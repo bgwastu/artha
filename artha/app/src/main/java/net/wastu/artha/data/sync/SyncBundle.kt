@@ -19,6 +19,8 @@ data class SyncBundle(
     val transactions: List<UnifiedTransaction>,
 )
 
+class UnsupportedSyncVersionException(version: Int) : Exception("Unsupported backup version: $version. Update Artha before restoring this backup.")
+
 object SyncBundleSerializer {
 
     fun toJsonBytes(bundle: SyncBundle): ByteArray {
@@ -81,10 +83,11 @@ object SyncBundleSerializer {
             throw CorruptedSyncPayloadException("Invalid sync bundle JSON.", e)
         }
 
-        val version = root.optInt("version", 1)
+        val version = root.getInt("version")
+        if (version != 1) throw UnsupportedSyncVersionException(version)
         val exportedAt = root.optLong("exportedAtEpochMillis", 0L)
 
-        val analysisObj = root.optJSONObject("analysis") ?: JSONObject()
+        val analysisObj = root.getJSONObject("analysis")
         val aiObj = analysisObj.optJSONObject("aiConfig")
         val aiConfig = AiConfig(
             baseUrl = aiObj?.optString("baseUrl").orEmpty(),
@@ -107,21 +110,20 @@ object SyncBundleSerializer {
             analysisFingerprints = parseStringMap(analysisObj.optJSONObject("analysisFingerprints")),
         )
 
-        val txArray = root.optJSONArray("transactions") ?: JSONArray()
+        val txArray = root.getJSONArray("transactions")
         val transactions = mutableListOf<UnifiedTransaction>()
         for (i in 0 until txArray.length()) {
-            val obj = txArray.optJSONObject(i) ?: continue
+            val obj = txArray.getJSONObject(i)
             val providerName = obj.optString("provider")
-            val provider = Provider.entries.firstOrNull { it.name == providerName } ?: continue
-            val txId = obj.optString("providerTransactionId").takeIf { it.isNotBlank() } ?: continue
-            val directionName = obj.optString("direction", Direction.DEBIT.name)
-            val direction = Direction.entries.firstOrNull { it.name == directionName } ?: Direction.DEBIT
-            val amountMinor = obj.optLong("amountMinor", 0L)
-            if (amountMinor <= 0L) continue
-            val currencyCode = obj.optString("currencyCode", "IDR").ifBlank { "IDR" }
-            val occurredAtMs = obj.optLong("occurredAtEpochMillis", 0L)
-            val description = obj.optString("description", "")
-            val rawPayload = obj.optString("rawPayload", "{}").ifBlank { "{}" }
+            val provider = Provider.valueOf(providerName)
+            val txId = obj.getString("providerTransactionId")
+            val direction = Direction.valueOf(obj.getString("direction"))
+            val amountMinor = obj.getLong("amountMinor")
+            val currencyCode = obj.getString("currencyCode")
+            val occurredAtMs = obj.getLong("occurredAtEpochMillis")
+            val description = obj.getString("description")
+            val rawPayload = obj.getString("rawPayload")
+            JSONObject(rawPayload) // Validate every row before any restore writes.
             val pocketId = obj.optString("pocketId").takeIf { it.isNotBlank() && it != "null" }
             val pocketName = obj.optString("pocketName").takeIf { it.isNotBlank() && it != "null" }
             val pocket = if (pocketId != null && pocketName != null) Pocket(pocketId, pocketName) else null

@@ -343,6 +343,13 @@ class AnalysisStore(context: Context) {
     }
 
     @Synchronized
+    fun restoreSnapshot(remote: AnalysisSnapshot) {
+        val local = _snapshot.value
+        val merged = net.wastu.artha.data.sync.SyncMerger.mergeAnalysis(local, remote)
+        applyMergedSnapshot(merged.copy(aiConfig = local.aiConfig))
+    }
+
+    @Synchronized
     fun applyMergedSnapshot(merged: AnalysisSnapshot) {
         prefs.edit {
             putString("user_notes", JSONObject(merged.userNotes as Map<*, *>).toString())

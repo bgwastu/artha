@@ -17,6 +17,8 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -126,7 +128,12 @@ class DriveSyncManager(
         if (clean.isBlank()) {
             clearStoredPassword()
         } else {
-            storePassword(clean)
+            try {
+                storePassword(clean)
+            } catch (_: Exception) {
+                recordError("Unable to store the password securely. Please try again.", CloudSyncStatus.ERROR)
+                return
+            }
         }
         val hasPass = clean.isNotBlank()
         val current = _syncState.value
@@ -139,7 +146,11 @@ class DriveSyncManager(
         _syncState.value = current.copy(hasPassword = hasPass, status = newStatus, lastError = null)
     }
 
-    suspend fun syncNow(): SyncResult = syncMutex.withLock {
+    suspend fun syncNow(): SyncResult = transfer(restore = false)
+
+    suspend fun restoreNow(): SyncResult = transfer(restore = true)
+
+    private suspend fun transfer(restore: Boolean): SyncResult = syncMutex.withLock {
         withContext(Dispatchers.IO) {
             val currentState = _syncState.value
             if (!currentState.isEnabled) {
@@ -169,6 +180,9 @@ class DriveSyncManager(
                     lastError = "Google Drive authorization required.",
                 )
                 return@withContext SyncResult.Error("Google Drive authorization required.", consentIntent = intent)
+            } catch (cancelled: CancellationException) {
+                _syncState.value = _syncState.value.copy(isSyncing = false, status = CloudSyncStatus.READY)
+                throw cancelled
             } catch (e: Exception) {
                 val err = "Failed to obtain Google OAuth token: ${e.message}"
                 recordError(err, CloudSyncStatus.ERROR)
@@ -176,75 +190,46 @@ class DriveSyncManager(
             }
 
             try {
-                // 1. List existing backups in appDataFolder
-                val existingBackups = GoogleDriveAppDataClient.listBackups(token)
-
-                // 2. Pull and merge remote backup if one exists
-                var restoredCount = 0
-                if (existingBackups.isNotEmpty()) {
-                    var remoteBundle: SyncBundle? = null
-                    var wrongPassword = false
-
-                    for (file in existingBackups.take(2)) {
-                        val encryptedBytes = GoogleDriveAppDataClient.downloadBackup(token, file.id)
-                        try {
-                            val decryptedBytes = SyncCrypto.decrypt(encryptedBytes, password)
-                            remoteBundle = SyncBundleSerializer.fromJsonBytes(decryptedBytes)
-                            break
-                        } catch (wp: WrongSyncPasswordException) {
-                            wrongPassword = true
-                            break
-                        } catch (_: Exception) {
-                            // Try previous revision
-                        }
-                    }
-
-                    if (wrongPassword) {
-                        val err = "Incorrect encryption password for existing Google Drive backup."
-                        recordError(err, CloudSyncStatus.WRONG_PASSWORD)
-                        return@withContext SyncResult.Error(err, isWrongPassword = true)
-                    }
-
-                    if (remoteBundle != null) {
-                        val localSnapshot = analysisStore?.snapshot?.value
-                        if (localSnapshot != null) {
-                            val mergedAnalysis = SyncMerger.mergeAnalysis(localSnapshot, remoteBundle.analysis)
-                            analysisStore.applyMergedSnapshot(mergedAnalysis)
-                        }
-
-                        val localTxs = ledger().observeTransactions().firstOrNull().orEmpty()
-                        val missingToAppend = SyncMerger.findMissingTransactionsToAppend(localTxs, remoteBundle.transactions)
-                        if (missingToAppend.isNotEmpty()) {
-                            ledger().append(missingToAppend)
-                            restoredCount = missingToAppend.size
-                        }
-                    }
+                val files = GoogleDriveAppDataClient.listBackups(token)
+                coroutineContext.ensureActive()
+                val previous = BackupPolicy.readLatest(files, password) { id ->
+                    coroutineContext.ensureActive()
+                    GoogleDriveAppDataClient.downloadBackup(token, id)
                 }
-
-                // 3. Build superset payload and push to Google Drive
+                coroutineContext.ensureActive()
+                var restoredCount = 0
+                if (restore) {
+                    checkNotNull(previous) { "No cloud backup exists yet." }
+                    val local = ledger().observeTransactions().firstOrNull().orEmpty()
+                    val missing = SyncMerger.findMissingTransactionsToAppend(local, previous.transactions)
+                    coroutineContext.ensureActive()
+                    val result = ledger().append(missing)
+                    restoredCount = result.inserted
+                    analysisStore?.restoreSnapshot(previous.analysis)
+                }
                 val allTxs = ledger().observeTransactions().firstOrNull().orEmpty()
-                val currentSnapshot = analysisStore?.snapshot?.value ?: net.wastu.artha.data.analysis.AnalysisSnapshot()
-                val bundleToExport = SyncBundle(
-                    version = 1,
-                    exportedAtEpochMillis = System.currentTimeMillis(),
-                    analysis = currentSnapshot,
+                val snapshot = analysisStore?.snapshot?.value ?: net.wastu.artha.data.analysis.AnalysisSnapshot()
+                val bundle = SyncBundle(
+                    analysis = snapshot.copy(aiConfig = snapshot.aiConfig.copy(apiKey = "")),
                     transactions = allTxs,
                 )
-
-                val jsonBytes = SyncBundleSerializer.toJsonBytes(bundleToExport)
-                val encryptedBlob = SyncCrypto.encrypt(jsonBytes, password)
-                GoogleDriveAppDataClient.uploadBackup(token, encryptedBlob)
-
-                // 4. Prune older backups, keeping only the 2 newest
-                val updatedFiles = GoogleDriveAppDataClient.listBackups(token)
-                if (updatedFiles.size > 2) {
-                    for (oldFile in updatedFiles.drop(2)) {
-                        runCatching { GoogleDriveAppDataClient.deleteFile(token, oldFile.id) }
+                var uploaded = false
+                if (!restore) {
+                    BackupPolicy.requireCompleteLedger(allTxs, previous)
+                    if (previous == null || !BackupPolicy.sameContent(bundle, previous)) {
+                        val encrypted = SyncCrypto.encrypt(SyncBundleSerializer.toJsonBytes(bundle), password)
+                        coroutineContext.ensureActive()
+                        GoogleDriveAppDataClient.uploadBackup(token, encrypted)
+                        uploaded = true
                     }
                 }
-
+                // Retain all revisions: recovery history must never be silently pruned.
                 val now = System.currentTimeMillis()
-                val summary = "${allTxs.size} tx encrypted & backed up" + if (restoredCount > 0) " ($restoredCount restored)" else ""
+                val summary = when {
+                    restore -> "$restoredCount transactions restored; existing data kept"
+                    uploaded -> "${allTxs.size} transactions encrypted and backed up"
+                    else -> "Backup already up to date"
+                }
                 prefs.edit {
                     putLong("last_sync_ms", now)
                     putString("last_sync_summary", summary)
@@ -260,6 +245,9 @@ class DriveSyncManager(
                 )
 
                 SyncResult.Success(allTxs.size, restoredCount)
+            } catch (cancelled: CancellationException) {
+                _syncState.value = _syncState.value.copy(isSyncing = false, status = CloudSyncStatus.READY)
+                throw cancelled
             } catch (unauthorized: DriveUnauthorizedException) {
                 GoogleAuthUtil.clearToken(context, token)
                 val err = "Google Drive session expired; please tap Sync again."
@@ -347,27 +335,21 @@ class DriveSyncManager(
 
     // --- Android KeyStore Passphrase Storage ---
 
+    @Synchronized
     private fun storePassword(password: String) {
-        try {
-            val key = getOrCreateSecretKey()
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, key)
-            val iv = cipher.iv
-            val cipherText = cipher.doFinal(password.toByteArray(Charsets.UTF_8))
-            val packed = ByteArray(iv.size + cipherText.size)
-            System.arraycopy(iv, 0, packed, 0, iv.size)
-            System.arraycopy(cipherText, 0, packed, iv.size, cipherText.size)
-            val encoded = Base64.encodeToString(packed, Base64.NO_WRAP)
-            prefs.edit { putString("enc_sync_pass", encoded) }
-        } catch (_: Exception) {
-            // Fallback for JVM test environments where AndroidKeyStore is stubbed
-            prefs.edit { putString("plain_sync_pass", password) }
-        }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateSecretKey())
+        val packed = cipher.iv + cipher.doFinal(password.toByteArray(Charsets.UTF_8))
+        check(prefs.edit().putString("enc_sync_pass", Base64.encodeToString(packed, Base64.NO_WRAP))
+            .remove("plain_sync_pass").commit()) { "Unable to save encryption password securely." }
     }
 
     fun getStoredPassword(): String? {
         val plain = prefs.getString("plain_sync_pass", null)
-        if (plain != null) return plain
+        if (plain != null) {
+            // One-time migration. Keep legacy recovery material if KeyStore is unavailable.
+            return runCatching { storePassword(plain); plain }.getOrNull()
+        }
         val enc = prefs.getString("enc_sync_pass", null) ?: return null
         return try {
             val packed = Base64.decode(enc, Base64.NO_WRAP)

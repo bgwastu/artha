@@ -146,6 +146,10 @@ class ArthaViewModel(
         viewModelScope.launch { driveSyncManager?.syncNow() }
     }
 
+    fun restoreDriveBackup() {
+        viewModelScope.launch { driveSyncManager?.restoreNow() }
+    }
+
     fun syncProvider(provider: Provider) {
         if (_rootGate.value != RootGateState.GRANTED || ingestionJob?.isActive == true) return
         val currentSession = session

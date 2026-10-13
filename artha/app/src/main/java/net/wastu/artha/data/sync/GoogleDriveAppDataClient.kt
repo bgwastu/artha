@@ -28,44 +28,39 @@ object GoogleDriveAppDataClient {
     private const val UPLOAD_ENDPOINT = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime,size,md5Checksum"
 
     fun listBackups(accessToken: String): List<DriveBackupFile> {
-        val query = URLEncoder.encode("name = '$BACKUP_FILE_NAME' and trashed = false", "UTF-8")
-        val fields = URLEncoder.encode("files(id,name,modifiedTime,size,md5Checksum)", "UTF-8")
-        val url = URL("$FILES_ENDPOINT?spaces=appDataFolder&q=$query&orderBy=modifiedTime%20desc&fields=$fields")
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 15_000
-            readTimeout = 15_000
-            setRequestProperty("Authorization", "Bearer $accessToken")
-            setRequestProperty("Accept", "application/json")
-        }
-        return try {
-            val code = conn.responseCode
-            if (code == 401) throw DriveUnauthorizedException()
-            if (code !in 200..299) {
-                val err = runCatching { conn.errorStream?.bufferedReader()?.readText() }.getOrNull().orEmpty()
-                throw DriveApiException("Drive list failed (HTTP $code): ${err.take(180)}", code)
+        val result = mutableListOf<DriveBackupFile>()
+        var pageToken: String? = null
+        val seenTokens = mutableSetOf<String>()
+        do {
+            val query = URLEncoder.encode("name = '$BACKUP_FILE_NAME' and trashed = false", "UTF-8")
+            val fields = URLEncoder.encode("nextPageToken,files(id,name,modifiedTime,size,md5Checksum)", "UTF-8")
+            val page = pageToken?.let { "&pageToken=${URLEncoder.encode(it, "UTF-8")}" }.orEmpty()
+            val url = URL("$FILES_ENDPOINT?spaces=appDataFolder&q=$query&orderBy=modifiedTime%20desc&fields=$fields&pageSize=1000$page")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 15_000
+                readTimeout = 15_000
+                setRequestProperty("Authorization", "Bearer $accessToken")
+                setRequestProperty("Accept", "application/json")
             }
-            val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-            val json = JSONObject(body)
-            val files = json.optJSONArray("files") ?: JSONArray()
-            buildList {
+            try {
+                val code = conn.responseCode
+                if (code == 401) throw DriveUnauthorizedException()
+                if (code !in 200..299) throw DriveApiException("Drive list failed (HTTP $code)", code)
+                val json = JSONObject(conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
+                val files = json.getJSONArray("files")
                 for (i in 0 until files.length()) {
-                    val f = files.optJSONObject(i) ?: continue
-                    val id = f.optString("id").takeIf { it.isNotBlank() } ?: continue
-                    add(
-                        DriveBackupFile(
-                            id = id,
-                            name = f.optString("name", BACKUP_FILE_NAME),
-                            modifiedTime = f.optString("modifiedTime", ""),
-                            sizeBytes = f.optLong("size", 0L),
-                            md5Checksum = f.optString("md5Checksum", ""),
-                        )
-                    )
+                    val f = files.getJSONObject(i)
+                    result += DriveBackupFile(f.getString("id"), f.getString("name"),
+                        f.getString("modifiedTime"), f.optLong("size"), f.optString("md5Checksum"))
                 }
+                pageToken = json.optString("nextPageToken").takeIf { it.isNotBlank() }
+                if (pageToken != null) check(seenTokens.add(pageToken)) { "Drive returned a repeated page token." }
+            } finally {
+                conn.disconnect()
             }
-        } finally {
-            conn.disconnect()
-        }
+        } while (pageToken != null)
+        return result
     }
 
     fun downloadBackup(accessToken: String, fileId: String): ByteArray {

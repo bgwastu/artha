@@ -82,6 +82,8 @@ fun ProvidersScreen(
     viewModel: ArthaViewModel? = null,
 ) {
     var showAiConfigDialog by remember { mutableStateOf(false) }
+    var restoringBackup by remember { mutableStateOf(false) }
+    var showRestoreConfirmation by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showAccountDialog by remember { mutableStateOf(false) }
     var showResetConfirmationDialog by remember { mutableStateOf(false) }
@@ -102,8 +104,10 @@ fun ProvidersScreen(
 
     val consentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
-    ) {
-        viewModel?.syncDriveNow()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            if (restoringBackup) viewModel?.restoreDriveBackup() else viewModel?.syncDriveNow()
+        }
     }
 
     LazyColumn(
@@ -171,7 +175,9 @@ fun ProvidersScreen(
                         }
                     },
                     onConfigurePassword = { showPasswordDialog = true },
+                    onRestoreNow = { showRestoreConfirmation = true },
                     onSyncNow = {
+                        restoringBackup = false
                         if (driveSyncState.status == CloudSyncStatus.AUTH_REQUIRED && driveSyncState.consentIntent != null) {
                             consentLauncher.launch(driveSyncState.consentIntent!!)
                         } else {
@@ -344,6 +350,20 @@ fun ProvidersScreen(
             },
         )
     }
+    if (showRestoreConfirmation && viewModel != null) {
+        AlertDialog(
+            onDismissRequest = { showRestoreConfirmation = false },
+            title = { Text("Restore backup?") },
+            text = { Text("Add missing history and restore saved notes from your encrypted backup. Existing transactions and this phone’s AI credentials are kept.") },
+            confirmButton = { TextButton(onClick = {
+                showRestoreConfirmation = false
+                restoringBackup = true
+                if (driveSyncState.consentIntent != null) consentLauncher.launch(driveSyncState.consentIntent!!)
+                else viewModel.restoreDriveBackup()
+            }) { Text("Restore") } },
+            dismissButton = { TextButton(onClick = { showRestoreConfirmation = false }) { Text("Cancel") } },
+        )
+    }
     val context = androidx.compose.ui.platform.LocalContext.current
     if (showResetConfirmationDialog && viewModel != null) {
         ResetConfirmationDialog(
@@ -364,6 +384,7 @@ private fun GoogleDriveSyncCard(
     onConnectAccount: () -> Unit,
     onConfigurePassword: () -> Unit,
     onSyncNow: () -> Unit,
+    onRestoreNow: () -> Unit,
 ) {
     Card(
         modifier = Modifier
@@ -403,12 +424,12 @@ private fun GoogleDriveSyncCard(
                     }
                     Column {
                         Text(
-                            "Google Drive Sync",
+                            "Google Drive Backup",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            "Client-side encrypted (AES-256-GCM)",
+                            "Encrypted backup; restore when needed",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -524,7 +545,7 @@ private fun GoogleDriveSyncCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (state.lastSyncEpochMillis != null) "Last synced: ${formatRelativeTime(state.lastSyncEpochMillis)}" else "Never synced",
+                        text = if (state.lastSyncEpochMillis != null) "Last backup activity: ${formatRelativeTime(state.lastSyncEpochMillis)}" else "No backup yet",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -551,12 +572,18 @@ private fun GoogleDriveSyncCard(
                         Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            text = if (state.status == CloudSyncStatus.AUTH_REQUIRED) "Authorize" else "Sync Now",
+                            text = if (state.status == CloudSyncStatus.AUTH_REQUIRED) "Authorize" else "Back Up",
                             style = MaterialTheme.typography.labelSmall,
                         )
                     }
                 }
             }
+
+            OutlinedButton(
+                onClick = onRestoreNow,
+                enabled = !state.isSyncing && state.isEnabled && state.hasPassword && state.accountEmail != null,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Restore backup") }
 
             // Error Display Banner (if any error occurred)
             if (!state.lastError.isNullOrBlank()) {
