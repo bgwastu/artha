@@ -121,7 +121,7 @@ class JagoProviderAdapter(private val reader: JagoTransactionReader) : ProviderA
 }
 
 class ShopeeProviderAdapter(private val files: RootFileReader) : ProviderAdapter {
-    override val coverageHint = "Recent marketplace pages and keyword-matched food orders; incomplete history"
+    override val coverageHint = "Unconfirmed paid marketplace/food orders; bounded history; digital purchases excluded"
     override val provider = Provider.SHOPEE
     private val reader = ShopeeOrderReader(files)
     override val accountIdentifier get() = reader.accountUsername
@@ -129,19 +129,19 @@ class ShopeeProviderAdapter(private val files: RootFileReader) : ProviderAdapter
 }
 
 class TokopediaProviderAdapter(private val files: RootFileReader) : ProviderAdapter {
-    override val coverageHint = "Experimental order enrichment; payment schema must be verified"
+    override val coverageHint = "Verification may block history; payment schema remains unverified"
     override val provider = Provider.TOKOPEDIA
     override suspend fun ingest(): List<UnifiedTransaction> = TokopediaOrderReader(files).transactions()
 }
 
 class GojekProviderAdapter(private val files: RootFileReader) : ProviderAdapter {
-    override val coverageHint = "Locally cached GoPay history and optional 2026 ride file only"
+    override val coverageHint = "Verified native GoPay cache and exact booking enrichment; live/cash history may be unavailable"
     override val provider = Provider.GOJEK
     override suspend fun ingest(): List<UnifiedTransaction> = GojekOrderReader(files).transactions()
 }
 
 class GrabProviderAdapter(private val files: RootFileReader) : ProviderAdapter {
-    override val coverageHint = "Recent wallet and order pages only; incomplete history"
+    override val coverageHint = "Settled card charges and recent rides; other wallet/cash and food receipts remain unverified"
     override val provider = Provider.GRAB
     override suspend fun ingest(): List<UnifiedTransaction> = GrabOrderReader(files).transactions()
 }

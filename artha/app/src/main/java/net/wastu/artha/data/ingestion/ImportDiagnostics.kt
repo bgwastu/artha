@@ -26,12 +26,16 @@ internal class ImportRows {
     }
     fun finish(): List<UnifiedTransaction> {
         if (transactions.isEmpty()) providerFailure?.let { throw it }
-        if (issues.isNotEmpty()) throw PartialImportException(transactions.distinctBy { it.key }, "Incomplete import: ${issues.size} issues. ${issues.first()}")
+        if (issues.isNotEmpty()) {
+            val summary = (listOfNotNull(providerFailure?.message) + issues).distinct().take(3).joinToString(" · ")
+            throw PartialImportException(transactions.distinctBy { it.key }, "Incomplete import: ${issues.size} issues. $summary")
+        }
         return transactions.distinctBy { it.key }
     }
 }
 
 internal fun requireHttpSuccess(code: Int, provider: String) {
-    if (code == 401 || code == 403) throw ProviderReadException(AccountStatus.NEEDS_LOGIN, "$provider login expired (HTTP $code). Open the provider app and log in again.")
+    if (code == 401) throw ProviderReadException(AccountStatus.NEEDS_LOGIN, "$provider login expired (HTTP $code). Open the provider app and log in again.")
+    if (code == 403) throw ProviderReadException(AccountStatus.ERROR, "$provider blocked this history request (HTTP 403). Open its app to check for verification or access restrictions.")
     check(code in 200..299) { "$provider request failed (HTTP $code)" }
 }
