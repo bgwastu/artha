@@ -47,3 +47,9 @@ fun formatMinorAmount(amountMinor: BigInteger, currencyCode: String = "IDR"): St
 }
 
 fun formatDate(instant: Instant): String = TransactionDateFormatter.format(instant)
+
+private val TransactionTimeFormatter: DateTimeFormatter = DateTimeFormatter
+    .ofPattern("HH:mm", IndonesianLocale)
+    .withZone(ZoneId.systemDefault())
+
+fun formatTime(instant: Instant): String = TransactionTimeFormatter.format(instant)

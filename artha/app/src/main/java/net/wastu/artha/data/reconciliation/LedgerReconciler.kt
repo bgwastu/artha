@@ -22,7 +22,8 @@ object LedgerReconciler {
         val afterReversals = reconcileReversals(afterPocketTransfers)
         // 1. Identify real marketplace/food orders vs synthetic Jago-linked copies
         val deduplicated = afterReversals.filter { item ->
-            !(item.provider != Provider.JAGO && item.rawPayload.contains("\"origin\":\"jago-linked-local-hive\""))
+            !(item.provider != Provider.JAGO && item.rawPayload.contains("\"origin\":\"jago-linked-local-hive\"")) &&
+            !(item.provider == Provider.GOJEK && item.providerTransactionId.startsWith("gojek:0") && item.rawPayload.contains("gopay-order-history"))
         }
 
         val nonJago = deduplicated.filter { it.provider != Provider.JAGO }

@@ -75,6 +75,7 @@ import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.ui.LedgerState
 import net.wastu.artha.ui.formatDate
 import net.wastu.artha.ui.formatMoney
+import net.wastu.artha.ui.formatTime
 import net.wastu.artha.ui.theme.expenseColor
 import net.wastu.artha.ui.theme.incomeColor
 import kotlinx.coroutines.Dispatchers
@@ -97,7 +98,6 @@ fun LedgerScreen(
     var selectedProvider by rememberSaveable { mutableStateOf<Provider?>(null) }
     var selectedDirection by rememberSaveable { mutableStateOf<Direction?>(null) }
     val dateRange by viewModel?.dateRangeFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
-    val isAnalyzing by viewModel?.analyzingAi?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
     var showDateRangePicker by remember { mutableStateOf(false) }
     val visibleProviders = remember(enabledProviders) {
         Provider.entries.filter { it in enabledProviders }
@@ -118,7 +118,6 @@ fun LedgerScreen(
             TransactionList(
                 transactions = filtered,
                 onTransaction = onTransaction,
-                isAnalyzing = isAnalyzing,
                 resetKey = selectedProvider to selectedDirection,
                 activeFilter = run {
                     val dateLabel = dateRange?.let { (start, end) ->
@@ -333,6 +332,7 @@ fun SearchTransactionsScreen(
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun TransactionList(
     transactions: List<UnifiedTransaction>,
@@ -341,10 +341,15 @@ private fun TransactionList(
     resetKey: Any? = null,
     activeFilter: String? = null,
     onClearFilter: () -> Unit = {},
-    isAnalyzing: Boolean = false,
 ) {
     val listState = rememberLazyListState()
     LaunchedEffect(resetKey) { listState.scrollToItem(0) }
+
+    val groupedByDay = remember(transactions) {
+        val zone = ZoneId.systemDefault()
+        transactions.groupBy { LocalDate.ofInstant(it.occurredAt, zone) }
+    }
+
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
@@ -372,15 +377,53 @@ private fun TransactionList(
                 )
             }
         }
-        items(
-            transactions,
-            key = { "${it.provider.name}:${it.providerTransactionId}" },
-            contentType = { "transaction" },
-        ) { transaction ->
-            TransactionRow(transaction, onClick = { onTransaction(transaction) }, highlightQuery = highlightQuery, isAnalyzing = isAnalyzing)
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 16.dp),
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+        groupedByDay.forEach { (date, dailyTransactions) ->
+            stickyHeader(key = "day_$date") {
+                DateGroupHeader(date = date)
+            }
+            items(
+                dailyTransactions,
+                key = { "${it.provider.name}:${it.providerTransactionId}" },
+                contentType = { "transaction" },
+            ) { transaction ->
+                TransactionRow(
+                    transaction = transaction,
+                    onClick = { onTransaction(transaction) },
+                    highlightQuery = highlightQuery,
+                )
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DateGroupHeader(date: LocalDate) {
+    val zone = ZoneId.systemDefault()
+    val today = LocalDate.now(zone)
+    val dayLabel = when (date) {
+        today -> "Hari Ini"
+        today.minusDays(1) -> "Kemarin"
+        else -> date.format(DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", Locale.forLanguageTag("id-ID")))
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = dayLabel,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
             )
         }
     }
@@ -431,7 +474,7 @@ fun HighlightedText(
 }
 
 @Composable
-fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlightQuery: String = "", isAnalyzing: Boolean = false) {
+fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlightQuery: String = "") {
     val credit = transaction.direction == Direction.CREDIT
     val payloadValues by produceState(
         initialValue = emptyList<String>(),
@@ -485,21 +528,6 @@ fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlig
                             modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)),
                             contentScale = ContentScale.Crop,
                         )
-                    }
-                    if (isAnalyzing && !credit && transaction.category == null) {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
-                            modifier = Modifier.size(40.dp),
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                        }
                     }
                 }
             },
@@ -568,8 +596,11 @@ fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlig
             supportingContent = {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        val timeStr = formatTime(transaction.occurredAt)
+                        val catStr = transaction.category
+                        val label = if (!credit && !catStr.isNullOrBlank()) "$timeStr - $catStr" else timeStr
                         Text(
-                            formatDate(transaction.occurredAt),
+                            label,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,

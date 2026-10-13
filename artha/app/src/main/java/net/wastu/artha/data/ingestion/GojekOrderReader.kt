@@ -147,6 +147,10 @@ internal class GojekOrderReader(private val files: RootFileReader) {
                     }
 
                     val serviceType = item.optString("service_type")
+                    val isQris = serviceType.equals("COLLECT", ignoreCase = true) ||
+                        desc.contains("QRIS", ignoreCase = true) ||
+                        paymentType.contains("QRIS", ignoreCase = true) ||
+                        item.optString("payment_transfer_type").contains("QRIS", ignoreCase = true)
                     val methods = item.optJSONArray("payment_method_breakup")
                     val methodName = methods?.optJSONObject(0)?.optString("payment_method_name") ?: "GoPay"
 
@@ -167,6 +171,7 @@ internal class GojekOrderReader(private val files: RootFileReader) {
                             money = Money(amountMinor, "IDR"),
                             occurredAt = occurredAt,
                             description = desc,
+                            isQris = isQris,
                             rawPayload = rawPayload,
                         )
                     )

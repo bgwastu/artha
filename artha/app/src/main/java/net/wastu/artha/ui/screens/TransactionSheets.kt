@@ -82,7 +82,6 @@ fun TransactionDetailsSheet(
     onDismiss: () -> Unit,
 ) {
     val snapshot = viewModel?.analysisSnapshot?.collectAsStateWithLifecycle()?.value
-    val isAnalyzing = viewModel?.analyzingAi?.collectAsStateWithLifecycle()?.value ?: false
     val availableCategories = snapshot?.customCategories ?: net.wastu.artha.data.analysis.INITIAL_DEFAULT_CATEGORIES
     var showCategoryPicker by remember { mutableStateOf(false) }
     var currentCategory by remember(transaction.providerTransactionId, transaction.category) {
@@ -140,21 +139,6 @@ fun TransactionDetailsSheet(
                                 contentDescription = transaction.provider.displayName,
                                 modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)),
                             )
-                            if (isAnalyzing && !credit) {
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
-                                    modifier = Modifier.size(48.dp),
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(22.dp),
-                                            strokeWidth = 2.5.dp,
-                                            color = MaterialTheme.colorScheme.primary,
-                                        )
-                                    }
-                                }
-                            }
                         }
                         if (grouped != null && grouped.length() > 1 && transaction.provider != Provider.JAGO) {
                             Image(
