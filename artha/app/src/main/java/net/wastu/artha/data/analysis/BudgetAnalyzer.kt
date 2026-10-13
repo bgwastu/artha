@@ -66,7 +66,7 @@ object BudgetAnalyzer {
         return buildString {
             append("- Confirmed spending: ${rupiah(analysis.totalPersonalSpendingMinor)}.\n")
             analysis.categories.firstOrNull()?.let { append("- Largest category: ${it.category}, ${rupiah(it.amountMinor)} (${it.sharePercent.toInt()}%).\n") }
-            if (analysis.previousMonthTotalMinor > 0) append("- Previous complete month: ${rupiah(analysis.previousMonthTotalMinor)}.\n")
+            if (analysis.previousMonthTotalMinor > 0) append("- Previous recorded month: ${rupiah(analysis.previousMonthTotalMinor)}.\n")
             val largest = analysis.categories.flatMap { it.transactions }.maxByOrNull { it.money.amountMinor }
             largest?.let { append("- Largest payment: ${it.description}, ${rupiah(it.money.amountMinor)}.") }
         }.trim()

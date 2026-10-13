@@ -316,6 +316,8 @@ private fun MonthSummaryCard(
                 }
             }
 
+            Text(if (canGoNext) "Confirmed spending" else "Confirmed spending · month to date",
+                style = MaterialTheme.typography.labelMedium)
             // Total spending display + subtle delta badge inline
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -329,7 +331,7 @@ private fun MonthSummaryCard(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
 
-            val delta = analysis.totalDeltaPercent
+                val delta = analysis.totalDeltaPercent
                 val prevTotal = analysis.previousMonthTotalMinor
                 if (delta != null && prevTotal > 0L) {
                     val symbol = if (delta < 0) "▼" else "▲"
@@ -347,6 +349,9 @@ private fun MonthSummaryCard(
                     }
                 }
             }
+
+            Text("Based on saved payments; provider history may be incomplete.", style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
 
             if (analysis.unconfirmedSpendingMinor > 0) {
                 Text("Unconfirmed orders: ${formatAmountMinor(analysis.unconfirmedSpendingMinor)} · excluded from total", style = MaterialTheme.typography.bodySmall)

@@ -20,10 +20,16 @@ class SpendingProjector(private val reconcile: (List<UnifiedTransaction>) -> Lis
     private var facts: List<UnifiedTransaction>? = null
     private var matched = emptyList<UnifiedTransaction>()
     private var aliases = emptyMap<String, List<String>>()
+    private data class EditInput(val note: String?, val category: String?, val manual: Boolean, val reason: String?)
+    private val rowCache = mutableMapOf<String, Pair<EditInput, UnifiedTransaction>>()
+    private var lastSnapshot: AnalysisSnapshot? = null
+    private var lastProjection: SpendingState.Ready? = null
 
     @Synchronized
     fun project(raw: List<UnifiedTransaction>, snapshot: AnalysisSnapshot): SpendingState.Ready {
+        if (facts == raw && snapshot == lastSnapshot) lastProjection?.let { return it }
         if (facts != raw) {
+            rowCache.clear()
             matched = reconcile(raw)
             facts = raw
             aliases = matched.associate { tx ->
@@ -43,13 +49,17 @@ class SpendingProjector(private val reconcile: (List<UnifiedTransaction>) -> Lis
             val manual = keys.firstOrNull { it in metadata.manualCategories }
             val categoryKey = manual ?: keys.firstOrNull { it in metadata.categories }
             val note = noteKey?.let { metadata.userNotes[it] }
+            val edit = EditInput(note, categoryKey?.let { metadata.categories[it] }, manual != null, categoryKey?.let { metadata.reasons[it] })
+            rowCache[tx.key]?.takeIf { it.first == edit }?.let { return@map it.second }
             val rule = CategoryClassifier.classify(tx, note)
             tx.copy(userNote = note,
                 category = if (tx.direction == Direction.CREDIT) null else categoryKey?.let { metadata.categories[it] } ?: rule.category,
                 classificationIsManual = manual != null,
-                aiReasoning = categoryKey?.let { metadata.reasons[it] } ?: rule.reason)
+                aiReasoning = edit.reason ?: rule.reason).also { rowCache[tx.key] = edit to it }
         }
-        return SpendingState.Ready(rows, raw.groupingBy { it.provider }.eachCount())
+        return SpendingState.Ready(rows, raw.groupingBy { it.provider }.eachCount()).also {
+            lastSnapshot = snapshot; lastProjection = it
+        }
     }
 }
 

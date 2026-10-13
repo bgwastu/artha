@@ -685,7 +685,7 @@ private fun ProviderCard(
     importEnabled: Boolean,
     onToggleImport: (Boolean) -> Unit,
 ) {
-    val accountStatus = diagnostic?.accountStatus ?: AccountStatus.CONNECTED
+    val accountStatus = diagnostic?.accountStatus ?: AccountStatus.UNKNOWN
     val lastError = diagnostic?.lastError
     val lastSyncTime = diagnostic?.lastSyncEpochMillis
     val lastSyncSummary = diagnostic?.lastSyncSummary

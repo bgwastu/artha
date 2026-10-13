@@ -31,6 +31,19 @@ class SpendingRepositoryTest {
         assertNull(projector.project(listOf(order, payment), cleared).transactions.single().userNote)
     }
 
+    @Test fun unchangedRowsAreReusedWhenOneAnnotationChanges() {
+        val other = payment.copy(providerTransactionId = "jago:other", description = "Kopi Kenangan")
+        val facts = listOf(payment, other)
+        val projector = SpendingProjector()
+        val original = projector.project(facts, AnalysisSnapshot())
+        assertSame(original, projector.project(facts, AnalysisSnapshot()))
+        val changed = projector.project(facts, AnalysisSnapshot(userNotes = mapOf(payment.key to "New context")))
+        assertEquals("New context", changed.transactions.first { it.key == payment.key }.userNote)
+        assertSame(original.transactions.first { it.key == other.key }, changed.transactions.first { it.key == other.key })
+        val newFacts = projector.project(listOf(payment, other.copy(description = "Netflix")), AnalysisSnapshot())
+        assertEquals("Tech & Subscriptions", newFacts.transactions.first { it.key == other.key }.category)
+    }
+
     @Test fun customPickerDaysHaveTheSameLocalBoundariesAsPresets() {
         val picker = Instant.parse("2026-10-02T00:00:00Z").toEpochMilli()
         val start = AccountingTime.pickerDay(picker)

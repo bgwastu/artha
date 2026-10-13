@@ -15,9 +15,12 @@ object TransactionMetadata {
 
     /** Keep ambiguous legacy entries in storage; never assign one user's edit to several payments. */
     fun migrate(snapshot: AnalysisSnapshot, transactions: List<UnifiedTransaction>): AnalysisSnapshot {
+        val legacyKeys = (snapshot.userNotes.keys + snapshot.categories.keys + snapshot.reasons.keys).filter { key ->
+            Provider.entries.none { key.startsWith("${it.name}:") }
+        }
+        if (legacyKeys.isEmpty()) return snapshot
         val candidates = transactions.groupBy { it.providerTransactionId.substringAfter(":") }
-        val aliases = (snapshot.userNotes.keys + snapshot.categories.keys + snapshot.reasons.keys).mapNotNull { legacy ->
-            if (Provider.entries.any { legacy.startsWith("${it.name}:") }) return@mapNotNull null
+        val aliases = legacyKeys.mapNotNull { legacy ->
             candidates[legacy]?.singleOrNull()?.let { legacy to it.key }
         }.toMap()
         if (aliases.isEmpty()) return snapshot

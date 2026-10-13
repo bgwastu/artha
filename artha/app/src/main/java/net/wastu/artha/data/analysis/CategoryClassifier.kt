@@ -14,6 +14,16 @@ data class ClassificationResult(
 )
 
 object CategoryClassifier {
+    private fun words(vararg values: String) = Regex("(?<![a-z])(?:${values.joinToString("|") { Regex.escape(it) }})(?![a-z])")
+    private val patterns = mapOf(
+        "Dining Out" to words("gofood", "grabfood", "shopeefood", "restaurant", "restoran", "coffee", "kopi", "pizza", "dinner", "lunch", "cafe"),
+        "Transport" to words("goride", "gocar", "grabride", "grabbike", "grabcar", "transport", "taxi"),
+        "Groceries" to words("indomaret", "alfamart", "superindo", "groceries", "supermarket"),
+        "Tech & Subscriptions" to words("github", "netflix", "spotify", "chatgpt", "openai", "anthropic", "cursor", "subscription"),
+        "Utilities & Bills" to words("pln", "telkom", "pulsa", "electricity", "internet bill"),
+        "Cash" to words("cash withdrawal"), "Taxes & Fees" to words("tax on interest"),
+        "Business" to words("business", "work expense"), "Shopping & Hardware" to words("shopee", "tokopedia"),
+    )
     fun classify(
         tx: UnifiedTransaction,
         userNote: String? = null,
@@ -36,17 +46,17 @@ object CategoryClassifier {
 
         val text = listOf(tx.description, userNote.orEmpty(), payload?.optString("serviceTier").orEmpty(),
             payload?.optString("origin").orEmpty(), payload?.optString("shopName").orEmpty(), payload?.optString("restaurantName").orEmpty()).joinToString(" ").lowercase(java.util.Locale.ROOT)
-        fun has(vararg words: String) = words.any { word -> Regex("(?<![a-z])${Regex.escape(word)}(?![a-z])").containsMatchIn(text) }
+        fun has(category: String) = patterns.getValue(category).containsMatchIn(text)
         val category = when {
-            has("gofood", "grabfood", "shopeefood", "restaurant", "restoran", "coffee", "kopi", "pizza", "dinner", "lunch", "cafe") -> "Dining Out"
-            has("goride", "gocar", "grabride", "grabbike", "grabcar", "transport", "taxi") || payload?.optString("pickupLocation")?.isNotBlank() == true -> "Transport"
-            has("indomaret", "alfamart", "superindo", "groceries", "supermarket") -> "Groceries"
-            has("github", "netflix", "spotify", "chatgpt", "openai", "anthropic", "cursor", "subscription") -> "Tech & Subscriptions"
-            has("pln", "telkom", "pulsa", "electricity", "internet bill") -> "Utilities & Bills"
-            code == "CWD04" || has("cash withdrawal") -> "Cash"
-            code == "TXD99" || has("tax on interest") -> "Taxes & Fees"
-            has("business", "work expense") -> "Business"
-            tx.provider in setOf(net.wastu.artha.core.model.Provider.SHOPEE, net.wastu.artha.core.model.Provider.TOKOPEDIA) || has("shopee", "tokopedia") -> "Shopping & Hardware"
+            has("Dining Out") -> "Dining Out"
+            has("Transport") || payload?.optString("pickupLocation")?.isNotBlank() == true -> "Transport"
+            has("Groceries") -> "Groceries"
+            has("Tech & Subscriptions") -> "Tech & Subscriptions"
+            has("Utilities & Bills") -> "Utilities & Bills"
+            code == "CWD04" || has("Cash") -> "Cash"
+            code == "TXD99" || has("Taxes & Fees") -> "Taxes & Fees"
+            has("Business") -> "Business"
+            tx.provider in setOf(net.wastu.artha.core.model.Provider.SHOPEE, net.wastu.artha.core.model.Provider.TOKOPEDIA) || has("Shopping & Hardware") -> "Shopping & Hardware"
             else -> CategoryConstants.UNCATEGORIZED
         }
         return ClassificationResult(category, if (category == CategoryConstants.UNCATEGORIZED) "" else "Local provider and merchant rule; you can choose a different category.")
