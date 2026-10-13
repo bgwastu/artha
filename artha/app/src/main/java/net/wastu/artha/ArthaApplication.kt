@@ -27,12 +27,5 @@ class ArthaApplication : Application() {
         )
         IngestionCoordinator(rootAccess, { ledger }, adapters, reader::invalidate, preferences = providerPreferences)
     }
-    fun resetAllData() {
-        database.resetLedger()
-        analysisStore.clearAllData()
-        providerPreferences.clearAll()
-        driveSyncManager.resetSyncState()
-        net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(applicationContext)
-        net.wastu.artha.ui.widget.TransactionsWidgetProvider.triggerUpdate(applicationContext)
-    }
+
 }

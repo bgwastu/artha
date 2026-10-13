@@ -79,21 +79,6 @@ class RoomLedgerRepositoryTest {
     }
 
     @Test
-    fun resetLedgerWipesAllTransactionsAndRestoresTriggers() = runBlocking {
-        ledger.append(listOf(transaction))
-        assertEquals(listOf(transaction), ledger.observeTransactions().first())
-        database.resetLedger()
-        assertEquals(emptyList<UnifiedTransaction>(), ledger.observeTransactions().first())
-        ledger.append(listOf(transaction))
-        try {
-            database.openHelper.writableDatabase.execSQL("DELETE FROM unified_transactions")
-            fail("Delete trigger should be active again")
-        } catch (_: SQLiteException) {
-            // Expected: triggers restored
-        }
-    }
-
-    @Test
     fun transactionsSurviveClosingAndReopeningTheLedger() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "ledger-persistence-test.db"

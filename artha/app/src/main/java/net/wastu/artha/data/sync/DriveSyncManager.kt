@@ -372,11 +372,7 @@ class DriveSyncManager(
         }
     }
 
-    fun resetSyncState() {
-        prefs.edit { clear() }
-        clearStoredPassword()
-        _syncState.value = DriveSyncState()
-    }
+
 
     private fun getOrCreateSecretKey(): SecretKey {
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }

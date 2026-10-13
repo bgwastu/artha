@@ -46,7 +46,6 @@ class MainActivity : ComponentActivity() {
                             syncingProvider = application.ingestion.syncingProvider,
                             analysisStore = application.analysisStore,
                             driveSyncManager = application.driveSyncManager,
-                            onResetAllData = { application.resetAllData() },
                         ).also {
                             if (initialDest != null) it.setTargetDestination(initialDest)
                         }

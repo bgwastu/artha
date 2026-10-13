@@ -98,13 +98,5 @@ class ProviderPreferences(context: Context) {
         }
         _diagnostics.value = current
     }
-    @Synchronized
-    fun clearAll() {
-        preferences.edit {
-            clear()
-            Provider.entries.forEach { putBoolean(it.name, false) }
-        }
-        _enabled.value = emptySet()
-        _diagnostics.value = loadDiagnostics()
-    }
+
 }
