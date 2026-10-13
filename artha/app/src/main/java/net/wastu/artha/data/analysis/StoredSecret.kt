@@ -10,8 +10,28 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+/** commit() can fail after updating its in-process cache; restore the affected keys too. */
+internal fun checkedPreferenceEdit(prefs: SharedPreferences, keys: List<String>, message: String,
+    changes: SharedPreferences.Editor.() -> Unit) {
+    val before = keys.distinct().associateWith { prefs.getString(it, null) }
+    fun restore() {
+        val editor = prefs.edit()
+        before.forEach { (key, value) -> if (value == null) editor.remove(key) else editor.putString(key, value) }
+        editor.commit()
+    }
+    val saved = try { prefs.edit().apply(changes).commit() } catch (error: Exception) {
+        runCatching { restore() }
+        throw error
+    }
+    if (!saved) {
+        runCatching { restore() }
+        error(message)
+    }
+}
+
 internal class StoredSecret(private val prefs: SharedPreferences, private val alias: String, private val legacyKey: String) {
     private val encryptedKey = "${legacyKey}_encrypted"
+    val storageKeys: List<String> get() = listOf(legacyKey, encryptedKey)
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey(alias, null) as? SecretKey)?.let { return it }
@@ -21,13 +41,17 @@ internal class StoredSecret(private val prefs: SharedPreferences, private val al
         }.generateKey()
     }
     fun save(value: String) {
+        checkedPreferenceEdit(prefs, storageKeys, "Unable to store credentials securely.") { stage(value, this) }
+    }
+    /** Allows secret and configuration metadata to be committed as one preference edit. */
+    fun stage(value: String, editor: SharedPreferences.Editor) {
         if (value.isBlank()) {
-            check(prefs.edit().remove(legacyKey).remove(encryptedKey).commit())
+            editor.remove(legacyKey).remove(encryptedKey)
             return
         }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
         val bytes = cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8))
-        check(prefs.edit().putString(encryptedKey, Base64.encodeToString(bytes, Base64.NO_WRAP)).remove(legacyKey).commit()) { "Unable to store AI credentials securely." }
+        editor.putString(encryptedKey, Base64.encodeToString(bytes, Base64.NO_WRAP)).remove(legacyKey)
     }
     fun read(): String {
         val legacy = prefs.getString(legacyKey, null)

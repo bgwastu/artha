@@ -109,7 +109,7 @@ class AnalysisStore(context: Context) {
             currentNotes[key] = note.trim()
         }
         currentUpdated["note:$key"] = now
-        prefs.edit {
+        checkedPreferenceEdit(prefs, listOf("user_notes", "updated_at_map"), "Note could not be saved") {
             putString("user_notes", JSONObject(currentNotes as Map<*, *>).toString())
             putString("updated_at_map", JSONObject(currentUpdated as Map<*, *>).toString())
         }
@@ -128,7 +128,7 @@ class AnalysisStore(context: Context) {
         currentCategories[key] = category
         currentReasons[key] = reason
         currentUpdated["cat:$key"] = now
-        prefs.edit {
+        checkedPreferenceEdit(prefs, listOf("manual_categories", "categories", "reasons", "updated_at_map"), "Category could not be saved") {
             putString("manual_categories", JSONArray(manualKeys.toList()).toString())
             putString("categories", JSONObject(currentCategories as Map<*, *>).toString())
             putString("reasons", JSONObject(currentReasons as Map<*, *>).toString())
@@ -159,16 +159,17 @@ class AnalysisStore(context: Context) {
     @Synchronized
     fun setAiConfig(config: AiConfig) {
         if (config.baseUrl.isNotBlank()) AiAnalysisService.endpoint(config.baseUrl)
-        secret.save(config.apiKey.trim())
+        val normalized = config.copy(baseUrl = config.baseUrl.trim(), model = config.model.trim(), apiKey = config.apiKey.trim())
         val now = System.currentTimeMillis()
         val currentUpdated = _snapshot.value.updatedAt.toMutableMap()
         currentUpdated["aiConfig"] = now
-        prefs.edit {
-            putString("ai_base_url", config.baseUrl.trim())
-            putString("ai_model", config.model.trim())
+        checkedPreferenceEdit(prefs, secret.storageKeys + listOf("ai_base_url", "ai_model", "updated_at_map"), "AI settings could not be saved") {
+            secret.stage(normalized.apiKey, this)
+            putString("ai_base_url", normalized.baseUrl)
+            putString("ai_model", normalized.model)
             putString("updated_at_map", JSONObject(currentUpdated as Map<*, *>).toString())
         }
-        _snapshot.value = _snapshot.value.copy(aiConfig = config, updatedAt = currentUpdated)
+        _snapshot.value = _snapshot.value.copy(aiConfig = normalized, updatedAt = currentUpdated)
     }
 
     @Synchronized
