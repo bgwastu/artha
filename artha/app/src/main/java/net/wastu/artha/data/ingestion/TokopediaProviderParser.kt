@@ -114,7 +114,7 @@ internal object TokopediaProviderParser {
         // Live reads returned HTTP 200/code 10000 with these verification headers.
         // Do not turn a verification challenge into an expired-login diagnosis.
         if (!verification.isNullOrBlank() || !parameters.isNullOrBlank()) throw ProviderReadException(AccountStatus.ERROR,
-            "Tokopedia blocked history with a verification challenge. Open Tokopedia and complete any verification. Saved history is kept.")
+            "Tokopedia blocked this reader with a verification challenge. Its own history screen may still work. Saved history is kept.")
         // The APK treats Tokopro-Toko-Login: 0 as server not logged in.
         if (loginState?.trim() == "0" || httpCode == 401) throw ProviderReadException(AccountStatus.NEEDS_LOGIN,
             "Tokopedia login is unavailable. Open Tokopedia and log in again.")
