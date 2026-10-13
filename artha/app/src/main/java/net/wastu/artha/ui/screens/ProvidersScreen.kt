@@ -86,6 +86,7 @@ fun ProvidersScreen(
     var showAccountDialog by remember { mutableStateOf(false) }
 
     val snapshot by viewModel?.analysisSnapshot?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val importEnabled by viewModel?.importEnabled?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(Provider.entries.toSet()) }
     val diagnostics by viewModel?.providerDiagnostics?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap()) }
     val currentlySyncing by viewModel?.syncingProvider?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(syncingProvider) }
     val driveSyncState by viewModel?.driveSyncState?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(DriveSyncState()) }
@@ -135,6 +136,8 @@ fun ProvidersScreen(
                 diagnostic = diagnostic,
                 isSyncing = isSyncingThis,
                 onToggleEnabled = { onEnabled(provider, it) },
+                importEnabled = provider in importEnabled,
+                onToggleImport = { viewModel?.setImportEnabled(provider, it) },
                 onManualSync = { viewModel?.syncProvider(provider) },
             )
         }
@@ -677,6 +680,8 @@ private fun ProviderCard(
     isSyncing: Boolean,
     onToggleEnabled: (Boolean) -> Unit,
     onManualSync: () -> Unit,
+    importEnabled: Boolean,
+    onToggleImport: (Boolean) -> Unit,
 ) {
     val accountStatus = diagnostic?.accountStatus ?: AccountStatus.CONNECTED
     val lastError = diagnostic?.lastError
@@ -738,6 +743,12 @@ private fun ProviderCard(
                 )
             }
 
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Import new history", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                Switch(checked = importEnabled, onCheckedChange = onToggleImport)
+            }
+            Text(if (isEnabled) "Shown in transactions" else "Hidden from transactions; saved history is kept", style = MaterialTheme.typography.labelSmall)
+
             // Status Badge and Transaction Count
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -748,6 +759,8 @@ private fun ProviderCard(
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = when (accountStatus) {
+                        AccountStatus.UNKNOWN -> MaterialTheme.colorScheme.surfaceVariant
+                        AccountStatus.PARTIAL -> MaterialTheme.colorScheme.tertiaryContainer
                         AccountStatus.CONNECTED -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
                         AccountStatus.NEEDS_LOGIN -> MaterialTheme.colorScheme.tertiaryContainer
                         AccountStatus.APP_NOT_INSTALLED -> MaterialTheme.colorScheme.surfaceVariant
@@ -760,6 +773,8 @@ private fun ProviderCard(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         val statusDotColor = when (accountStatus) {
+                            AccountStatus.UNKNOWN -> MaterialTheme.colorScheme.outline
+                            AccountStatus.PARTIAL -> MaterialTheme.colorScheme.tertiary
                             AccountStatus.CONNECTED -> MaterialTheme.colorScheme.primary
                             AccountStatus.NEEDS_LOGIN -> MaterialTheme.colorScheme.tertiary
                             AccountStatus.APP_NOT_INSTALLED -> MaterialTheme.colorScheme.outline
@@ -773,6 +788,8 @@ private fun ProviderCard(
                         )
                         Text(
                             text = when (accountStatus) {
+                                AccountStatus.UNKNOWN -> "Not verified"
+                                AccountStatus.PARTIAL -> "Limited coverage"
                                 AccountStatus.CONNECTED -> "Connected"
                                 AccountStatus.NEEDS_LOGIN -> "Needs Login"
                                 AccountStatus.APP_NOT_INSTALLED -> "Not Installed"
@@ -814,7 +831,7 @@ private fun ProviderCard(
 
                 OutlinedButton(
                     onClick = onManualSync,
-                    enabled = !isSyncing && isEnabled,
+                    enabled = !isSyncing && importEnabled,
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                     modifier = Modifier.height(34.dp),
                 ) {

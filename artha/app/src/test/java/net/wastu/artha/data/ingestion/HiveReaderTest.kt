@@ -24,7 +24,11 @@ class HiveReaderTest {
     }
     private fun frame(name: String, value: ByteArray?) : ByteArray {
         val body = byteArrayOf(1, name.length.toByte()) + name.toByteArray() + (value?.let(::encrypt) ?: byteArrayOf())
-        return integer(body.size + 8) + body + integer(0)
+        val data = integer(body.size + 8) + body
+        val crc = java.util.zip.CRC32().apply {
+            update(java.security.MessageDigest.getInstance("SHA-256").digest(key)); update(data)
+        }.value
+        return data + integer(crc.toInt())
     }
 
     @Test fun decryptsAdapterFieldsAndLastFrameWinsIncludingDeletion() {
@@ -61,6 +65,8 @@ class HiveReaderTest {
     @Test fun truncatedFramesAndWrongKeysFailRatherThanReturningEmptyHistory() {
         val data = frame("history", text("real value"))
         assertTrue(runCatching { HiveBox.read(data.copyOf(data.size - 1), key) }.isFailure)
+        val corrupt = data.copyOf().apply { this[lastIndex] = (this[lastIndex].toInt() xor 1).toByte() }
+        assertTrue(runCatching { HiveBox.read(corrupt, key) }.isFailure)
         assertTrue(runCatching { HiveBox.read(data, ByteArray(32)) }.isFailure)
         assertTrue(runCatching { HiveReader(byteArrayOf(10) + integer(Int.MAX_VALUE)).value() }.isFailure)
         assertTrue(runCatching { HiveBox.parseKey("[1,2]") }.isFailure)

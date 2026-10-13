@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 enum class AccountStatus {
+    UNKNOWN,
+    PARTIAL,
     CONNECTED,
     NEEDS_LOGIN,
     APP_NOT_INSTALLED,
@@ -17,7 +19,7 @@ data class ProviderDiagnostic(
     val lastSyncEpochMillis: Long? = null,
     val lastSyncSummary: String? = null,
     val lastError: String? = null,
-    val accountStatus: AccountStatus = AccountStatus.CONNECTED,
+    val accountStatus: AccountStatus = AccountStatus.UNKNOWN,
     val accountIdentifier: String? = null,
 )
 
@@ -25,6 +27,14 @@ class ProviderPreferences(context: Context) {
     private val preferences = context.getSharedPreferences("provider_visibility", Context.MODE_PRIVATE)
     private val _enabled = MutableStateFlow(Provider.entries.filter { preferences.getBoolean(it.name, true) }.toSet())
     val enabled = _enabled.asStateFlow()
+    private val _importEnabled = MutableStateFlow(Provider.entries.filter { preferences.getBoolean("${it.name}_import", true) }.toSet())
+    val importEnabled = _importEnabled.asStateFlow()
+
+    @Synchronized
+    fun setImportEnabled(provider: Provider, enabled: Boolean) {
+        preferences.edit { putBoolean("${provider.name}_import", enabled) }
+        _importEnabled.value = if (enabled) _importEnabled.value + provider else _importEnabled.value - provider
+    }
 
     private val _diagnostics = MutableStateFlow(loadDiagnostics())
     val diagnostics = _diagnostics.asStateFlow()
@@ -34,8 +44,8 @@ class ProviderPreferences(context: Context) {
             val syncTime = preferences.getLong("${p.name}_last_sync_ms", 0L).takeIf { it > 0L }
             val summary = preferences.getString("${p.name}_last_summary", null)
             val err = preferences.getString("${p.name}_last_error", null)
-            val statusStr = preferences.getString("${p.name}_status", AccountStatus.CONNECTED.name) ?: AccountStatus.CONNECTED.name
-            val status = runCatching { AccountStatus.valueOf(statusStr) }.getOrDefault(AccountStatus.CONNECTED)
+            val statusStr = preferences.getString("${p.name}_status", AccountStatus.UNKNOWN.name) ?: AccountStatus.UNKNOWN.name
+            val status = runCatching { AccountStatus.valueOf(statusStr) }.getOrDefault(AccountStatus.UNKNOWN)
             val ident = preferences.getString("${p.name}_identifier", null)
             ProviderDiagnostic(
                 lastSyncEpochMillis = syncTime,
@@ -56,6 +66,7 @@ class ProviderPreferences(context: Context) {
         provider: Provider,
         summary: String,
         accountIdentifier: String? = null,
+        coverageHint: String? = null,
     ) {
         val now = System.currentTimeMillis()
         val current = _diagnostics.value.toMutableMap()
@@ -63,17 +74,17 @@ class ProviderPreferences(context: Context) {
         val finalIdent = accountIdentifier ?: prev.accountIdentifier
         val updated = ProviderDiagnostic(
             lastSyncEpochMillis = now,
-            lastSyncSummary = summary,
-            lastError = null,
-            accountStatus = AccountStatus.CONNECTED,
+            lastSyncSummary = listOfNotNull(summary, coverageHint).joinToString(" · "),
+            lastError = coverageHint,
+            accountStatus = if (coverageHint == null) AccountStatus.CONNECTED else AccountStatus.PARTIAL,
             accountIdentifier = finalIdent,
         )
         current[provider] = updated
         preferences.edit {
             putLong("${provider.name}_last_sync_ms", now)
-            putString("${provider.name}_last_summary", summary)
-            remove("${provider.name}_last_error")
-            putString("${provider.name}_status", AccountStatus.CONNECTED.name)
+            putString("${provider.name}_last_summary", updated.lastSyncSummary)
+            if (coverageHint == null) remove("${provider.name}_last_error") else putString("${provider.name}_last_error", coverageHint)
+            putString("${provider.name}_status", updated.accountStatus.name)
             if (finalIdent != null) putString("${provider.name}_identifier", finalIdent)
         }
         _diagnostics.value = current

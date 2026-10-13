@@ -296,41 +296,24 @@ class DriveSyncManager(
         try {
             val root = rootAccess ?: net.wastu.artha.core.root.LibsuRootAccess(context)
             if (!root.verify()) return@withContext null
-
-            val rootReader = net.wastu.artha.data.ingestion.RootFileReader(context)
-            val bytes = rootReader.read("/data/system_ce/0/accounts_ce.db")
-            val tmp = java.io.File.createTempFile("accounts_ce", ".db", context.cacheDir)
-            try {
-                tmp.writeBytes(bytes)
-                android.database.sqlite.SQLiteDatabase.openDatabase(tmp.absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY).use { db ->
-                    val query = """
-                        SELECT at.authtoken, CAST(ex.value AS INTEGER) as exp_sec
-                        FROM authtokens at
-                        JOIN accounts a ON a._id = at.accounts_id
-                        LEFT JOIN extras ex ON ex.accounts_id = a._id AND ex.key = 'EXP:' || at.type
-                        WHERE a.name = ? AND at.type LIKE '%https://www.googleapis.com/auth/drive%'
-                        ORDER BY exp_sec DESC
-                        LIMIT 1
-                    """.trimIndent()
-                    db.rawQuery(query, arrayOf(email)).use { cursor ->
-                        if (cursor.moveToNext()) {
-                            val token = cursor.getString(0)
-                            val expSec = cursor.getLong(1)
-                            val nowSec = System.currentTimeMillis() / 1000
-                            if (!token.isNullOrBlank() && (expSec == 0L || expSec > nowSec)) {
-                                return@withContext token
-                            }
-                        }
+            return@withContext net.wastu.artha.data.ingestion.RootFileReader(context).readSqlite("/data/system_ce/0/accounts_ce.db") { db ->
+                val query = """
+                    SELECT at.authtoken, CAST(ex.value AS INTEGER) as exp_sec
+                    FROM authtokens at JOIN accounts a ON a._id = at.accounts_id
+                    LEFT JOIN extras ex ON ex.accounts_id = a._id AND ex.key = 'EXP:' || at.type
+                    WHERE a.name = ? AND at.type LIKE '%https://www.googleapis.com/auth/drive.appdata%'
+                    ORDER BY exp_sec DESC LIMIT 1
+                """.trimIndent()
+                db.rawQuery(query, arrayOf(email)).use { cursor ->
+                    if (!cursor.moveToNext()) null else {
+                        val token = cursor.getString(0)
+                        val expires = cursor.getLong(1)
+                        token?.takeIf { it.isNotBlank() && (expires == 0L || expires > System.currentTimeMillis() / 1000) }
                     }
                 }
-            } finally {
-                tmp.delete()
             }
-        } catch (e: Exception) {
-            android.util.Log.e("DriveSync", "Root token extraction failed", e)
-            null
-        }
-        null
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { null }
     }
 
     // --- Android KeyStore Passphrase Storage ---

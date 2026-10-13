@@ -28,4 +28,6 @@ Artha helps people in Indonesia understand their spending on rooted Android phon
   <img src="assets/screenshot.png" alt="Artha transaction timeline and spending analysis with fictional sample data">
 </picture>
 
+Imports use provider caches and private endpoints, so available history can be incomplete. Settings reports limited coverage and separates importing from hiding a source. Imports currently support the primary Android profile; Tokopedia and Grab schemas remain experimental and uncertain payment fields are skipped. Saved data remains available when root or a source is unavailable.
+
 AI disclosure: Human validated.

@@ -27,67 +27,54 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
         private set
 
     suspend fun transactions(): List<UnifiedTransaction> = withContext(Dispatchers.IO) {
-        try {
-            val cookies = readCookies()
-            check(cookies.isNotBlank()) { "Shopee session cookies not found. Please log in to Shopee app." }
-            val orders = linkedMapOf<String, UnifiedTransaction>()
-
-            // 1. Shopee Marketplace Orders
-            for (listType in listOf(8, 3)) {
-                for (offset in listOf(0, 20)) {
-                    coroutineContext.ensureActive()
-                    val response = runCatching { fetchOrders(cookies, listType, offset) }.getOrNull() ?: continue
-                    if (response.optInt("error", 0) != 0) continue
-                    val details = response.optJSONObject("data")?.optJSONArray("details_list") ?: continue
-                    for (index in 0 until details.length()) {
-                        val order = details.optJSONObject(index) ?: continue
-                        val transaction = parseOrder(order, cookies, fetchDetail = orders.size < 5) ?: continue
-                        orders.putIfAbsent(transaction.providerTransactionId, transaction)
-                    }
-                }
+        val cookies = readCookies()
+        check(cookies.isNotBlank()) { "Shopee session cookies missing. Please log in to Shopee." }
+        val rows = ImportRows()
+        for (listType in listOf(8, 3)) {
+            for (offset in 0..180 step 20) {
+                coroutineContext.ensureActive()
+                val details = try {
+                    val response = fetchOrders(cookies, listType, offset)
+                    check(response.optInt("error", 0) == 0) { "Shopee rejected the order history request" }
+                    response.getJSONObject("data").getJSONArray("details_list")
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (e: Exception) { rows.issue(e.message ?: "Marketplace page unavailable"); break }
+                for (index in 0 until details.length()) rows.readRow { parseOrder(details.getJSONObject(index), cookies, fetchDetail = false) }
+                if (details.length() < 20) break
+                if (offset == 180) rows.issue("Marketplace history capped at 200 recent orders per list")
             }
-
-            // 2. ShopeeFood Orders (concurrently fetched across key queries)
-            val foodDeferreds = coroutineScope {
-                SHOPEEFOOD_SEARCH_KEYWORDS.map { kw ->
-                    async { runCatching { fetchShopeeFoodOrders(cookies, kw) }.getOrNull() }
-                }
-            }
-            for (foodOrders in foodDeferreds.awaitAll().filterNotNull()) {
-                for (index in 0 until foodOrders.length()) {
-                    val foodOrder = foodOrders.optJSONObject(index) ?: continue
-                    val transaction = parseShopeeFoodOrder(foodOrder) ?: continue
-                    orders.putIfAbsent(transaction.providerTransactionId, transaction)
-                }
-            }
-
-            orders.values.sortedByDescending { it.occurredAt }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (e: Exception) {
-            throw e
         }
+        val semaphore = kotlinx.coroutines.sync.Semaphore(3)
+        val foodResults = coroutineScope {
+            SHOPEEFOOD_SEARCH_KEYWORDS.map { keyword -> async {
+                semaphore.acquire()
+                try { Result.success(fetchShopeeFoodOrders(cookies, keyword)) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (e: Exception) { Result.failure<JSONArray?>(e) }
+                finally { semaphore.release() }
+            } }.awaitAll()
+        }
+        for (result in foodResults) {
+            val orders = result.getOrNull()
+            if (orders == null) { rows.issue(result.exceptionOrNull()?.message ?: "Food history unavailable"); continue }
+            for (index in 0 until orders.length()) {
+                val order = orders.optJSONObject(index) ?: continue
+                if (order.optInt("status") >= 900 || order.optLong("cancel_time") > 0) continue
+                rows.readRow { parseShopeeFoodOrder(order) }
+            }
+        }
+        rows.finish().sortedByDescending { it.occurredAt }
     }
 
-    private suspend fun readCookies(): String {
-        val bytes = files.read("/data/data/com.shopee.id/app_webview_com.shopee.id/Default/Cookies")
-        val tmp = File.createTempFile("shopee_cookies", ".db")
-        try {
-            tmp.writeBytes(bytes)
-            return SQLiteDatabase.openDatabase(tmp.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { database ->
-                database.rawQuery("SELECT name, value FROM cookies WHERE host_key LIKE '%shopee.co.id'", null).use { cursor ->
-                    buildList {
-                        while (cursor.moveToNext()) {
-                            val name = cursor.getString(0).orEmpty()
-                            val value = cursor.getString(1).orEmpty()
-                            if (name == "username" && value.isNotBlank()) accountUsername = "@$value"
-                            if (name.isNotBlank() && value.isNotBlank()) add("$name=$value")
-                        }
-                    }.joinToString("; ")
+    private suspend fun readCookies(): String = files.readSqlite("/data/data/com.shopee.id/app_webview_com.shopee.id/Default/Cookies") { database ->
+        database.rawQuery("SELECT name, value FROM cookies WHERE host_key LIKE '%shopee.co.id'", null).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    val name = cursor.getString(0).orEmpty(); val value = cursor.getString(1).orEmpty()
+                    if (name == "username" && value.isNotBlank()) accountUsername = "@$value"
+                    if (name.isNotBlank() && value.isNotBlank()) add("$name=$value")
                 }
-            }
-        } finally {
-            tmp.delete()
+            }.joinToString("; ")
         }
     }
 
@@ -102,7 +89,7 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
             connection.setRequestProperty("User-Agent", "Shopee Android Beeshop locale/id version=38336 appver=38336")
             connection.setRequestProperty("X-Shopee-Client-Timezone", "Asia/Jakarta")
             connection.setRequestProperty("Referer", "https://shopee.co.id/")
-            check(connection.responseCode in 200..299) { "Shopee order history unavailable" }
+            requireHttpSuccess(connection.responseCode, "Shopee")
             return connection.inputStream.bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
         } finally {
             connection.disconnect()
@@ -137,11 +124,9 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
                 out.write(payload.toByteArray(Charsets.UTF_8))
             }
 
-            if (connection.responseCode !in 200..299) return null
+            requireHttpSuccess(connection.responseCode, "Shopee")
             val responseJson = connection.inputStream.bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
-            responseJson.optJSONObject("data")?.optJSONArray("orders")
-        } catch (_: Exception) {
-            null
+            responseJson.getJSONObject("data").getJSONArray("orders")
         } finally {
             connection.disconnect()
         }
@@ -217,7 +202,7 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
             provider = Provider.SHOPEE,
             providerTransactionId = "shopee:$orderId",
             direction = Direction.DEBIT,
-            money = Money(finalTotalMinor.coerceAtLeast(100L), "IDR"),
+            money = Money(finalTotalMinor, "IDR"),
             occurredAt = Instant.ofEpochMilli(paymentTimeMs),
             description = description,
             cardLast4 = cardLast4,
@@ -248,7 +233,7 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
             connection.setRequestProperty("User-Agent", "Shopee Android Beeshop locale/id version=38336 appver=38336")
             connection.setRequestProperty("X-Shopee-Client-Timezone", "Asia/Jakarta")
             connection.setRequestProperty("Referer", "https://shopee.co.id/")
-            if (connection.responseCode !in 200..299) return null
+            requireHttpSuccess(connection.responseCode, "Shopee")
             val json = connection.inputStream.bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
             val rows = json.optJSONObject("data")?.optJSONObject("processing_info")?.optJSONArray("info_rows") ?: return null
             for (i in 0 until rows.length()) {
@@ -259,8 +244,6 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
                     if (value != null && value > 0L) return value
                 }
             }
-            null
-        } catch (_: Exception) {
             null
         } finally {
             connection.disconnect()
@@ -273,8 +256,9 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
         if (orderId <= 0L) return null
         // Shopee stores rupiah * 100,000; the ledger stores rupiah * 100.
         val finalTotal = infoCard.optLong("final_total") / 1000L
+        if (finalTotal <= 0) return null
         val ctime = order.optJSONObject("shipping")?.optJSONObject("tracking_info")
-            ?.optLong("ctime")?.takeUnless { it == 0L } ?: Instant.now().epochSecond
+            ?.optLong("ctime")?.takeIf { it > 0L } ?: return null
         val orderTime = if (fetchDetail) fetchOrderTime(cookies, orderId) ?: ctime else ctime
         val cards = infoCard.optJSONArray("order_list_cards") ?: order.optJSONArray("order_list_cards") ?: JSONArray()
         val shopName = cards.optJSONObject(0)?.optJSONObject("shop_info")?.optString("shop_name").orEmpty()
@@ -307,7 +291,7 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
             provider = Provider.SHOPEE,
             providerTransactionId = "shopee:$orderId",
             direction = Direction.DEBIT,
-            money = Money(finalTotal.coerceAtLeast(100L), "IDR"),
+            money = Money(finalTotal, "IDR"),
             occurredAt = Instant.ofEpochSecond(orderTime),
             description = description,
             rawPayload = JSONObject()

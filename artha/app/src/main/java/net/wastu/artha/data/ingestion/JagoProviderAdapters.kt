@@ -30,13 +30,15 @@ class JagoTransactionReader(private val files: RootFileReader) {
             val encoded = requireNotNull(Regex("<string\\s+name=\"flutter\\.jago\\.sharedpref\\.hivekey\">([^<]+)</string>")
                 .find(xml)?.groupValues?.get(1)) { "Jago master key unavailable" }
             val master = HiveBox.parseKey(HiveBox.decrypt(Base64.decode(encoded.trim(), Base64.DEFAULT), ByteArray(16)).toString(Charsets.UTF_8))
-            val preferences = HiveBox.read(files.read("$base/app_flutter/shared_preference.hive"), master)
+            val snapshot = files.stableBatch(listOf("$base/app_flutter/shared_preference.hive", "$base/app_flutter/pot.hive", "$base/app_flutter/list_transaction_history.hive"))
+            val preferences = HiveBox.read(requireNotNull(snapshot["$base/app_flutter/shared_preference.hive"]), master)
             fun boxKey(name: String): ByteArray = HiveBox.parseKey(
                 requireNotNull((preferences[name] as? Map<*, *>)?.get("f2") as? String) { "Jago box key unavailable" },
             )
-            val pockets = HiveBox.read(files.read("$base/app_flutter/pot.hive"), boxKey("pot"))
-            val history = HiveBox.read(files.read("$base/app_flutter/list_transaction_history.hive"), boxKey("list_transaction_history"))
+            val pockets = HiveBox.read(requireNotNull(snapshot["$base/app_flutter/pot.hive"]), boxKey("pot"))
+            val history = HiveBox.read(requireNotNull(snapshot["$base/app_flutter/list_transaction_history.hive"]), boxKey("list_transaction_history"))
             val seen = mutableSetOf<String>()
+            var rejected = 0
             val transactions = buildList {
                 history.forEach { (pocketId, value) ->
                     val pocket = pockets[pocketId] as? Map<*, *>
@@ -48,6 +50,7 @@ class JagoTransactionReader(private val files: RootFileReader) {
                     }
                     val list = (value as? Map<*, *>)?.get("f2") as? List<*> ?: return@forEach
                     for (raw in list) {
+                        try {
                         val fields = raw as? Map<*, *> ?: error("Invalid Jago transaction")
                         fun text(index: Int) = fields["f$index"]?.toString().orEmpty().takeUnless { it == "null" }.orEmpty()
                         val id = text(47).ifBlank { text(6) }
@@ -60,7 +63,7 @@ class JagoTransactionReader(private val files: RootFileReader) {
                         val date = text(5).let {
                             try { OffsetDateTime.parse(it).toInstant() }
                             catch (_: java.time.format.DateTimeParseException) {
-                                Instant.ofEpochMilli((fields["f13"] as Number).toLong())
+                                Instant.ofEpochMilli(((fields["f13"] as? Map<*, *>)?.get("millis") as? Number ?: fields["f13"] as Number).toLong())
                             }
                         }
                         val localized = try { JSONObject(text(14)).let { it.optString("en").ifBlank { it.optString("id") } } }
@@ -99,36 +102,46 @@ class JagoTransactionReader(private val files: RootFileReader) {
                                 .put("fields", JSONObject(fields))
                                 .toString(),
                         ))
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                        catch (_: Exception) { rejected++ }
                     }
                 }
             }.sortedByDescending { it.occurredAt }
-            snapshot = transactions
+            if (rejected > 0) throw PartialImportException(transactions, "$rejected malformed bank rows skipped; valid cached rows imported")
+            this@JagoTransactionReader.snapshot = transactions
             transactions
         }
     }
 }
 
 class JagoProviderAdapter(private val reader: JagoTransactionReader) : ProviderAdapter {
+    override val coverageHint = "Cached bank history only"
     override val provider = Provider.JAGO
     override suspend fun ingest(): List<UnifiedTransaction> = reader.transactions()
 }
 
 class ShopeeProviderAdapter(private val files: RootFileReader) : ProviderAdapter {
+    override val coverageHint = "Recent marketplace pages and keyword-matched food orders; incomplete history"
     override val provider = Provider.SHOPEE
-    override suspend fun ingest(): List<UnifiedTransaction> = ShopeeOrderReader(files).transactions()
+    private val reader = ShopeeOrderReader(files)
+    override val accountIdentifier get() = reader.accountUsername
+    override suspend fun ingest(): List<UnifiedTransaction> = reader.transactions()
 }
 
 class TokopediaProviderAdapter(private val files: RootFileReader) : ProviderAdapter {
+    override val coverageHint = "Experimental order enrichment; payment schema must be verified"
     override val provider = Provider.TOKOPEDIA
     override suspend fun ingest(): List<UnifiedTransaction> = TokopediaOrderReader(files).transactions()
 }
 
 class GojekProviderAdapter(private val files: RootFileReader) : ProviderAdapter {
+    override val coverageHint = "Locally cached GoPay history and optional 2026 ride file only"
     override val provider = Provider.GOJEK
     override suspend fun ingest(): List<UnifiedTransaction> = GojekOrderReader(files).transactions()
 }
 
 class GrabProviderAdapter(private val files: RootFileReader) : ProviderAdapter {
+    override val coverageHint = "Recent wallet and order pages only; incomplete history"
     override val provider = Provider.GRAB
     override suspend fun ingest(): List<UnifiedTransaction> = GrabOrderReader(files).transactions()
 }

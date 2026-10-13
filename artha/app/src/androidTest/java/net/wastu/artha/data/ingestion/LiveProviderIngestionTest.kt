@@ -21,10 +21,10 @@ class LiveProviderIngestionTest {
         val live = JagoTransactionReader(RootFileReader(app)).transactions()
         assertTrue("Expected actual local Jago history", live.isNotEmpty())
         assertEquals(live.size, live.map { it.providerTransactionId }.toSet().size)
-        assertTrue(live.all { it.rawPayload.contains("jago-linked-local-hive") })
+        assertTrue(live.all { it.rawPayload.contains("jago-local-hive") })
         val first = app.ingestion.ingestAll()
-        assertEquals(Provider.entries.toSet(), first.keys)
-        assertFalse("All registered adapters must succeed", first.values.any { it.startsWith("Ingestion failed") })
+        assertEquals(app.providerPreferences.importEnabled.value, first.keys)
+        assertFalse("All registered adapters must succeed", first.values.any { it.startsWith("Unavailable") })
         val before = app.ledger.observeTransactions().first().size
         val second = app.ingestion.ingestAll()
         assertTrue(second.values.all { it.startsWith("0 added") })

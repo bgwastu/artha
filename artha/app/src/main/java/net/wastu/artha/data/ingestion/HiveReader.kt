@@ -59,11 +59,18 @@ internal object HiveBox {
     fun read(data: ByteArray, key: ByteArray): Map<String, Any?> {
         val buffer = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
         val values = linkedMapOf<String, ByteArray>()
+        val keyHash = java.security.MessageDigest.getInstance("SHA-256").digest(key)
         while (buffer.hasRemaining()) {
             val start = buffer.position()
             require(buffer.remaining() >= 4) { "Truncated Hive frame" }
             val length = buffer.int
             require(length >= 10 && length <= data.size - start) { "Invalid Hive frame length" }
+            val checksum = java.util.zip.CRC32().apply {
+                update(keyHash)
+                update(data, start, length - 4)
+            }.value
+            val stored = buffer.getInt(start + length - 4).toLong() and 0xffffffffL
+            require(checksum == stored) { "Hive integrity check failed; retry a stable snapshot." }
             val end = start + length - 4 // trailing Hive CRC
             val name = when (buffer.get().toInt() and 255) {
                 0 -> { require(buffer.position() + 4 <= end); (buffer.int.toLong() and 0xffffffffL).toString() }

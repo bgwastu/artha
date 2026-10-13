@@ -22,13 +22,11 @@ internal class TokopediaOrderReader(private val files: RootFileReader) {
         try {
             val blk = files.read("/data/data/com.tokopedia.tkpd/files/keva/repo/LOGIN_SESSION_v2/LOGIN_SESSION_v2.blk")
             val token = decryptSessionToken(blk)
-            if (token.isNullOrBlank()) return@withContext emptyList()
+            check(!token.isNullOrBlank()) { "Tokopedia session missing or unrecognized. Please log in again." }
             val cookies = readCookies()
             fetchOrders(token, cookies)
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
-            emptyList()
         }
     }
 
@@ -55,30 +53,12 @@ internal class TokopediaOrderReader(private val files: RootFileReader) {
         return null
     }
 
-    private suspend fun readCookies(): String {
-        return try {
-            val bytes = files.read("/data/data/com.tokopedia.tkpd/app_webview/Default/Cookies")
-            val tmp = File.createTempFile("tokopedia_cookies", ".db")
-            try {
-                tmp.writeBytes(bytes)
-                SQLiteDatabase.openDatabase(tmp.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { db ->
-                    db.rawQuery("SELECT name, value FROM cookies WHERE host_key LIKE '%tokopedia%'", null).use { cursor ->
-                        buildList {
-                            while (cursor.moveToNext()) {
-                                val name = cursor.getString(0).orEmpty()
-                                val value = cursor.getString(1).orEmpty()
-                                if (name.isNotBlank() && value.isNotBlank()) add("$name=$value")
-                            }
-                        }.joinToString("; ")
-                    }
-                }
-            } finally {
-                tmp.delete()
-            }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            ""
+    private suspend fun readCookies(): String = files.readSqlite("/data/data/com.tokopedia.tkpd/app_webview/Default/Cookies") { db ->
+        db.rawQuery("SELECT name, value FROM cookies WHERE host_key LIKE '%tokopedia%'", null).use { cursor ->
+            buildList { while (cursor.moveToNext()) {
+                val name = cursor.getString(0).orEmpty(); val value = cursor.getString(1).orEmpty()
+                if (name.isNotBlank() && value.isNotBlank()) add("$name=$value")
+            } }.joinToString("; ")
         }
     }
 
@@ -97,29 +77,14 @@ internal class TokopediaOrderReader(private val files: RootFileReader) {
             connection.setRequestProperty("User-Agent", "com.tokopedia.tkpd/45.0.5 (Android 16)")
             val body = JSONObject().put("fe_version", "2").put("page_size", 20).toString()
             connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            if (connection.responseCode !in 200..299) return emptyList()
+            requireHttpSuccess(connection.responseCode, "Tokopedia")
             val response = connection.inputStream.bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
-            val list = response.optJSONObject("data")?.optJSONArray("order_list") ?: return emptyList()
-            return buildList {
-                for (i in 0 until list.length()) {
-                    val order = list.optJSONObject(i) ?: continue
-                    val id = order.optString("order_id").ifBlank { order.optString("main_order_id") }
-                    if (id.isBlank()) continue
-                    val total = order.optLong("total_amount", 0L).coerceAtLeast(100L)
-                    val title = order.optString("product_name").ifBlank { "Tokopedia Order" }
-                    add(
-                        UnifiedTransaction(
-                            provider = Provider.TOKOPEDIA,
-                            providerTransactionId = "tokopedia:$id",
-                            direction = Direction.DEBIT,
-                            money = Money(total, "IDR"),
-                            occurredAt = Instant.now(),
-                            description = title,
-                            rawPayload = order.toString(),
-                        )
-                    )
-                }
+            val list = response.getJSONObject("data").getJSONArray("order_list")
+            val rows = ImportRows()
+            for (i in 0 until list.length()) rows.readRow {
+                ProviderRowParser.tokopedia(list.getJSONObject(i))
             }
+            return rows.finish()
         } finally {
             connection.disconnect()
         }

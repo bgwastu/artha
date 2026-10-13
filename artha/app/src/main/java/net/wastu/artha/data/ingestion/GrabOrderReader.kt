@@ -19,6 +19,7 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 import javax.xml.parsers.DocumentBuilderFactory
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -35,333 +36,115 @@ internal class GrabOrderReader(
     private val installTimeOverride: Long? = null,
 ) {
     suspend fun transactions(): List<UnifiedTransaction> = withContext(Dispatchers.IO) {
-        val token = runCatching { readSessionToken() }.getOrNull() ?: return@withContext emptyList()
-        val allTransactions = mutableMapOf<String, UnifiedTransaction>()
-
-        // 1. Ingest Rides (bookings list)
-        runCatching {
-            val rides = fetchRides(token)
-            for (ride in rides) {
-                allTransactions[ride.providerTransactionId] = ride
-            }
+        val token = readSessionToken()
+        val rows = ImportRows()
+        for (read in listOf<() -> List<UnifiedTransaction>>({ fetchRides(token) }, { fetchGrabPayTransactions(token) }, { fetchFoodOrders(token) })) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            try { rows.transactions += read() }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (partial: PartialImportException) { rows.transactions += partial.transactions; rows.issue(partial.message.orEmpty()) }
+            catch (e: Exception) { rows.issue(e.message ?: "Grab endpoint unavailable") }
         }
-
-        // 2. Ingest GrabPay / OVO Wallet history (credit & transactions)
-        runCatching {
-            val walletTxs = fetchGrabPayTransactions(token, existingRideCodes = allTransactions.keys)
-            for (tx in walletTxs) {
-                allTransactions.putIfAbsent(tx.providerTransactionId, tx)
-            }
-        }
-
-        // 3. Ingest GrabFood orders history if available
-        runCatching {
-            val foodOrders = fetchFoodOrders(token)
-            for (order in foodOrders) {
-                allTransactions.putIfAbsent(order.providerTransactionId, order)
-            }
-        }
-
-        allTransactions.values.sortedByDescending { it.occurredAt }
+        rows.finish().sortedByDescending { it.occurredAt }
     }
 
     internal suspend fun readSessionToken(): String {
-        val xmlBytes = files.read("/data/data/com.grabtaxi.passenger/shared_prefs/com.grabtaxi.passenger_preferences.xml")
-        val prefs = parsePreferencesXml(xmlBytes.inputStream())
-        val sessionId = prefs["sessionId"] ?: throw IllegalStateException("Missing sessionId in Grab preferences")
-        val salt = prefs["salt"] ?: throw IllegalStateException("Missing salt in Grab preferences")
-        val keyGenId = prefs["KEY_GENERATION_ID"]
-        val appsFlyerId = prefs["appsFlyerAppId"]
-
-        val installTime = installTimeOverride ?: files.packageFirstInstallTime("com.grabtaxi.passenger").takeIf { it > 0L }
-            ?: runCatching { readInstallTimeFromRestrictions() }.getOrNull()
-            ?: throw IllegalStateException("Cannot resolve Grab install time")
-
-        return decryptSession(sessionId, salt, installTime, keyGenId, appsFlyerId)
+        val prefs = parsePreferencesXml(files.read("/data/data/com.grabtaxi.passenger/shared_prefs/com.grabtaxi.passenger_preferences.xml").inputStream())
+        val sessionId = prefs["sessionId"] ?: error("Grab session missing. Please log in again.")
+        val salt = prefs["salt"] ?: error("Grab session salt missing. Please log in again.")
+        val installTime = installTimeOverride ?: files.packageFirstInstallTime("com.grabtaxi.passenger").takeIf { it > 0 }
+            ?: readInstallTimeFromRestrictions() ?: error("Cannot resolve Grab install time")
+        return decryptSession(sessionId, salt, installTime, prefs["KEY_GENERATION_ID"], prefs["appsFlyerAppId"])
     }
 
     private suspend fun readInstallTimeFromRestrictions(): Long? {
-        val xmlBytes = files.read("/data/system/users/0/package-restrictions.xml")
-        val text = String(xmlBytes, Charsets.UTF_8)
+        val text = files.read("/data/system/users/0/package-restrictions.xml").toString(Charsets.UTF_8)
         val match = Regex("""<package\s+name="com\.grabtaxi\.passenger"[^>]*first-install-time="([0-9a-fA-F]+)"""").find(text)
         return match?.groupValues?.get(1)?.toLongOrNull(16)
     }
 
+    private fun request(token: String, url: String): JSONObject {
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"; connectTimeout = 10_000; readTimeout = 15_000
+            setRequestProperty("Authorization", token); setRequestProperty("x-mts-ssid", token)
+            setRequestProperty("User-Agent", "Grab/5.430.0 (Android)")
+            setRequestProperty("X-Grab-id-ServiceId", "PASSENGER"); setRequestProperty("Accept", "application/json")
+        }
+        try {
+            requireHttpSuccess(connection.responseCode, "Grab")
+            return connection.inputStream.bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
+        } finally { connection.disconnect() }
+    }
+
     private fun fetchRides(token: String): List<UnifiedTransaction> {
-        val url = "https://p.grabtaxi.com/api/passenger/v3/rides/bookings/list?bookingTypes=PAST"
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            setRequestProperty("Authorization", token)
-            setRequestProperty("x-mts-ssid", token)
-            setRequestProperty("User-Agent", "Grab/5.430.0 (Android)")
-            setRequestProperty("X-Grab-id-ServiceId", "PASSENGER")
-            setRequestProperty("Accept", "application/json")
-            connectTimeout = 10000
-            readTimeout = 15000
+        val rides = request(token, "https://p.grabtaxi.com/api/passenger/v3/rides/bookings/list?bookingTypes=PAST").getJSONArray("rides")
+        val rows = ImportRows()
+        for (i in 0 until rides.length()) rows.readRow {
+            val ride = rides.getJSONObject(i)
+            val id = ride.getString("bookingCode")
+            val service = ride.optJSONObject("serviceInfo")?.optString("name").orEmpty().ifBlank { "GrabRide" }
+            val amount = ride.getJSONObject("quote").getJSONObject("fare").getLong("lowerBound")
+            val timeline = ride.getJSONObject("timeline")
+            val time = timeline.optLong("completeTime").takeIf { it > 0 } ?: timeline.getLong("pickupTime").also { require(it > 0) }
+            val route = ride.optJSONArray("itinerary")
+            fun location(index: Int) = route?.optJSONObject(index)?.let { it.optString("keyword").ifBlank { it.optString("address") } }.orEmpty()
+            val pickup = location(0); val dropoff = location((route?.length() ?: 1) - 1)
+            val payload = JSONObject().put("origin", "grab-rides-api").put("orderNumber", id).put("serviceTier", service)
+                .put("pickupLocation", pickup).put("dropoffLocation", dropoff).put("paymentMethod", "GrabPay")
+            UnifiedTransaction(Provider.GRAB, "grab:$id", Direction.DEBIT, Money(amount), Instant.ofEpochMilli(time),
+                if (pickup.isNotBlank() && dropoff.isNotBlank()) "$service: $pickup to $dropoff" else service, payload.toString())
         }
-        if (connection.responseCode !in 200..299) return emptyList()
-        val text = connection.inputStream.bufferedReader().use { it.readText() }
-        val root = JSONObject(text)
-        val rides = root.optJSONArray("rides") ?: return emptyList()
-
-        return buildList {
-            for (i in 0 until rides.length()) {
-                val ride = rides.optJSONObject(i) ?: continue
-                val code = ride.optString("bookingCode").ifBlank { continue }
-                val serviceInfo = ride.optJSONObject("serviceInfo")
-                val serviceName = serviceInfo?.optString("name")?.takeIf { it.isNotBlank() } ?: "GrabRide"
-
-                val quote = ride.optJSONObject("quote")
-                val fareObj = quote?.optJSONObject("fare")
-                val fareMinor = fareObj?.optLong("lowerBound", 0L) ?: 0L
-
-                val timeline = ride.optJSONObject("timeline")
-                val completeTime = timeline?.optLong("completeTime", 0L)?.takeIf { it > 0L }
-                    ?: timeline?.optLong("pickupTime", 0L)?.takeIf { it > 0L }
-                    ?: System.currentTimeMillis()
-                val occurredAt = Instant.ofEpochMilli(completeTime)
-
-                val itinerary = ride.optJSONArray("itinerary")
-                val pickup = itinerary?.optJSONObject(0)?.let {
-                    it.optString("keyword").ifBlank { it.optString("address") }
-                }.orEmpty().trim()
-                val dropoff = itinerary?.optJSONObject(itinerary.length() - 1)?.let {
-                    it.optString("keyword").ifBlank { it.optString("address") }
-                }.orEmpty().trim()
-
-                val description = if (pickup.isNotBlank() && dropoff.isNotBlank()) {
-                    "$serviceName: $pickup to $dropoff"
-                } else if (dropoff.isNotBlank()) {
-                    "$serviceName to $dropoff"
-                } else {
-                    serviceName
-                }
-
-                val rawPayload = JSONObject()
-                    .put("origin", "grab-rides-api")
-                    .put("provider", Provider.GRAB.name)
-                    .put("orderNumber", code)
-                    .put("serviceTier", serviceName)
-                    .put("pickupLocation", pickup)
-                    .put("dropoffLocation", dropoff)
-                    .put("paymentMethod", "GrabPay")
-                    .toString()
-
-                add(
-                    UnifiedTransaction(
-                        provider = Provider.GRAB,
-                        providerTransactionId = "grab:$code",
-                        direction = Direction.DEBIT,
-                        money = Money(fareMinor, "IDR"),
-                        occurredAt = occurredAt,
-                        description = description,
-                        rawPayload = rawPayload,
-                    )
-                )
-            }
-        }
+        return rows.finish()
     }
 
-    private fun fetchGrabPayTransactions(token: String, existingRideCodes: Set<String>): List<UnifiedTransaction> {
-        val url = "https://p.grabtaxi.com/api/passenger/v2/grabpay/history/credit/?currency=IDR&pageSize=50&lastElementID=0"
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            setRequestProperty("Authorization", token)
-            setRequestProperty("x-mts-ssid", token)
-            setRequestProperty("User-Agent", "Grab/5.430.0 (Android)")
-            setRequestProperty("X-Grab-id-ServiceId", "PASSENGER")
-            setRequestProperty("Accept", "application/json")
-            connectTimeout = 10000
-            readTimeout = 15000
-        }
-        if (connection.responseCode !in 200..299) return emptyList()
-        val text = connection.inputStream.bufferedReader().use { it.readText() }
-        val root = JSONObject(text)
-        val txs = root.optJSONArray("transactions") ?: return emptyList()
-
-        return buildList {
-            for (i in 0 until txs.length()) {
-                val item = txs.optJSONObject(i) ?: continue
-                val txId = item.optString("txID").ifBlank { continue }
-                val group = item.optString("partnerGroupTxID")
-                val partnerId = item.optString("partnerID")
-                val title = item.optString("title", "GrabPay Payment")
-                val subtitle = item.optString("subtitle")
-                val amountRupiah = item.optLong("amount", 0L)
-                val amountMinor = amountRupiah * 100L
-                val tsSeconds = item.optLong("timestamp", 0L)
-                val occurredAt = if (tsSeconds > 0L) Instant.ofEpochSecond(tsSeconds) else Instant.now()
-                val payMethod = item.optString("payMethod", "GrabPay")
-
-                // If this is a ride already recorded in recent rides, skip duplicating the ride charge.
-                if (group.isNotBlank() && "grab:$group" in existingRideCodes && partnerId.equals("Transport", ignoreCase = true)) {
-                    continue
-                }
-
-                val isTip = partnerId.equals("Tipping", ignoreCase = true) || title.contains("Tip", ignoreCase = true)
-                val isRide = partnerId.equals("Transport", ignoreCase = true) || title.contains("Ride", ignoreCase = true)
-                val isFood = partnerId.equals("GrabFood", ignoreCase = true) || subtitle.contains("GrabFood", ignoreCase = true)
-
-                // For older rides not in the 7 recent rides list, try fetching their detailed receipt
-                var detailedRide: UnifiedTransaction? = null
-                if (isRide && group.isNotBlank() && "grab:$group" !in existingRideCodes) {
-                    detailedRide = runCatching { fetchRideDetail(token, group) }.getOrNull()
-                }
-
-                if (detailedRide != null) {
-                    add(detailedRide)
-                    continue
-                }
-
-                val desc = when {
-                    isTip -> "Grab: Tip${if (group.isNotBlank()) " ($group)" else ""}"
-                    isFood -> "GrabFood: $title"
-                    isRide -> "Grab: $title${if (group.isNotBlank()) " ($group)" else ""}"
-                    else -> "GrabPay: $title"
-                }
-
-                val rawPayload = JSONObject()
-                    .put("origin", "grab-wallet-api")
-                    .put("provider", Provider.GRAB.name)
-                    .put("orderNumber", if (group.isNotBlank()) group else txId)
-                    .put("serviceTier", if (isFood) "GrabFood" else if (isRide) "GrabRide" else "GrabPay")
-                    .put("paymentMethod", payMethod)
-                    .toString()
-
-                val txKey = if (isTip) "grab:tip:$txId" else "grab:$txId"
-                add(
-                    UnifiedTransaction(
-                        provider = Provider.GRAB,
-                        providerTransactionId = txKey,
-                        direction = Direction.DEBIT,
-                        money = Money(amountMinor, "IDR"),
-                        occurredAt = occurredAt,
-                        description = desc,
-                        rawPayload = rawPayload,
-                    )
-                )
+    private fun fetchGrabPayTransactions(token: String): List<UnifiedTransaction> {
+        val items = request(token, "https://p.grabtaxi.com/api/passenger/v2/grabpay/history/credit/?currency=IDR&pageSize=50&lastElementID=0").getJSONArray("transactions")
+        val rows = ImportRows()
+        for (i in 0 until items.length()) rows.readRow {
+            val item = items.getJSONObject(i)
+            val id = item.getString("txID")
+            val group = item.optString("partnerGroupTxID")
+            val title = item.optString("title").ifBlank { "GrabPay Payment" }
+            val partner = item.optString("partnerID")
+            val type = item.optString("direction").ifBlank { item.optString("paymentType") }
+            val direction = Direction.valueOf(type.uppercase(java.util.Locale.ROOT))
+            val rupiah = item.getLong("amount").also { require(it != Long.MIN_VALUE) }
+            val amount = Math.multiplyExact(kotlin.math.abs(rupiah), 100)
+            val time = item.getLong("timestamp").also { require(it > 0) }
+            val tip = partner.equals("Tipping", true) || title.contains("Tip", true)
+            val order = if (!tip && group.isNotBlank()) group else id
+            val payload = JSONObject().put("origin", "grab-wallet-api").put("orderNumber", order).put("item", item)
+                .put("paymentMethod", item.optString("payMethod")).put("serviceTier", partner)
+            // Optional route enrichment never changes the wallet payment's amount or timestamp.
+            if (partner.equals("Transport", true) && group.isNotBlank() && i < 3) {
+                try {
+                    val receipt = request(token, "https://p.grabtaxi.com/api/passenger/v3/rides/history/$group").getJSONObject("response")
+                    val route = receipt.optJSONArray("itinerary")
+                    fun location(index: Int) = route?.optJSONObject(index)?.optJSONObject("details")?.let { it.optString("keywords").ifBlank { it.optString("address") } }.orEmpty()
+                    payload.put("pickupLocation", location(0)).put("dropoffLocation", location((route?.length() ?: 1) - 1))
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { rows.issue("Optional ride receipt unavailable; wallet payment retained") }
             }
+            UnifiedTransaction(Provider.GRAB, if (tip) "grab:tip:$id" else "grab:$id", direction,
+                Money(amount), Instant.ofEpochSecond(time), "GrabPay: $title", payload.toString())
         }
-    }
-
-    private fun fetchRideDetail(token: String, bookingCode: String): UnifiedTransaction? {
-        val url = "https://p.grabtaxi.com/api/passenger/v3/rides/history/$bookingCode"
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            setRequestProperty("Authorization", token)
-            setRequestProperty("x-mts-ssid", token)
-            setRequestProperty("User-Agent", "Grab/5.430.0 (Android)")
-            setRequestProperty("X-Grab-id-ServiceId", "PASSENGER")
-            setRequestProperty("Accept", "application/json")
-            connectTimeout = 8000
-            readTimeout = 10000
-        }
-        if (connection.responseCode !in 200..299) return null
-        val text = connection.inputStream.bufferedReader().use { it.readText() }
-        val root = JSONObject(text).optJSONObject("response") ?: return null
-
-        val serviceInfo = root.optJSONObject("serviceTypeInfo")
-        val serviceName = serviceInfo?.optString("name")?.takeIf { it.isNotBlank() } ?: "GrabRide"
-
-        val totalFareInfo = root.optJSONObject("totalFareInfo")
-        val fareMinor = totalFareInfo?.optLong("amount", 0L) ?: 0L
-
-        val itinerary = root.optJSONArray("itinerary")
-        var pickup = ""
-        var dropoff = ""
-        var completedTime = 0L
-
-        if (itinerary != null && itinerary.length() > 0) {
-            val pObj = itinerary.optJSONObject(0)
-            val dObj = itinerary.optJSONObject(itinerary.length() - 1)
-            pickup = pObj?.optJSONObject("details")?.let {
-                it.optString("keywords").ifBlank { it.optString("address") }
-            }.orEmpty().trim()
-            dropoff = dObj?.optJSONObject("details")?.let {
-                it.optString("keywords").ifBlank { it.optString("address") }
-            }.orEmpty().trim()
-            completedTime = dObj?.optString("time")?.let {
-                runCatching { Instant.parse(it).toEpochMilli() }.getOrNull()
-            } ?: 0L
-        }
-
-        val occurredAt = if (completedTime > 0L) Instant.ofEpochMilli(completedTime) else Instant.now()
-        val desc = if (pickup.isNotBlank() && dropoff.isNotBlank()) {
-            "$serviceName: $pickup to $dropoff"
-        } else if (dropoff.isNotBlank()) {
-            "$serviceName to $dropoff"
-        } else {
-            serviceName
-        }
-
-        val rawPayload = JSONObject()
-            .put("origin", "grab-rides-detail-api")
-            .put("provider", Provider.GRAB.name)
-            .put("orderNumber", bookingCode)
-            .put("serviceTier", serviceName)
-            .put("pickupLocation", pickup)
-            .put("dropoffLocation", dropoff)
-            .put("paymentMethod", totalFareInfo?.optString("name", "GrabPay") ?: "GrabPay")
-            .toString()
-
-        return UnifiedTransaction(
-            provider = Provider.GRAB,
-            providerTransactionId = "grab:$bookingCode",
-            direction = Direction.DEBIT,
-            money = Money(fareMinor, "IDR"),
-            occurredAt = occurredAt,
-            description = desc,
-            rawPayload = rawPayload,
-        )
+        return rows.finish()
     }
 
     private fun fetchFoodOrders(token: String): List<UnifiedTransaction> {
-        val url = "https://p.grabtaxi.com/api/passenger/v3/grabfood/orders/history?limit=20&offSet=0&latlng=-6.2088,106.8456&sortBy=CreatedAt&excludeOngoing=1&disablePagination=false"
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            setRequestProperty("Authorization", token)
-            setRequestProperty("x-mts-ssid", token)
-            setRequestProperty("User-Agent", "Grab/5.430.0 (Android)")
-            setRequestProperty("X-Grab-id-ServiceId", "PASSENGER")
-            setRequestProperty("Accept", "application/json")
-            connectTimeout = 8000
-            readTimeout = 10000
+        val orders = request(token, "https://p.grabtaxi.com/api/passenger/v3/grabfood/orders/history?limit=20&offSet=0&latlng=-6.2088,106.8456&sortBy=CreatedAt&excludeOngoing=1&disablePagination=false").getJSONArray("orders")
+        val rows = ImportRows()
+        for (i in 0 until orders.length()) rows.readRow {
+            val order = orders.getJSONObject(i)
+            val id = order.getString("orderID")
+            val amount = order.getLong("totalMinor")
+            val time = order.getLong("orderTime").also { require(it > 0) }
+            val merchant = order.optString("merchantName").ifBlank { "GrabFood" }
+            val payload = JSONObject().put("origin", "grab-food-api").put("orderNumber", id)
+                .put("restaurantName", merchant).put("paymentMethod", "GrabPay")
+            UnifiedTransaction(Provider.GRAB, "grab:$id", Direction.DEBIT, Money(amount), Instant.ofEpochMilli(time), "GrabFood: $merchant", payload.toString())
         }
-        if (connection.responseCode !in 200..299) return emptyList()
-        val text = connection.inputStream.bufferedReader().use { it.readText() }
-        val root = JSONObject(text)
-        val orders = root.optJSONArray("orders") ?: return emptyList()
-
-        return buildList {
-            for (i in 0 until orders.length()) {
-                val order = orders.optJSONObject(i) ?: continue
-                val orderId = order.optString("orderID").ifBlank { continue }
-                val merchantName = order.optString("merchantName", "GrabFood")
-                val totalMinor = order.optLong("totalMinor", 0L)
-                val orderTime = order.optLong("orderTime", 0L)
-                val occurredAt = if (orderTime > 0L) Instant.ofEpochMilli(orderTime) else Instant.now()
-
-                val rawPayload = JSONObject()
-                    .put("origin", "grab-food-api")
-                    .put("provider", Provider.GRAB.name)
-                    .put("orderNumber", orderId)
-                    .put("restaurant", merchantName)
-                    .put("paymentMethod", "GrabPay")
-                    .toString()
-
-                add(
-                    UnifiedTransaction(
-                        provider = Provider.GRAB,
-                        providerTransactionId = "grab:$orderId",
-                        direction = Direction.DEBIT,
-                        money = Money(totalMinor, "IDR"),
-                        occurredAt = occurredAt,
-                        description = "GrabFood: $merchantName",
-                        rawPayload = rawPayload,
-                    )
-                )
-            }
-        }
+        return rows.finish()
     }
 
     companion object {
