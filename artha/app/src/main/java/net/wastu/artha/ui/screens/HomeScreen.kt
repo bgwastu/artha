@@ -21,6 +21,10 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -118,6 +122,9 @@ fun HomeScreen(
     val selected = latestTransactions.firstOrNull { it.key == selectedKey } ?: selectedFallback?.takeIf { it.key == selectedKey }
     val closeDetails = { selectedKey = null; selectedFallback = null }
     val detailsState = selected?.let { rememberTransactionDetailsState(it.key) }
+    val largeNavigationText = LocalDensity.current.fontScale > 1.3f
+    fun navigationLabel(item: Destination) =
+        if (largeNavigationText && item == Destination.TRANSACTIONS) "Payments" else item.label
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val showDetailsPane = maxWidth >= 1080.dp && maxHeight >= 480.dp && destination == Destination.TRANSACTIONS && !showSearch && selected != null
         val showRail = maxWidth >= 600.dp && maxHeight >= 480.dp
@@ -132,7 +139,7 @@ fun HomeScreen(
                             }
                         }
                     },
-                    title = { Text(destination.label) },
+                    title = { Text(destination.label, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     actions = {
                         if (destination == Destination.TRANSACTIONS) {
                             IconButton(onClick = onRefresh, enabled = !refreshing) {
@@ -177,7 +184,7 @@ fun HomeScreen(
                                 selected = destination == item,
                                 onClick = { destination = item },
                                 icon = { Icon(item.icon, contentDescription = null) },
-                                label = { Text(item.label) },
+                                label = { Text(navigationLabel(item), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             )
                         }
                     }
@@ -186,13 +193,14 @@ fun HomeScreen(
         ) { padding ->
             Row(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
                 if (showRail) {
-                    NavigationRail {
+                    NavigationRail(modifier = Modifier.width(if (largeNavigationText) 128.dp else 80.dp)) {
                         Destination.entries.forEach { item ->
                             NavigationRailItem(
+                                modifier = Modifier.fillMaxWidth(),
                                 selected = destination == item,
                                 onClick = { destination = item },
                                 icon = { Icon(item.icon, contentDescription = null) },
-                                label = { Text(item.label) },
+                                label = { Text(navigationLabel(item), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             )
                         }
                     }
