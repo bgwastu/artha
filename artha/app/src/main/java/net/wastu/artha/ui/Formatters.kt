@@ -13,7 +13,7 @@ import java.util.Locale
 private val IndonesianLocale = Locale.forLanguageTag("id-ID")
 
 private val TransactionDateFormatter: DateTimeFormatter = DateTimeFormatter
-    .ofPattern("d MMM yyyy, HH:mm", IndonesianLocale)
+    .ofPattern("d MMM yyyy, HH:mm", Locale.US)
     .withZone(ZoneId.systemDefault())
 
 private val CachedCurrencyFormat = ThreadLocal.withInitial {
@@ -49,7 +49,7 @@ fun formatMinorAmount(amountMinor: BigInteger, currencyCode: String = "IDR"): St
 fun formatDate(instant: Instant): String = TransactionDateFormatter.format(instant)
 
 private val TransactionTimeFormatter: DateTimeFormatter = DateTimeFormatter
-    .ofPattern("HH:mm", IndonesianLocale)
+    .ofPattern("HH:mm", Locale.US)
     .withZone(ZoneId.systemDefault())
 
 fun formatTime(instant: Instant): String = TransactionTimeFormatter.format(instant)

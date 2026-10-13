@@ -405,9 +405,9 @@ private fun DateGroupHeader(date: LocalDate) {
     val zone = ZoneId.systemDefault()
     val today = LocalDate.now(zone)
     val dayLabel = when (date) {
-        today -> "Hari Ini"
-        today.minusDays(1) -> "Kemarin"
-        else -> date.format(DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", Locale.forLanguageTag("id-ID")))
+        today -> "Today"
+        today.minusDays(1) -> "Yesterday"
+        else -> date.format(DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", Locale.US))
     }
     Surface(
         color = MaterialTheme.colorScheme.surface,

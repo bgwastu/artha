@@ -160,9 +160,24 @@ internal fun buildTransactionItemView(
     val views = RemoteViews(context.packageName, R.layout.widget_transaction_item)
 
     views.setImageViewResource(R.id.widget_item_icon, tx.provider.iconRes)
-    views.setTextViewText(R.id.widget_item_description, tx.description)
+    val title = if (tx.isQris && !tx.description.contains("QRIS", ignoreCase = true)) {
+        "[QRIS] ${tx.description}"
+    } else {
+        tx.description
+    }
+    views.setTextViewText(R.id.widget_item_description, title)
 
-    val dateStr = tx.occurredAt.atZone(ZoneId.systemDefault()).format(dateFormatter)
+    val zone = ZoneId.systemDefault()
+    val localDate = tx.occurredAt.atZone(zone).toLocalDate()
+    val today = java.time.LocalDate.now(zone)
+    val timeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
+    val timeStr = tx.occurredAt.atZone(zone).format(timeFormatter)
+    val dayPrefix = when (localDate) {
+        today -> "Today"
+        today.minusDays(1) -> "Yesterday"
+        else -> tx.occurredAt.atZone(zone).format(dateFormatter)
+    }
+    val dateStr = "$dayPrefix, $timeStr"
     val isCredit = tx.direction == Direction.CREDIT
     val subtitleParts = mutableListOf(dateStr)
     if (!isCredit && !tx.category.isNullOrBlank()) {

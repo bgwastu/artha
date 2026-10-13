@@ -10,6 +10,28 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 abstract class LedgerDatabase : RoomDatabase() {
     abstract fun transactions(): TransactionDao
 
+    fun resetLedger() {
+        val db = openHelper.writableDatabase
+        db.beginTransaction()
+        try {
+            db.execSQL("DROP TRIGGER IF EXISTS prevent_transaction_delete")
+            db.execSQL("DROP TRIGGER IF EXISTS prevent_transaction_update")
+            db.execSQL("DELETE FROM unified_transactions")
+            db.execSQL("""
+                CREATE TRIGGER prevent_transaction_update BEFORE UPDATE ON unified_transactions
+                BEGIN SELECT RAISE(ABORT, 'Ledger is append-only'); END
+            """.trimIndent())
+            db.execSQL("""
+                CREATE TRIGGER prevent_transaction_delete BEFORE DELETE ON unified_transactions
+                BEGIN SELECT RAISE(ABORT, 'Ledger is append-only'); END
+            """.trimIndent())
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        invalidationTracker.refreshVersionsSync()
+    }
+
     companion object {
         fun create(context: Context): LedgerDatabase = Room.databaseBuilder(
             context.applicationContext,

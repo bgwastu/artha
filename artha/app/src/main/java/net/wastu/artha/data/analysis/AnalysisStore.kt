@@ -332,6 +332,17 @@ class AnalysisStore(context: Context) {
     }
 
     @Synchronized
+    fun clearAllData() {
+        prefs.edit { clear() }
+        val seeded = JSONArray(INITIAL_DEFAULT_CATEGORIES).toString()
+        prefs.edit { putString("custom_categories", seeded) }
+        _snapshot.value = AnalysisSnapshot(
+            customCategories = INITIAL_DEFAULT_CATEGORIES,
+        )
+        runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
+    }
+
+    @Synchronized
     fun applyMergedSnapshot(merged: AnalysisSnapshot) {
         prefs.edit {
             putString("user_notes", JSONObject(merged.userNotes as Map<*, *>).toString())

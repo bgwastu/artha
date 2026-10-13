@@ -83,6 +83,7 @@ class ArthaViewModel(
     val analysisStore: AnalysisStore? = null,
     val driveSyncManager: net.wastu.artha.data.sync.DriveSyncManager? = null,
     private val computationDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default,
+    private val onResetAllData: (() -> Unit)? = null,
 ) : ViewModel() {
     private val _rootGate = MutableStateFlow(RootGateState.LOCKED)
     val rootGate = _rootGate.asStateFlow()
@@ -120,6 +121,19 @@ class ArthaViewModel(
 
     fun setProviderEnabled(provider: Provider, enabled: Boolean) {
         if (_rootGate.value == RootGateState.GRANTED) preferences?.setEnabled(provider, enabled)
+    }
+
+    fun resetAllData() {
+        viewModelScope.launch(Dispatchers.IO) {
+            onResetAllData?.invoke()
+            _selectedMonth.value = YearMonth.now(clock)
+            _dateRangeFilter.value = null
+            _providerCounts.value = emptyMap()
+            _reconciledCache.value = emptyList()
+            _monthAnalysis.value = BudgetAnalyzer.analyzeMonth(YearMonth.now(clock), emptyList(), null)
+            _ingestionStatus.value = emptyMap()
+            _ledgerState.value = LedgerState.Ready(emptyList())
+        }
     }
 
     val providerDiagnostics = preferences?.diagnostics ?: MutableStateFlow(emptyMap<Provider, net.wastu.artha.data.providers.ProviderDiagnostic>()).asStateFlow()

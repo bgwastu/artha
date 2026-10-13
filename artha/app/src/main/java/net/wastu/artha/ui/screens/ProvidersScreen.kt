@@ -24,6 +24,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -81,6 +84,7 @@ fun ProvidersScreen(
     var showAiConfigDialog by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showAccountDialog by remember { mutableStateOf(false) }
+    var showResetConfirmationDialog by remember { mutableStateOf(false) }
 
     val snapshot by viewModel?.analysisSnapshot?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val diagnostics by viewModel?.providerDiagnostics?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap()) }
@@ -241,6 +245,72 @@ fun ProvidersScreen(
                 }
             }
         }
+
+        // Section: Danger Zone / Reset All Data
+        if (viewModel != null) {
+            item(key = "section_reset_header") {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "DATA MANAGEMENT",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            }
+
+            item(key = "reset_all_data_card") {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .clickable { showResetConfirmationDialog = true },
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            modifier = Modifier.size(44.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.DeleteOutline,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.size(24.dp),
+                                )
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Reset All Data",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            Text(
+                                "Wipe all local transactions, notes, categories, and settings",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            contentDescription = "Reset",
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
+        }
     }
 
     if (showAiConfigDialog && snapshot != null && viewModel != null) {
@@ -271,6 +341,17 @@ fun ProvidersScreen(
             onSave = { email ->
                 viewModel.setDriveAccountEmail(email)
                 showAccountDialog = false
+            },
+        )
+    }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    if (showResetConfirmationDialog && viewModel != null) {
+        ResetConfirmationDialog(
+            onDismiss = { showResetConfirmationDialog = false },
+            onConfirmReset = {
+                showResetConfirmationDialog = false
+                viewModel.resetAllData()
+                android.widget.Toast.makeText(context, "All data has been reset", android.widget.Toast.LENGTH_SHORT).show()
             },
         )
     }
@@ -896,6 +977,78 @@ fun AiConfigDialog(
                 }
             ) {
                 Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun ResetConfirmationDialog(
+    onDismiss: () -> Unit,
+    onConfirmReset: () -> Unit,
+) {
+    var acknowledged by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                Icons.Default.DeleteOutline,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(28.dp),
+            )
+        },
+        title = {
+            Text(
+                "Reset All Data?",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(
+                    "This action is permanent and cannot be undone. All imported ledger transactions, custom categories, user notes, AI analysis caches, and sync credentials will be completely erased.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { acknowledged = !acknowledged }
+                        .padding(vertical = 4.dp),
+                ) {
+                    Checkbox(
+                        checked = acknowledged,
+                        onCheckedChange = { acknowledged = it },
+                    )
+                    Text(
+                        "I understand that all local data will be permanently deleted",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            FilledTonalButton(
+                onClick = onConfirmReset,
+                enabled = acknowledged,
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ),
+            ) {
+                Text("Permanently Reset", fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
