@@ -15,20 +15,34 @@ object LedgerReconciler {
     private data class Evidence(val tx: UnifiedTransaction, val payload: JSONObject) {
         val code = payload.optString("code")
         val reference = payload.optString("originalChargeId").ifBlank { payload.optString("paymentReference") }
-        val order = payload.optString("orderNumber").ifBlank { payload.optString("order_id") }
+        val order = payload.optString("orderNumber").ifBlank { payload.optString("orderId") }.ifBlank { payload.optString("order_id") }
         val origin = payload.optString("origin")
         val merchant = payload.optString("counterpart").ifBlank { tx.description }.trim().lowercase(Locale.ROOT)
         val internal = code in setOf("SAD01", "SAD02", "SAC01", "SAC02", "TDD02", "TDC02", "TDC03", "TDC08", "TDC12") ||
             payload.optJSONObject("fields")?.optString("f22") == "INTERNAL"
-        val refund = code.endsWith("-R", true) || code == "GPC02" ||
+        val refund = tx.isReversal || payload.optBoolean("verifiedRefund") || payload.optString("serviceTier").endsWith("REFUND") || code.endsWith("-R", true) || code == "GPC02" ||
             tx.description.contains("refund", true) || tx.description.contains("reversal", true)
-        private val walletDirection = payload.optJSONObject("item")?.let {
-            it.optString("direction").ifBlank { it.optString("paymentType") }.uppercase(Locale.ROOT)
-        }
+        private val legacyGrabCharge = payload.optJSONObject("item")?.let { item ->
+            item.optString("status") == "COMPLETED" && item.optString("currency") == "IDR" &&
+                ((item.optString("txType") == "BOOKING_CHARGE" && item.optString("coreTxType") == "BookingCharge") ||
+                    (item.optString("txType") == "TIPPING_CHARGE" && item.optString("coreTxType") == "TippingCharge")) &&
+                runCatching { Math.multiplyExact(item.getLong("amount"), 100L) == tx.money.amountMinor && java.time.Instant.ofEpochSecond(item.getLong("timestamp")) == tx.occurredAt }.getOrDefault(false)
+        } == true
         // Older Grab imports guessed DEBIT. Keep those rows, but require source direction
         // evidence before treating an old wallet row as a confirmed payment.
-        val confirmed = tx.provider == Provider.JAGO || origin == "gopay-order-history" ||
-            origin == "grab-wallet-api" && walletDirection == tx.direction.name
+        private val settled = payload.optString("paymentStatus") == "COMPLETED" &&
+            payload.optString("paymentDirection") == tx.direction.name && payload.optString("paymentCurrency") == tx.money.currencyCode &&
+            payload.optLong("paymentAmountMinor", -1L) == tx.money.amountMinor &&
+            runCatching { java.time.Instant.parse(payload.getString("paymentTimestamp")) == tx.occurredAt }.getOrDefault(false)
+        private val legacyGoPay = payload.optJSONObject("item")?.let { item ->
+            item.optString("status") == "COMPLETED" && item.optString("payment_type") == tx.direction.name &&
+                item.optJSONObject("amount")?.optString("currency") == tx.money.currencyCode &&
+                runCatching { item.getJSONObject("amount").get("value").toString().toBigDecimal().movePointRight(2).longValueExact() == tx.money.amountMinor && java.time.OffsetDateTime.parse(item.getString("order_timestamp")).toInstant() == tx.occurredAt }.getOrDefault(false)
+        } == true
+        val confirmed = tx.provider == Provider.JAGO || tx.provider == Provider.GOJEK && origin == "gopay-order-history" &&
+            (settled && payload.optString("paymentEvidence") == "settled-wallet-history" || legacyGoPay) ||
+            tx.provider == Provider.GRAB && origin == "grab-wallet-api" &&
+            (settled && payload.optString("paymentEvidence") == "settled-charge-history" || legacyGrabCharge && tx.direction == Direction.DEBIT)
         val funding = payload.optBoolean("isWalletFunding") || payload.optBoolean("isPocketTransfer") || internal ||
             (tx.provider == Provider.JAGO && code in setOf("OTD10", "TFD70") &&
                 listOf("gopay", "ovo", "shopeepay", "top up", "topup").any { it in merchant }) ||
@@ -80,8 +94,7 @@ object LedgerReconciler {
             val e = evidence(t)
             t.copy(isConfirmed = e.confirmed, rawPayload = if (e.funding) e.payload.put("isWalletFunding", true).toString() else t.rawPayload)
         }
-        val reversed = reconcilePartialRefunds(reconcileReversals(reconcilePocketTransfers(initial)))
-        val deduped = reconcileOrderPayments(reversed)
+        val deduped = reconcileOrderPayments(reconcilePocketTransfers(initial))
         val bank = deduped.filter { it.provider == Provider.JAGO }
         val bankIdentities = bank.map { it.providerTransactionId.substringAfter(":") to it.money }.toSet()
         val orders = deduped.filter { it.provider != Provider.JAGO }.filterNot { o ->
@@ -97,12 +110,15 @@ object LedgerReconciler {
         val matched = mutableSetOf<String>()
         val enriched = orders.map { o ->
             val b = choices[o.key]?.singleOrNull()?.takeIf { reverseCount[it.key] == 1 }
-            if (b == null) o else {
+            if (b == null) {
+                // Several plausible bank partners cannot count again as another confirmed payment.
+                if (choices[o.key].orEmpty().isNotEmpty() && o.isConfirmed) o.copy(isConfirmed = false) else o
+            } else {
                 matched += b.key
                 mergeGroupedTransaction(o, b, Provider.JAGO)
             }
         }
-        val result = enriched + bank.filter { it.key !in matched }
+        val result = reconcileReversals(reconcilePartialRefunds(enriched + bank.filter { it.key !in matched }))
         return result.sortedWith(compareByDescending<UnifiedTransaction> { it.occurredAt }.thenBy { it.key })
     }
 
@@ -111,7 +127,8 @@ object LedgerReconciler {
 
     private fun reconcileOrderPayments(transactions: List<UnifiedTransaction>): List<UnifiedTransaction> {
         val facts = transactions.map(::evidence)
-        val byOrder = facts.filter { it.order.isNotBlank() }.groupBy { Triple(it.tx.provider, it.order, it.tx.money.currencyCode) }
+        val byOrder = facts.filter { it.order.isNotBlank() }.groupBy { Triple(it.tx.provider,
+            it.payload.optString("bookingNumber").ifBlank { it.order }, it.tx.money.currencyCode) }
         val consumed = mutableSetOf<String>()
         val combined = mutableListOf<UnifiedTransaction>()
         for (group in byOrder.values) {
@@ -149,9 +166,9 @@ object LedgerReconciler {
         val debits = facts.filter { it.tx.direction == Direction.DEBIT && !it.internal }
         val paired = pair(refunds, debits, windowSeconds = 14 * 86400L, candidate = { c, d ->
             val age = Duration.between(d.tx.occurredAt, c.tx.occurredAt)
-            age >= Duration.ZERO && age <= Duration.ofDays(14) && compatibleAccount(c.tx, d.tx) &&
-                (c.reference == d.tx.providerTransactionId || c.reference == d.tx.providerTransactionId.substringAfter(":") ||
-                    (c.code.endsWith("-R", true) && c.code.removeSuffix("-R") == d.code && c.merchant == d.merchant))
+            c.tx.isConfirmed && c.reference.isBlank() && !d.tx.isReversal &&
+                age >= Duration.ZERO && age <= Duration.ofDays(14) && compatibleAccount(c.tx, d.tx) &&
+                c.code.endsWith("-R", true) && c.code.removeSuffix("-R") == d.code && c.merchant == d.merchant
         }, merge = { c, d ->
             val payload = evidence(d).payload.put("isReversal", true).put("originalChargeId", d.providerTransactionId)
                 .put("groupedTransactions", JSONArray().put(buildGroupEntry(d, "Original Charge")).put(buildGroupEntry(c, "Refund")))
@@ -165,12 +182,27 @@ object LedgerReconciler {
         val facts = transactions.map(::evidence)
         val debits = facts.filter { it.tx.direction == Direction.DEBIT && !it.tx.isReversal }.associateBy { it.tx.key }
         val refunds = facts.filter { it.tx.direction == Direction.CREDIT && it.refund && it.reference.isNotBlank() }
+        // Group aliases retain original provider identities after bank/order enrichment.
+        val references = mutableMapOf<Triple<Provider, String, String>, MutableList<Evidence>>()
+        fun register(provider: Provider, id: String, debit: Evidence) {
+            for (alias in setOf(id, id.substringAfter(":"))) {
+                references.getOrPut(Triple(provider, alias, debit.tx.money.currencyCode)) { mutableListOf() }.add(debit)
+            }
+        }
+        for (debit in debits.values) {
+            register(debit.tx.provider, debit.tx.providerTransactionId, debit)
+            val groups = debit.payload.optJSONArray("groupedTransactions")
+            for (i in 0 until (groups?.length() ?: 0)) {
+                val group = groups?.optJSONObject(i) ?: continue
+                val provider = runCatching { Provider.valueOf(group.getString("provider")) }.getOrNull() ?: continue
+                group.optString("providerTransactionId").takeIf(String::isNotBlank)?.let { register(provider, it, debit) }
+            }
+        }
         val grouped = refunds.mapNotNull { credit ->
-            val debit = debits.values.singleOrNull { d -> d.tx.provider == credit.tx.provider &&
-                d.tx.money.currencyCode == credit.tx.money.currencyCode && compatibleAccount(d.tx, credit.tx) &&
-                (credit.reference == d.tx.providerTransactionId || credit.reference == d.tx.providerTransactionId.substringAfter(":")) &&
-                Duration.between(d.tx.occurredAt, credit.tx.occurredAt).let { it >= Duration.ZERO && it <= Duration.ofDays(14) }
-            } ?: return@mapNotNull null
+            if (!credit.tx.isConfirmed && !credit.payload.optBoolean("verifiedRefund")) return@mapNotNull null
+            val debit = references[Triple(credit.tx.provider, credit.reference, credit.tx.money.currencyCode)]
+                .orEmpty().distinctBy { it.tx.key }.singleOrNull { d -> compatibleAccount(d.tx, credit.tx) && credit.tx.occurredAt >= d.tx.occurredAt }
+                ?: return@mapNotNull null
             debit.tx.key to credit.tx
         }.groupBy({ it.first }, { it.second })
         val used = mutableSetOf<String>()
@@ -179,8 +211,8 @@ object LedgerReconciler {
             val refunded = credits.fold(java.math.BigInteger.ZERO) { sum, credit -> sum + java.math.BigInteger.valueOf(credit.money.amountMinor) }
             if (credits.isEmpty() || refunded > java.math.BigInteger.valueOf(debit.money.amountMinor)) debit else {
                 used += credits.map { it.key }
-                val payload = evidence(debit).payload.put("refundedAmountMinor", refunded.toLong())
-                val groups = JSONArray().put(buildGroupEntry(debit, "Original Charge"))
+                val payload = evidence(debit).payload.put("grossPaidAmountMinor", debit.money.amountMinor).put("refundedAmountMinor", refunded.toLong())
+                val groups = payload.optJSONArray("groupedTransactions") ?: JSONArray().put(buildGroupEntry(debit, "Original Charge"))
                 credits.forEach { groups.put(buildGroupEntry(it, "Partial Refund")) }
                 payload.put("groupedTransactions", groups)
                 val remaining = debit.money.amountMinor - refunded.toLong()

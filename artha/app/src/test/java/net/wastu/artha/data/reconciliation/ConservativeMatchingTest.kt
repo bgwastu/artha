@@ -49,7 +49,7 @@ class ConservativeMatchingTest {
 
     @Test fun rideAndPaymentUseOneReliableOrderIdentityAndSettledAmount() {
         val ride = tx(Provider.GOJEK, "gojek:o", "GoRide", amount = 4_000_000, payload = """{"origin":"gojek-orders-local","orderNumber":"o"}""")
-        val payment = tx(Provider.GOJEK, "gopay:o", "Payment", amount = 4_200_000, payload = """{"origin":"gopay-order-history","orderNumber":"o"}""")
+        val payment = tx(Provider.GOJEK, "gopay:o", "Payment", amount = 4_200_000, payload = """{"origin":"gopay-order-history","orderNumber":"o","paymentEvidence":"settled-wallet-history","paymentStatus":"COMPLETED","paymentDirection":"DEBIT","paymentAmountMinor":4200000,"paymentCurrency":"IDR","paymentTimestamp":"2026-10-02T05:00:00Z"}""")
         val row = LedgerReconciler.reconcileLedger(listOf(ride, payment)).single()
         assertEquals(payment.key, row.key)
         assertEquals(payment.money, row.money)
@@ -80,7 +80,7 @@ class ConservativeMatchingTest {
         assertEquals(0L, BudgetAnalyzer.analyzeMonth(YearMonth.of(2026, 10), rows).totalPersonalSpendingMinor)
         assertEquals(2, rows.size)
         assertEquals(Direction.DEBIT, guessedDebit.direction) // Raw facts remain immutable.
-        val verified = missing.copy(rawPayload = """{"origin":"grab-wallet-api","item":{"direction":"DEBIT"}}""")
+        val verified = missing.copy(rawPayload = """{"origin":"grab-wallet-api","item":{"status":"COMPLETED","currency":"IDR","txType":"BOOKING_CHARGE","coreTxType":"BookingCharge","amount":75000,"timestamp":1790917200}}""")
         assertTrue(LedgerReconciler.reconcileLedger(listOf(verified)).single().isConfirmed)
     }
 }
