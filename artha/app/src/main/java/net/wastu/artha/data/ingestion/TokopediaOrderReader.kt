@@ -69,6 +69,7 @@ internal class TokopediaOrderReader(private val files: RootFileReader) {
             connection.requestMethod = "POST"
             connection.connectTimeout = 10_000
             connection.readTimeout = 10_000
+            connection.instanceFollowRedirects = false
             connection.doOutput = true
             connection.setRequestProperty("Authorization", "Bearer $token")
             connection.setRequestProperty("Accounts-Authorization", "Bearer $token")
@@ -79,7 +80,9 @@ internal class TokopediaOrderReader(private val files: RootFileReader) {
             connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             requireHttpSuccess(connection.responseCode, "Tokopedia")
             val response = connection.inputStream.bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
-            val list = response.getJSONObject("data").getJSONArray("order_list")
+            val list = response.optJSONObject("data")?.optJSONArray("order_list")
+                ?: throw ProviderReadException(net.wastu.artha.data.providers.AccountStatus.ERROR,
+                    "Tokopedia's experimental response is unsupported. Saved history is kept.")
             val rows = ImportRows()
             for (i in 0 until list.length()) rows.readRow {
                 ProviderRowParser.tokopedia(list.getJSONObject(i))

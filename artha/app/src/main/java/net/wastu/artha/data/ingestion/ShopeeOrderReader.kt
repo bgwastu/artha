@@ -38,7 +38,7 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
                     check(response.optInt("error", 0) == 0) { "Shopee rejected the order history request" }
                     response.getJSONObject("data").getJSONArray("details_list")
                 } catch (cancelled: CancellationException) { throw cancelled }
-                catch (e: Exception) { rows.issue(e.message ?: "Marketplace page unavailable"); break }
+                catch (e: Exception) { rows.issue(e); break }
                 for (index in 0 until details.length()) rows.readRow { parseOrder(details.getJSONObject(index), cookies, fetchDetail = false) }
                 if (details.length() < 20) break
                 if (offset == 180) rows.issue("Marketplace history capped at 200 recent orders per list")
@@ -56,7 +56,7 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
         }
         for (result in foodResults) {
             val orders = result.getOrNull()
-            if (orders == null) { rows.issue(result.exceptionOrNull()?.message ?: "Food history unavailable"); continue }
+            if (orders == null) { rows.issue(result.exceptionOrNull() as? Exception ?: Exception("Food history unavailable")); continue }
             for (index in 0 until orders.length()) {
                 val order = orders.optJSONObject(index) ?: continue
                 if (order.optInt("status") >= 900 || order.optLong("cancel_time") > 0) continue
@@ -104,6 +104,7 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
             connection.doOutput = true
             connection.connectTimeout = 8_000
             connection.readTimeout = 8_000
+            connection.instanceFollowRedirects = false
             connection.setRequestProperty("Cookie", cookies)
             connection.setRequestProperty("User-Agent", "Shopee Android Beeshop locale/id version=38336 appver=38336")
             connection.setRequestProperty("X-Shopee-Client-Timezone", "Asia/Jakarta")

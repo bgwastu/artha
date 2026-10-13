@@ -43,7 +43,7 @@ internal class GrabOrderReader(
             try { rows.transactions += read() }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (partial: PartialImportException) { rows.transactions += partial.transactions; rows.issue(partial.message.orEmpty()) }
-            catch (e: Exception) { rows.issue(e.message ?: "Grab endpoint unavailable") }
+            catch (e: Exception) { rows.issue(e) }
         }
         rows.finish().sortedByDescending { it.occurredAt }
     }
@@ -66,6 +66,7 @@ internal class GrabOrderReader(
     private fun request(token: String, url: String): JSONObject {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"; connectTimeout = 10_000; readTimeout = 15_000
+            instanceFollowRedirects = false
             setRequestProperty("Authorization", token); setRequestProperty("x-mts-ssid", token)
             setRequestProperty("User-Agent", "Grab/5.430.0 (Android)")
             setRequestProperty("X-Grab-id-ServiceId", "PASSENGER"); setRequestProperty("Accept", "application/json")

@@ -40,6 +40,20 @@ class ImportValidationTest {
         assertEquals(1, error.transactions.size)
     }
 
+    @Test fun expiredLoginSurvivesEndpointErrorCollection() {
+        val rows = ImportRows()
+        rows.issue(ProviderReadException(net.wastu.artha.data.providers.AccountStatus.NEEDS_LOGIN, "Open the provider app to log in again."))
+        assertEquals(net.wastu.artha.data.providers.AccountStatus.NEEDS_LOGIN,
+            assertThrows(ProviderReadException::class.java) { rows.finish() }.status)
+    }
+
+    @Test fun validRowsRemainImportableWhenAnotherEndpointNeedsLogin() {
+        val rows = ImportRows()
+        rows.readRow { ProviderRowParser.goPay(payment()) }
+        rows.issue(ProviderReadException(net.wastu.artha.data.providers.AccountStatus.NEEDS_LOGIN, "Login expired"))
+        assertEquals(1, assertThrows(PartialImportException::class.java) { rows.finish() }.transactions.size)
+    }
+
     @Test fun coordinatorAppendsPartialValidHistoryWithoutReportingCompleteSuccess() = runTest {
         var saved = emptyList<UnifiedTransaction>()
         val ledger = object : LedgerRepository {

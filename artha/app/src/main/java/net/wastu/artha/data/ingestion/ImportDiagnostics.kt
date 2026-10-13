@@ -11,7 +11,12 @@ class PartialImportException(val transactions: List<UnifiedTransaction>, message
 internal class ImportRows {
     val transactions = mutableListOf<UnifiedTransaction>()
     private val issues = mutableListOf<String>()
+    private var providerFailure: ProviderReadException? = null
     fun issue(message: String) { issues += message }
+    fun issue(error: Exception) {
+        if (error is ProviderReadException && (providerFailure == null || error.status == AccountStatus.NEEDS_LOGIN)) providerFailure = error
+        issue(error.message ?: "Provider request unavailable")
+    }
     inline fun readRow(block: () -> UnifiedTransaction?) {
         try {
             val row = block()
@@ -20,6 +25,7 @@ internal class ImportRows {
         catch (_: Exception) { issue("Unrecognized transaction row") }
     }
     fun finish(): List<UnifiedTransaction> {
+        if (transactions.isEmpty()) providerFailure?.let { throw it }
         if (issues.isNotEmpty()) throw PartialImportException(transactions.distinctBy { it.key }, "Incomplete import: ${issues.size} issues. ${issues.first()}")
         return transactions.distinctBy { it.key }
     }
