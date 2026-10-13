@@ -1,44 +1,29 @@
 package net.wastu.artha.ui.screens
 
 import android.accounts.AccountManager
-import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudSync
-import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.SettingsSuggest
-import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -50,9 +35,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -65,12 +50,27 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.data.analysis.AiConfig
+import net.wastu.artha.data.analysis.AiAnalysisService
 import net.wastu.artha.data.providers.AccountStatus
 import net.wastu.artha.data.providers.ProviderDiagnostic
 import net.wastu.artha.data.sync.CloudSyncStatus
 import net.wastu.artha.data.sync.DriveSyncState
 import net.wastu.artha.ui.ArthaViewModel
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.semantics.Role
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProvidersScreen(
     enabled: Set<Provider> = Provider.entries.toSet(),
@@ -79,467 +79,277 @@ fun ProvidersScreen(
     onEnabled: (Provider, Boolean) -> Unit = { _, _ -> },
     viewModel: ArthaViewModel? = null,
 ) {
-    var showAiConfigDialog by remember { mutableStateOf(false) }
-    var restoringBackup by remember { mutableStateOf(false) }
+    var selectedProvider by rememberSaveable { mutableStateOf<Provider?>(null) }
+    var showBackup by rememberSaveable { mutableStateOf(false) }
+    var showAiConfig by rememberSaveable { mutableStateOf(false) }
+    var showCategories by rememberSaveable { mutableStateOf(false) }
+    var showContext by rememberSaveable { mutableStateOf(false) }
     var showRestoreConfirmation by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showAccountDialog by remember { mutableStateOf(false) }
+    var restoringBackup by remember { mutableStateOf(false) }
+    var savingAi by remember { mutableStateOf(false) }
+    var aiError by remember { mutableStateOf<String?>(null) }
 
-    val settingsError by viewModel?.settingsError?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val snapshot by viewModel?.analysisSnapshot?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val importEnabled by viewModel?.importEnabled?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(Provider.entries.toSet()) }
     val diagnostics by viewModel?.providerDiagnostics?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap()) }
-    val currentlySyncing by viewModel?.syncingProvider?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(syncingProvider) }
-    val driveSyncState by viewModel?.driveSyncState?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(DriveSyncState()) }
+    val importing by viewModel?.syncingProvider?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(syncingProvider) }
+    val backup by viewModel?.driveSyncState?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(DriveSyncState()) }
 
-    val accountPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val email = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
-        if (!email.isNullOrBlank()) {
-            viewModel?.setDriveAccountEmail(email)
+    val accountPicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)?.takeIf { it.isNotBlank() }?.let {
+            viewModel?.setDriveAccountEmail(it)
         }
+        showBackup = true
     }
-
-    val consentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
+    val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             if (restoringBackup) viewModel?.restoreDriveBackup() else viewModel?.syncDriveNow()
         }
+        showBackup = true
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        if (settingsError != null) item(key = "settings_error") { Text(settingsError!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) }
-        item(key = "section_providers") {
-            Text(
-                "CONNECTED FINANCIAL SOURCES",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-            )
-        }
-
+    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
+        item { SettingsHeading("Sources") }
         items(Provider.entries, key = { it.name }) { provider ->
-            val isEnabled = provider in enabled
-            val count = providerCounts[provider] ?: 0
-            val diagnostic = diagnostics[provider]
-            val isSyncingThis = currentlySyncing == provider
-
-            ProviderCard(
-                provider = provider,
-                isEnabled = isEnabled,
-                txCount = count,
-                diagnostic = diagnostic,
-                isSyncing = isSyncingThis,
-                onToggleEnabled = { onEnabled(provider, it) },
-                importEnabled = provider in importEnabled,
-                onToggleImport = { viewModel?.setImportEnabled(provider, it) },
-                onManualSync = { viewModel?.syncProvider(provider) },
-            )
+            Surface(onClick = { selectedProvider = provider }) {
+                ListItem(
+                    headlineContent = { Text(provider.displayName) },
+                    supportingContent = {
+                        Text(providerSummary(diagnostics[provider], providerCounts[provider] ?: 0,
+                            provider in importEnabled, importing == provider))
+                    },
+                    leadingContent = {
+                        Image(painterResource(provider.iconRes), null,
+                            Modifier.size(40.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
+                    },
+                    trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                )
+            }
         }
-
-        // Section: Cloud Backup & Sync
         if (viewModel != null) {
-            item(key = "section_sync_header") {
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "CLOUD BACKUP & SYNC",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                )
+            item { SettingsHeading("Backup") }
+            item {
+                SettingsLink("Google Drive", backupSummary(backup, restoringBackup), Icons.Default.CloudSync) { showBackup = true }
             }
-
-            item(key = "drive_sync_card") {
-                GoogleDriveSyncCard(
-                    state = driveSyncState,
-                    onToggleEnabled = { enabledVal ->
-                        viewModel.setDriveSyncEnabled(enabledVal)
-                        if (enabledVal && !driveSyncState.hasPassword) {
-                            showPasswordDialog = true
-                        }
-                    },
-                    onConnectAccount = {
-                        val chooseIntent = AccountManager.newChooseAccountIntent(
-                            null, null, arrayOf("com.google"), null, null, null, null
-                        )
-                        runCatching {
-                            accountPickerLauncher.launch(chooseIntent)
-                        }.onFailure {
-                            showAccountDialog = true
-                        }
-                    },
-                    onConfigurePassword = { showPasswordDialog = true },
-                    onRestoreNow = { showRestoreConfirmation = true },
-                    onSyncNow = {
-                        restoringBackup = false
-                        if (driveSyncState.status == CloudSyncStatus.AUTH_REQUIRED && driveSyncState.consentIntent != null) {
-                            consentLauncher.launch(driveSyncState.consentIntent!!)
-                        } else {
-                            viewModel.syncDriveNow()
-                        }
-                    },
-                )
-            }
-        }
-
-        // Section: AI Intelligence
-        if (viewModel != null && snapshot != null) {
-            item(key = "section_ai_header") {
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "OPTIONAL AI COMMENTARY",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                )
-            }
-
-            item(key = "ai_provider_card") {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                        .clickable { showAiConfigDialog = true },
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.size(44.dp),
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Default.SettingsSuggest,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.size(24.dp),
-                                )
-                            }
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                "AI Commentary Provider",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            val model = snapshot?.aiConfig?.model ?: "google/gemini-3.8-flash"
-                            Text(
-                                "Model: $model",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Icon(
-                            Icons.Default.ChevronRight,
-                            contentDescription = "Configure",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+            item { SettingsHeading("Analysis") }
+            item {
+                val config = snapshot?.aiConfig
+                val filled = config != null && config.baseUrl.isNotBlank() && config.apiKey.isNotBlank() && config.model.isNotBlank()
+                val validUrl = config != null && runCatching { AiAnalysisService.endpoint(config.baseUrl) }.isSuccess
+                val summary = if (!filled) "Not set up" else if (!validUrl) "Check URL" else "Configured"
+                SettingsLink("AI commentary", summary, Icons.Default.SettingsSuggest) {
+                    aiError = null
+                    showAiConfig = true
                 }
             }
+            item { SettingsLink("Categories", null, Icons.Default.Category) { showCategories = true } }
+            item { SettingsLink("Personal context", null, Icons.Default.EditNote) { showContext = true } }
         }
-
     }
 
-    if (showAiConfigDialog && snapshot != null && viewModel != null) {
-        AiConfigDialog(
-            currentConfig = snapshot!!.aiConfig,
-            onDismiss = { showAiConfigDialog = false },
-            onSave = { updated ->
-                viewModel.updateAiConfig(updated)
-                showAiConfigDialog = false
-            },
-        )
+    selectedProvider?.let { provider ->
+        SettingsDetailSheet(provider.displayName, { selectedProvider = null }) {
+            ProviderSettings(
+                enabled = provider in enabled, importEnabled = provider in importEnabled,
+                count = providerCounts[provider] ?: 0, diagnostic = diagnostics[provider],
+                importing = importing == provider,
+                onEnabled = { onEnabled(provider, it) },
+                onImportEnabled = { viewModel?.setImportEnabled(provider, it) },
+                onImport = { viewModel?.syncProvider(provider) },
+            )
+        }
     }
-
+    if (showBackup && viewModel != null) {
+        SettingsDetailSheet("Google Drive", { showBackup = false }) {
+            BackupSettings(
+                backup, restoringBackup,
+                onEnabled = viewModel::setDriveSyncEnabled,
+                onAccount = {
+                    showBackup = false
+                    val intent = AccountManager.newChooseAccountIntent(null, null, arrayOf("com.google"), null, null, null, null)
+                    runCatching { accountPicker.launch(intent) }.onFailure { showAccountDialog = true }
+                },
+                onPassword = { showBackup = false; showPasswordDialog = true },
+                onBackup = {
+                    restoringBackup = false
+                    if (backup.status == CloudSyncStatus.AUTH_REQUIRED && backup.consentIntent != null) {
+                        showBackup = false
+                        consent.launch(backup.consentIntent!!)
+                    } else viewModel.syncDriveNow()
+                },
+                onRestore = { showBackup = false; showRestoreConfirmation = true },
+            )
+        }
+    }
+    if (showAiConfig && snapshot != null && viewModel != null) {
+        AiConfigDialog(snapshot!!.aiConfig,
+            onDismiss = { if (!savingAi) showAiConfig = false },
+            saving = savingAi, error = aiError,
+            onSave = { config ->
+                savingAi = true
+                aiError = null
+                viewModel.updateAiConfig(config) { error ->
+                    savingAi = false
+                    aiError = error
+                    if (error == null) showAiConfig = false
+                }
+            })
+    }
+    if (showCategories && snapshot != null && viewModel != null) {
+        ManageCategoriesSheet(snapshot!!.customCategories, snapshot!!.categoryIcons,
+            { showCategories = false }, viewModel::addCustomCategory, viewModel::removeCustomCategory,
+            viewModel::setCategoryIcon, viewModel::resetCategoriesToDefault)
+    }
+    if (showContext && snapshot != null && viewModel != null) {
+        KnowledgeEditorDialog(snapshot!!.knowledge, { showContext = false }) {
+            viewModel.applyKnowledgeRewrite(it)
+            showContext = false
+        }
+    }
     if (showPasswordDialog && viewModel != null) {
-        SyncPasswordDialog(
-            onDismiss = { showPasswordDialog = false },
-            onSave = { pass ->
-                viewModel.setDriveEncryptionPassword(pass)
-                showPasswordDialog = false
-            },
-        )
+        SyncPasswordDialog({ showPasswordDialog = false; showBackup = true }) {
+            viewModel.setDriveEncryptionPassword(it)
+            showPasswordDialog = false
+            showBackup = true
+        }
     }
-
     if (showAccountDialog && viewModel != null) {
-        AccountEmailDialog(
-            currentEmail = driveSyncState.accountEmail.orEmpty(),
-            onDismiss = { showAccountDialog = false },
-            onSave = { email ->
-                viewModel.setDriveAccountEmail(email)
-                showAccountDialog = false
-            },
-        )
+        AccountEmailDialog(backup.accountEmail.orEmpty(), { showAccountDialog = false; showBackup = true }) {
+            viewModel.setDriveAccountEmail(it)
+            showAccountDialog = false
+            showBackup = true
+        }
     }
     if (showRestoreConfirmation && viewModel != null) {
-        AlertDialog(
-            onDismissRequest = { showRestoreConfirmation = false },
+        AlertDialog(onDismissRequest = { showRestoreConfirmation = false; showBackup = true },
             title = { Text("Restore backup?") },
-            text = { Text("Add missing history and restore saved notes from your encrypted backup. Existing transactions and this phone’s AI credentials are kept.") },
-            confirmButton = { TextButton(onClick = {
-                showRestoreConfirmation = false
-                restoringBackup = true
-                if (driveSyncState.consentIntent != null) consentLauncher.launch(driveSyncState.consentIntent!!)
-                else viewModel.restoreDriveBackup()
-            }) { Text("Restore") } },
-            dismissButton = { TextButton(onClick = { showRestoreConfirmation = false }) { Text("Cancel") } },
-        )
+            text = { Text("Add missing history and restore notes. Existing transactions, chosen categories and this phone’s AI credentials are kept.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showRestoreConfirmation = false
+                    restoringBackup = true
+                    if (backup.consentIntent != null) consent.launch(backup.consentIntent!!)
+                    else { showBackup = true; viewModel.restoreDriveBackup() }
+                }) { Text("Restore") }
+            },
+            dismissButton = { TextButton(onClick = { showRestoreConfirmation = false; showBackup = true }) { Text("Cancel") } })
     }
-
 }
 
 @Composable
-private fun GoogleDriveSyncCard(
-    state: DriveSyncState,
-    onToggleEnabled: (Boolean) -> Unit,
-    onConnectAccount: () -> Unit,
-    onConfigurePassword: () -> Unit,
-    onSyncNow: () -> Unit,
-    onRestoreNow: () -> Unit,
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            // Header Row: Cloud Icon + Title & Switch
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier.size(44.dp),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.CloudSync,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(24.dp),
-                            )
-                        }
-                    }
-                    Column {
-                        Text(
-                            "Google Drive Backup",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            "Encrypted backup; restore when needed",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+private fun SettingsHeading(title: String) {
+    Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp))
+}
 
-                Switch(
-                    checked = state.isEnabled,
-                    onCheckedChange = onToggleEnabled,
-                )
+@Composable
+private fun SettingsLink(title: String, summary: String?, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Surface(onClick = onClick) {
+        ListItem(headlineContent = { Text(title) },
+            supportingContent = summary?.let { { Text(it) } },
+            leadingContent = { Icon(icon, null) }, trailingContent = { Icon(Icons.Default.ChevronRight, null) })
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsDetailSheet(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Close settings") }
             }
-
-            // Status Badge & Account Email
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = when (state.status) {
-                        CloudSyncStatus.READY -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                        CloudSyncStatus.SYNCING -> MaterialTheme.colorScheme.primaryContainer
-                        CloudSyncStatus.NEEDS_ACCOUNT, CloudSyncStatus.NEEDS_PASSWORD -> MaterialTheme.colorScheme.tertiaryContainer
-                        CloudSyncStatus.WRONG_PASSWORD, CloudSyncStatus.ERROR, CloudSyncStatus.AUTH_REQUIRED -> MaterialTheme.colorScheme.errorContainer
-                        CloudSyncStatus.DISABLED -> MaterialTheme.colorScheme.surfaceVariant
-                    },
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        val dotColor = when (state.status) {
-                            CloudSyncStatus.READY -> MaterialTheme.colorScheme.primary
-                            CloudSyncStatus.SYNCING -> MaterialTheme.colorScheme.primary
-                            CloudSyncStatus.NEEDS_ACCOUNT, CloudSyncStatus.NEEDS_PASSWORD -> MaterialTheme.colorScheme.tertiary
-                            CloudSyncStatus.WRONG_PASSWORD, CloudSyncStatus.ERROR, CloudSyncStatus.AUTH_REQUIRED -> MaterialTheme.colorScheme.error
-                            CloudSyncStatus.DISABLED -> MaterialTheme.colorScheme.outline
-                        }
-                        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(dotColor))
-                        Text(
-                            text = when (state.status) {
-                                CloudSyncStatus.READY -> "Connected"
-                                CloudSyncStatus.SYNCING -> "Syncing"
-                                CloudSyncStatus.NEEDS_ACCOUNT -> "Needs Account"
-                                CloudSyncStatus.NEEDS_PASSWORD -> "Needs Password"
-                                CloudSyncStatus.WRONG_PASSWORD -> "Wrong Password"
-                                CloudSyncStatus.AUTH_REQUIRED -> "Auth Required"
-                                CloudSyncStatus.ERROR -> "Error"
-                                CloudSyncStatus.DISABLED -> "Disabled"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                }
-
-                TextButton(
-                    onClick = onConnectAccount,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                ) {
-                    Text(
-                        text = state.accountEmail ?: "Connect Account",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Medium,
-                    )
-                }
-            }
-
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-
-            // Encryption Password Configuration Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Lock,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = if (state.hasPassword) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        text = if (state.hasPassword) "Password Configured" else "No Password Set",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-
-                OutlinedButton(
-                    onClick = onConfigurePassword,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    modifier = Modifier.height(32.dp),
-                ) {
-                    Text(
-                        text = if (state.hasPassword) "Change" else "Set Password",
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-            }
-
-            // Sync Information & Manual Sync Button Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (state.lastSyncEpochMillis != null) "Last backup activity: ${formatRelativeTime(state.lastSyncEpochMillis)}" else "No backup yet",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (state.lastSyncSummary != null) {
-                        Text(
-                            text = state.lastSyncSummary.replace(" · ", ". "),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                        )
-                    }
-                }
-
-                FilledTonalButton(
-                    onClick = onSyncNow,
-                    enabled = !state.isSyncing && state.isEnabled && state.hasPassword && state.accountEmail != null,
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                    modifier = Modifier.height(34.dp),
-                ) {
-                    if (state.isSyncing) {
-                        CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Syncing", style = MaterialTheme.typography.labelSmall)
-                    } else {
-                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            text = if (state.status == CloudSyncStatus.AUTH_REQUIRED) "Authorize" else "Back Up",
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    }
-                }
-            }
-
-            OutlinedButton(
-                onClick = onRestoreNow,
-                enabled = !state.isSyncing && state.isEnabled && state.hasPassword && state.accountEmail != null,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Restore backup") }
-
-            // Error Display Banner (if any error occurred)
-            if (!state.lastError.isNullOrBlank()) {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            Icons.Default.ErrorOutline,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Text(
-                            text = state.lastError,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                    }
-                }
-            }
+            content()
         }
     }
+}
+
+@Composable
+private fun SettingsSwitch(title: String, checked: Boolean, onChange: (Boolean) -> Unit, summary: String? = null) {
+    ListItem(modifier = Modifier.toggleable(checked, role = Role.Switch, onValueChange = onChange),
+        headlineContent = { Text(title) }, supportingContent = summary?.let { { Text(it) } },
+        trailingContent = { Switch(checked, onCheckedChange = null) })
+}
+
+private fun providerSummary(diagnostic: ProviderDiagnostic?, count: Int, importEnabled: Boolean, importing: Boolean): String = when {
+    importing -> "Importing"
+    !importEnabled -> "Import paused"
+    else -> when (diagnostic?.accountStatus ?: AccountStatus.UNKNOWN) {
+        AccountStatus.PARTIAL -> "Limited history"
+        AccountStatus.CONNECTED -> if (count > 0) "$count saved transactions" else "No saved history"
+        AccountStatus.NEEDS_LOGIN -> "Sign in required"
+        AccountStatus.APP_NOT_INSTALLED -> "App not installed"
+        AccountStatus.ERROR -> "Import failed"
+        AccountStatus.UNKNOWN -> if (count > 0) "$count saved transactions" else "Not imported"
+    }
+}
+
+@Composable
+private fun ProviderSettings(
+    enabled: Boolean, importEnabled: Boolean, count: Int, diagnostic: ProviderDiagnostic?, importing: Boolean,
+    onEnabled: (Boolean) -> Unit, onImportEnabled: (Boolean) -> Unit, onImport: () -> Unit,
+) {
+    SettingsSwitch("Import new history", importEnabled, onImportEnabled)
+    SettingsSwitch("Show in Transactions", enabled, onEnabled)
+    ListItem(headlineContent = { Text("Saved transactions") }, trailingContent = { Text(count.toString()) })
+    diagnostic?.accountIdentifier?.let { ListItem(headlineContent = { Text("Account") }, supportingContent = { Text(it) }) }
+    val status = providerSummary(diagnostic, count, importEnabled, importing)
+    ListItem(headlineContent = { Text(status) }, supportingContent = diagnostic?.lastSyncEpochMillis?.let { { Text(formatRelativeTime(it)) } })
+    if (diagnostic?.accountStatus == AccountStatus.NEEDS_LOGIN) {
+        Text("Sign in in the source app, then import again", modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodyMedium)
+    }
+    if (diagnostic?.lastError != null) {
+        Text(diagnostic.lastError, color = if (diagnostic.accountStatus == AccountStatus.ERROR) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodyMedium)
+    }
+    FilledTonalButton(onClick = onImport, enabled = importEnabled && !importing,
+        modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+        if (importing) CircularProgressIndicator(Modifier.size(18.dp).padding(end = 4.dp), strokeWidth = 2.dp)
+        Text(if (importing) "Importing" else "Import history")
+    }
+    if (!diagnostic?.lastSyncSummary.isNullOrBlank()) {
+        var showDiagnostics by remember { mutableStateOf(false) }
+        TextButton(onClick = { showDiagnostics = !showDiagnostics }, modifier = Modifier.padding(horizontal = 8.dp)) {
+            Text(if (showDiagnostics) "Hide details" else "Import details")
+        }
+        if (showDiagnostics) Text(diagnostic!!.lastSyncSummary!!.replace(" \u00b7 ", ". "),
+            modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+private fun backupSummary(state: DriveSyncState, restoring: Boolean): String = when (state.status) {
+    CloudSyncStatus.DISABLED -> "Off"
+    CloudSyncStatus.NEEDS_ACCOUNT -> "Choose an account"
+    CloudSyncStatus.NEEDS_PASSWORD -> "Set a password"
+    CloudSyncStatus.READY -> if (state.lastSyncEpochMillis == null) "Ready" else "Last activity ${formatRelativeTime(state.lastSyncEpochMillis)}"
+    CloudSyncStatus.SYNCING -> if (restoring) "Restoring" else "Backing up"
+    CloudSyncStatus.WRONG_PASSWORD -> "Check password"
+    CloudSyncStatus.AUTH_REQUIRED -> "Authorization required"
+    CloudSyncStatus.ERROR -> if (restoring) "Restore failed" else "Backup failed"
+}
+
+@Composable
+private fun BackupSettings(state: DriveSyncState, restoring: Boolean, onEnabled: (Boolean) -> Unit,
+    onAccount: () -> Unit, onPassword: () -> Unit, onBackup: () -> Unit, onRestore: () -> Unit,
+) {
+    SettingsSwitch("Backup", state.isEnabled, onEnabled, "Back up after imports")
+    SettingsLink("Account", state.accountEmail ?: "Choose an account", Icons.Default.CloudSync, onAccount)
+    SettingsLink("Backup password", if (state.hasPassword) "Set" else "Not set", Icons.Default.Lock, onPassword)
+    if (state.isEnabled) {
+        Text(backupSummary(state, restoring), modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium)
+        state.lastError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp)) }
+    }
+    val ready = state.isEnabled && state.hasPassword && !state.accountEmail.isNullOrBlank() && !state.isSyncing
+    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilledTonalButton(onClick = onBackup, enabled = ready, modifier = Modifier.fillMaxWidth()) {
+            Text(if (state.status == CloudSyncStatus.AUTH_REQUIRED) "Authorize backup" else "Back up now")
+        }
+        OutlinedButton(onClick = onRestore, enabled = ready, modifier = Modifier.fillMaxWidth()) { Text("Restore backup") }
+    }
+    state.lastSyncSummary?.let { Text(it.replace(" \u00b7 ", ". "), modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall) }
 }
 
 @Composable
@@ -554,11 +364,11 @@ fun SyncPasswordDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Sync Encryption Password", fontWeight = FontWeight.Bold) },
+        title = { Text("Backup password", fontWeight = FontWeight.Bold) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "Your ledger is encrypted on-device with AES-256-GCM before uploading to Google Drive. Google cannot read your transactions. You will need this password to sync with other devices.",
+                    "Keep this password to restore your encrypted backup.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -569,7 +379,7 @@ fun SyncPasswordDialog(
                         password = it
                         errorMessage = null
                     },
-                    label = { Text("Master Password") },
+                    label = { Text("Password") },
                     singleLine = true,
                     visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = {
@@ -589,7 +399,7 @@ fun SyncPasswordDialog(
                         confirmPassword = it
                         errorMessage = null
                     },
-                    label = { Text("Confirm Password") },
+                    label = { Text("Confirm password") },
                     singleLine = true,
                     visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
@@ -637,18 +447,13 @@ fun AccountEmailDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Google Account", fontWeight = FontWeight.Bold) },
+        title = { Text("Google account", fontWeight = FontWeight.Bold) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "Enter the Google Account email associated with your Google Drive backup.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = email,
                     onValueChange = { email = it },
-                    label = { Text("Google Account Email") },
+                    label = { Text("Google account Email") },
                     placeholder = { Text("e.g. user@gmail.com") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -673,212 +478,6 @@ fun AccountEmailDialog(
     )
 }
 
-@Composable
-private fun ProviderCard(
-    provider: Provider,
-    isEnabled: Boolean,
-    txCount: Int,
-    diagnostic: ProviderDiagnostic?,
-    isSyncing: Boolean,
-    onToggleEnabled: (Boolean) -> Unit,
-    onManualSync: () -> Unit,
-    importEnabled: Boolean,
-    onToggleImport: (Boolean) -> Unit,
-) {
-    val accountStatus = diagnostic?.accountStatus ?: AccountStatus.UNKNOWN
-    val lastError = diagnostic?.lastError
-    val lastSyncTime = diagnostic?.lastSyncEpochMillis
-    val lastSyncSummary = diagnostic?.lastSyncSummary
-    val accountIdentifier = diagnostic?.accountIdentifier
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            // Header Row: App Icon + Name + Identifier & Switch Toggle
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { onToggleEnabled(!isEnabled) },
-                ) {
-                    Image(
-                        painter = painterResource(provider.iconRes),
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(10.dp)),
-                        contentScale = ContentScale.Crop,
-                    )
-                    Column {
-                        Text(
-                            provider.displayName,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        if (accountIdentifier != null) {
-                            Text(
-                                accountIdentifier,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    }
-                }
-
-                Switch(
-                    checked = isEnabled,
-                    onCheckedChange = { onToggleEnabled(it) },
-                )
-            }
-
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Import new history", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                Switch(checked = importEnabled, onCheckedChange = onToggleImport)
-            }
-            Text(if (isEnabled) "Shown in transactions" else "Hidden from transactions; saved history is kept", style = MaterialTheme.typography.labelSmall)
-
-            // Status Badge and Transaction Count
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Status Badge
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = when (accountStatus) {
-                        AccountStatus.UNKNOWN -> MaterialTheme.colorScheme.surfaceVariant
-                        AccountStatus.PARTIAL -> MaterialTheme.colorScheme.tertiaryContainer
-                        AccountStatus.CONNECTED -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                        AccountStatus.NEEDS_LOGIN -> MaterialTheme.colorScheme.tertiaryContainer
-                        AccountStatus.APP_NOT_INSTALLED -> MaterialTheme.colorScheme.surfaceVariant
-                        AccountStatus.ERROR -> MaterialTheme.colorScheme.errorContainer
-                    },
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        val statusDotColor = when (accountStatus) {
-                            AccountStatus.UNKNOWN -> MaterialTheme.colorScheme.outline
-                            AccountStatus.PARTIAL -> MaterialTheme.colorScheme.tertiary
-                            AccountStatus.CONNECTED -> MaterialTheme.colorScheme.primary
-                            AccountStatus.NEEDS_LOGIN -> MaterialTheme.colorScheme.tertiary
-                            AccountStatus.APP_NOT_INSTALLED -> MaterialTheme.colorScheme.outline
-                            AccountStatus.ERROR -> MaterialTheme.colorScheme.error
-                        }
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(statusDotColor)
-                        )
-                        Text(
-                            text = when (accountStatus) {
-                                AccountStatus.UNKNOWN -> "Not verified"
-                                AccountStatus.PARTIAL -> "Limited coverage"
-                                AccountStatus.CONNECTED -> "Connected"
-                                AccountStatus.NEEDS_LOGIN -> "Needs Login"
-                                AccountStatus.APP_NOT_INSTALLED -> "Not Installed"
-                                AccountStatus.ERROR -> "Sync Error"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                }
-
-                Text(
-                    text = "$txCount transactions",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            // Sync Information & Manual Sync Button Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (lastSyncTime != null) "Last synced: ${formatRelativeTime(lastSyncTime)}" else "Never synced",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (lastSyncSummary != null) {
-                        Text(
-                            text = lastSyncSummary.replace(" · ", ". "),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                        )
-                    }
-                }
-
-                OutlinedButton(
-                    onClick = onManualSync,
-                    enabled = !isSyncing && importEnabled,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    modifier = Modifier.height(34.dp),
-                ) {
-                    if (isSyncing) {
-                        CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Syncing", style = MaterialTheme.typography.labelSmall)
-                    } else {
-                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Sync", style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-            }
-
-            // Error Display Banner (if any error occurred)
-            if (!lastError.isNullOrBlank()) {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            Icons.Default.ErrorOutline,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Text(
-                            text = lastError,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
 private fun formatRelativeTime(epochMillis: Long): String {
     val diffMs = System.currentTimeMillis() - epochMillis
     val diffSec = (diffMs / 1000).coerceAtLeast(0)
@@ -895,64 +494,37 @@ private fun formatRelativeTime(epochMillis: Long): String {
 }
 
 @Composable
-fun AiConfigDialog(
-    currentConfig: AiConfig,
-    onDismiss: () -> Unit,
-    onSave: (AiConfig) -> Unit,
+fun AiConfigDialog(currentConfig: AiConfig, onDismiss: () -> Unit, onSave: (AiConfig) -> Unit,
+    saving: Boolean = false, error: String? = null,
 ) {
     var baseUrl by remember { mutableStateOf(currentConfig.baseUrl) }
     var apiKey by remember { mutableStateOf(currentConfig.apiKey) }
     var model by remember { mutableStateOf(currentConfig.model) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("AI Provider Configuration", fontWeight = FontWeight.Bold) },
+    var validationError by remember { mutableStateOf<String?>(null) }
+    AlertDialog(onDismissRequest = { if (!saving) onDismiss() },
+        title = { Text("AI commentary") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = baseUrl,
-                    onValueChange = { baseUrl = it },
-                    label = { Text("Base URL") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = apiKey,
-                    onValueChange = { apiKey = it },
-                    label = { Text("API Key / Bearer") },
-                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = model,
-                    onValueChange = { model = it },
-                    label = { Text("Model ID") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Sends spending details and personal context to this provider", style = MaterialTheme.typography.bodyMedium)
+                OutlinedTextField(baseUrl, { baseUrl = it; validationError = null }, label = { Text("Endpoint URL") },
+                    singleLine = true, enabled = !saving, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(apiKey, { apiKey = it; validationError = null }, label = { Text("API key") },
+                    visualTransformation = PasswordVisualTransformation(), singleLine = true, enabled = !saving, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(model, { model = it; validationError = null }, label = { Text("Model") },
+                    singleLine = true, enabled = !saving, modifier = Modifier.fillMaxWidth())
+                (validationError ?: error)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
         confirmButton = {
-            FilledTonalButton(
-                onClick = {
-                    onSave(
-                        currentConfig.copy(
-                            baseUrl = baseUrl.trim(),
-                            apiKey = apiKey.trim(),
-                            model = model.trim(),
-                        )
-                    )
+            FilledTonalButton(enabled = !saving, onClick = {
+                val endpointError = runCatching { AiAnalysisService.endpoint(baseUrl) }.exceptionOrNull()
+                validationError = when {
+                    baseUrl.isBlank() || model.isBlank() || apiKey.isBlank() -> "Enter the URL, API key and model"
+                    endpointError != null -> if (endpointError is IllegalArgumentException) endpointError.message else "Enter a valid provider URL"
+                    else -> null
                 }
-            ) {
-                Text("Save")
-            }
+                if (validationError == null) onSave(currentConfig.copy(baseUrl = baseUrl.trim(), apiKey = apiKey.trim(), model = model.trim()))
+            }) { Text(if (saving) "Saving" else "Save") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        },
-    )
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !saving) { Text("Cancel") } })
 }
-

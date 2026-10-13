@@ -193,11 +193,22 @@ class ArthaViewModel(
         viewModelScope.launch(Dispatchers.IO) { analysisStore?.setClassification(transaction.key, category, "", manual = true) }
     }
     fun applyKnowledgeRewrite(rewritten: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setKnowledge(rewritten) } }
-    fun updateAiConfig(config: AiConfig) { viewModelScope.launch(Dispatchers.IO) {
-        try { analysisStore?.setAiConfig(config); _settingsError.value = null }
-        catch (cancelled: CancellationException) { throw cancelled }
-        catch (e: Exception) { _settingsError.value = e.message ?: "AI settings could not be saved securely." }
-    } }
+    fun updateAiConfig(config: AiConfig, onComplete: (String?) -> Unit = {}) {
+        viewModelScope.launch {
+            val error = withContext(Dispatchers.IO) {
+                try {
+                    checkNotNull(analysisStore) { "AI settings are unavailable" }.setAiConfig(config)
+                    null
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    e.message ?: "AI settings could not be saved securely"
+                }
+            }
+            _settingsError.value = error
+            onComplete(error)
+        }
+    }
     fun addCustomCategory(category: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.addCustomCategory(category) } }
     fun removeCustomCategory(category: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.removeCustomCategory(category) } }
     fun resetCategoriesToDefault() { viewModelScope.launch(Dispatchers.IO) { analysisStore?.resetCategoriesToDefault() } }
@@ -210,7 +221,7 @@ class ArthaViewModel(
     private fun fingerprint(month: YearMonth, rows: List<UnifiedTransaction>, snapshot: AnalysisSnapshot): String =
         BudgetAnalyzer.computeMonthFingerprint(rows.filter {
             YearMonth.from(it.occurredAt.atZone(AccountingTime.zone)) in setOf(month, month.minusMonths(1)) &&
-                (BudgetAnalyzer.isSpending(it) || !it.isConfirmed && it.direction == Direction.DEBIT && it.money.currencyCode == "IDR")
+                BudgetAnalyzer.isSpending(it)
         }, snapshot.monthlyNotes[month.toString()].orEmpty(),
             snapshot.knowledge + "\n${snapshot.aiConfig.baseUrl}\n${snapshot.aiConfig.model}\n${snapshot.aiConfig.apiKey}\n${if (month == YearMonth.now(clock.withZone(AccountingTime.zone))) java.time.LocalDate.now(clock.withZone(AccountingTime.zone)) else month}", snapshot.customCategories)
 

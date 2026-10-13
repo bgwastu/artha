@@ -49,6 +49,8 @@ import androidx.compose.ui.unit.dp
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.ui.LedgerState
+import net.wastu.artha.ui.screens.TransactionFilters
+import net.wastu.artha.ui.screens.TransactionFiltersSaver
 
 private enum class Destination(val label: String, val icon: ImageVector) {
     TRANSACTIONS("Transactions", Icons.AutoMirrored.Filled.List),
@@ -70,6 +72,7 @@ fun HomeScreen(
     viewModel: ArthaViewModel? = null,
 ) {
     val saveableStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+    var transactionFilters by rememberSaveable(stateSaver = TransactionFiltersSaver) { mutableStateOf(TransactionFilters()) }
     var destination by rememberSaveable { mutableStateOf(Destination.TRANSACTIONS) }
     var showSearch by rememberSaveable { mutableStateOf(false) }
     var showFilter by rememberSaveable { mutableStateOf(false) }
@@ -192,6 +195,8 @@ fun HomeScreen(
                                 showFilter = showFilter,
                                 onDismissFilter = { showFilter = false },
                                 viewModel = viewModel,
+                                filters = transactionFilters,
+                                onFiltersChanged = { transactionFilters = it },
                             )
                             Destination.ANALYSIS -> {
                                 if (viewModel != null) {
@@ -225,6 +230,9 @@ fun HomeScreen(
                     ledgerState,
                     onBack = { showSearch = false },
                     onTransaction = { selectedTransaction = it },
+                    filters = transactionFilters,
+                    viewModel = viewModel,
+                    onRetry = onRetryLedger,
                 )
             }
         }

@@ -3,7 +3,6 @@ package net.wastu.artha.ui.screens
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -18,7 +17,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
@@ -29,7 +27,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -48,13 +45,13 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,16 +70,74 @@ import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.ui.LedgerState
-import net.wastu.artha.ui.formatDate
 import net.wastu.artha.ui.formatMoney
 import net.wastu.artha.ui.formatTime
-import net.wastu.artha.ui.theme.expenseColor
-import net.wastu.artha.ui.theme.incomeColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.RadioButton
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import net.wastu.artha.core.model.AccountingTime
+import java.time.Instant
+
+data class TransactionFilters(
+    val provider: Provider? = null,
+    val direction: Direction? = null,
+) {
+    fun matches(transaction: UnifiedTransaction): Boolean =
+        transaction.isConfirmed &&
+        (provider == null || transaction.provider == provider) &&
+        (direction == null || transaction.direction == direction)
+}
+
+internal fun transactionSearchScope(currentView: List<UnifiedTransaction>, allSaved: List<UnifiedTransaction>,
+    filters: TransactionFilters, searchAllSaved: Boolean): List<UnifiedTransaction> =
+    if (searchAllSaved) allSaved.filter { it.isConfirmed } else currentView.filter(filters::matches)
+
+val TransactionFiltersSaver = listSaver<TransactionFilters, String>(
+    save = { listOf(it.provider?.name.orEmpty(), it.direction?.name.orEmpty()) },
+    // Earlier bundles have a third activity item. Ignore it while restoring source/direction.
+    restore = { TransactionFilters(it.getOrNull(0)?.takeIf(String::isNotBlank)?.let(Provider::valueOf),
+        it.getOrNull(1)?.takeIf(String::isNotBlank)?.let(Direction::valueOf)) },
+)
+
+enum class TransactionPeriod(val label: String) {
+    ALL("All time"), THIS_MONTH("This month"), LAST_MONTH("Last month"), LAST_30_DAYS("Last 30 days"), CUSTOM("Custom dates");
+    fun range(today: LocalDate): Pair<Long?, Long?>? {
+        val days = when (this) {
+            ALL, CUSTOM -> return null
+            THIS_MONTH -> today.withDayOfMonth(1) to today
+            LAST_MONTH -> today.minusMonths(1).let { it.withDayOfMonth(1) to it.withDayOfMonth(it.lengthOfMonth()) }
+            LAST_30_DAYS -> today.minusDays(29) to today
+        }
+        return days.first.atStartOfDay(AccountingTime.zone).toInstant().toEpochMilli() to
+            days.second.atStartOfDay(AccountingTime.zone).toInstant().toEpochMilli()
+    }
+}
+
+private fun rangeLabel(range: Pair<Long?, Long?>): String {
+    val formatter = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.US)
+    fun date(value: Long?) = value?.let { Instant.ofEpochMilli(it).atZone(AccountingTime.zone).toLocalDate().format(formatter) }
+    val start = date(range.first)
+    val end = date(range.second)
+    return if (start != null && end != null && start != end) "$start to $end" else start ?: end ?: "Dates"
+}
+
+private data class ActiveTransactionFilter(val label: String, val clear: () -> Unit)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -94,163 +149,138 @@ fun LedgerScreen(
     showFilter: Boolean = false,
     onDismissFilter: () -> Unit = {},
     viewModel: ArthaViewModel? = null,
+    filters: TransactionFilters = TransactionFilters(),
+    onFiltersChanged: (TransactionFilters) -> Unit = {},
 ) {
-    var selectedProvider by rememberSaveable { mutableStateOf<Provider?>(null) }
-    var selectedDirection by rememberSaveable { mutableStateOf<Direction?>(null) }
     val dateRange by viewModel?.dateRangeFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
-    val categoryFilter by viewModel?.categoryFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
-    LaunchedEffect(categoryFilter) { if (categoryFilter != null) { selectedProvider = null; selectedDirection = Direction.DEBIT } }
-    var showDateRangePicker by remember { mutableStateOf(false) }
-    val visibleProviders = remember(enabledProviders) {
-        Provider.entries.filter { it in enabledProviders }
+    val category by viewModel?.categoryFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    // Category drill-down is all-source confirmed spending; prior browsing choices stay intact for Back.
+    val effectiveFilters = if (category == null) filters else TransactionFilters(direction = Direction.DEBIT)
+    val visibleProviders = Provider.entries.filter { it in enabledProviders }
+    LaunchedEffect(enabledProviders, filters.provider) {
+        if (filters.provider != null && filters.provider !in enabledProviders) onFiltersChanged(filters.copy(provider = null))
     }
-    LaunchedEffect(enabledProviders) {
-        if (selectedProvider !in enabledProviders) selectedProvider = null
+    fun clearAll() {
+        onFiltersChanged(TransactionFilters())
+        viewModel?.clearDateRangeFilter()
+        viewModel?.clearCategoryFilter()
+    }
+    val active = buildList {
+        category?.let { add(ActiveTransactionFilter(it) { viewModel?.clearCategoryFilter() }) }
+        effectiveFilters.provider?.let { add(ActiveTransactionFilter(it.displayName) { onFiltersChanged(filters.copy(provider = null)) }) }
+        if (category == null) effectiveFilters.direction?.let {
+            add(ActiveTransactionFilter(if (it == Direction.CREDIT) "Incoming" else "Outgoing") { onFiltersChanged(filters.copy(direction = null)) })
+        }
+        dateRange?.let { add(ActiveTransactionFilter(rangeLabel(it)) { viewModel?.clearDateRangeFilter() }) }
     }
     when (state) {
         LedgerState.Loading -> LedgerFeedback(loading = true)
-        LedgerState.Failed -> LedgerFeedback(title = "Failed to load", onRetry = onRetry)
-        is LedgerState.Ready -> {
-            val filtered = remember(state.transactions, selectedProvider, selectedDirection) {
-                state.transactions.filter { transaction ->
-                    (selectedProvider == null || transaction.provider == selectedProvider) &&
-                        (selectedDirection == null || transaction.direction == selectedDirection)
-                }
-            }
-            TransactionList(
-                transactions = filtered,
-                onTransaction = onTransaction,
-                resetKey = listOf(selectedProvider, selectedDirection, dateRange, categoryFilter),
-                activeFilter = run {
-                    val dateLabel = dateRange?.let { (start, end) ->
-                        val zone = net.wastu.artha.core.model.AccountingTime.zone
-                        val fmt = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.US)
-                        val s = start?.let { fmt.format(java.time.Instant.ofEpochMilli(it).atZone(zone).toLocalDate()) }
-                        val e = end?.let { fmt.format(java.time.Instant.ofEpochMilli(it).atZone(zone).toLocalDate()) }
-                        if (s != null && e != null) "$s to $e" else s ?: e ?: "Date range"
-                    }
-                    listOfNotNull(
-                        categoryFilter?.let { "$it  all sources" },
-                        selectedProvider?.displayName,
-                        selectedDirection?.let { if (it == Direction.CREDIT) "Incoming" else "Outgoing" },
-                        dateLabel
-                    ).joinToString(" / ").ifBlank { null }
-                },
-                onClearFilter = {
-                    selectedProvider = null
-                    selectedDirection = null
-                    viewModel?.clearDateRangeFilter()
-                    viewModel?.clearCategoryFilter()
-                },
-            )
-        }
+        LedgerState.Failed -> LedgerFeedback(title = "Couldn't load transactions", onRetry = onRetry)
+        is LedgerState.Ready -> TransactionList(
+            transactions = remember(state.transactions, effectiveFilters) { state.transactions.filter(effectiveFilters::matches) },
+            onTransaction = onTransaction, resetKey = listOf(effectiveFilters, dateRange, category),
+            activeFilters = active, onClearFilters = ::clearAll,
+            emptyTitle = if (active.isNotEmpty()) "No matching transactions" else "No transactions",
+        )
     }
     if (showFilter) {
-        ModalBottomSheet(onDismissRequest = onDismissFilter) {
-            Column(
-                Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text("Filter Transactions", style = MaterialTheme.typography.titleLarge)
-                Text("Direction", style = MaterialTheme.typography.titleSmall)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(null to "All directions", Direction.CREDIT to "Incoming", Direction.DEBIT to "Outgoing")
-                        .forEach { (direction, label) ->
-                            FilterChip(
-                                selected = selectedDirection == direction,
-                                onClick = { selectedDirection = direction },
-                                label = { Text(label) },
-                            )
-                        }
+        TransactionFilterSheet(
+            filters = effectiveFilters, range = dateRange, category = category,
+            providers = visibleProviders,
+            onDismiss = onDismissFilter,
+            onApply = { updated, dates, clearCategory ->
+                if (category == null || clearCategory) onFiltersChanged(updated)
+                if (clearCategory) viewModel?.clearCategoryFilter()
+                if (dates == null) viewModel?.clearDateRangeFilter() else viewModel?.setDateRangeFilter(dates.first, dates.second)
+                onDismissFilter()
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun TransactionFilterSheet(
+    filters: TransactionFilters, range: Pair<Long?, Long?>?, category: String?, providers: List<Provider>,
+    onDismiss: () -> Unit,
+    onApply: (TransactionFilters, Pair<Long?, Long?>?, Boolean) -> Unit,
+) {
+    var draft by remember { mutableStateOf(filters) }
+    var dates by remember { mutableStateOf(range) }
+    var clearCategory by remember { mutableStateOf(false) }
+    var pickingDates by remember { mutableStateOf(false) }
+    val today = LocalDate.now(AccountingTime.clock)
+    val selectedPeriod = if (dates == null) TransactionPeriod.ALL else
+        TransactionPeriod.entries.firstOrNull { it != TransactionPeriod.CUSTOM && it.range(today) == dates } ?: TransactionPeriod.CUSTOM
+    // The date picker replaces the filter sheet; changes remain staged until the sheet's Apply.
+    if (pickingDates) {
+        fun pickerDay(value: Long?) = value?.let {
+            Instant.ofEpochMilli(it).atZone(AccountingTime.zone).toLocalDate().atStartOfDay(ZoneId.of("UTC")).toInstant().toEpochMilli()
+        }
+        val picker = rememberDateRangePickerState(initialSelectedStartDateMillis = pickerDay(dates?.first),
+            initialSelectedEndDateMillis = pickerDay(dates?.second))
+        DatePickerDialog(onDismissRequest = { pickingDates = false },
+            confirmButton = {
+                TextButton(enabled = picker.selectedStartDateMillis != null, onClick = {
+                    val start = picker.selectedStartDateMillis!!
+                    val end = picker.selectedEndDateMillis ?: start
+                    dates = AccountingTime.pickerDay(start) to AccountingTime.pickerDay(end)
+                    pickingDates = false
+                }) { Text("Done") }
+            }, dismissButton = { TextButton(onClick = { pickingDates = false }) { Text("Cancel") } }) {
+            DateRangePicker(picker, modifier = Modifier.heightIn(max = 520.dp))
+        }
+    } else {
+        ModalBottomSheet(onDismissRequest = onDismiss, sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+            Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).imePadding()) {
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Filters", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { draft = TransactionFilters(); dates = null; clearCategory = true }) { Text("Reset") }
                 }
-                Text("Provider", style = MaterialTheme.typography.titleSmall)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = selectedProvider == null,
-                        onClick = { selectedProvider = null },
-                        label = { Text("All") },
-                    )
-                    visibleProviders.forEach { item ->
-                        FilterChip(
-                            selected = selectedProvider == item,
-                            onClick = { selectedProvider = if (selectedProvider == item) null else item },
-                            label = { Text(item.displayName) },
-                        )
+                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    if (category != null && !clearCategory) {
+                        FilterChip(selected = true, onClick = { clearCategory = true; draft = filters.copy(direction = null) },
+                            label = { Text(category) }, trailingIcon = { Icon(Icons.Default.Clear, "Remove category filter") })
+                    }
+                    if (category == null || clearCategory) {
+                        FilterOptions("Direction", listOf(null, Direction.DEBIT, Direction.CREDIT), draft.direction,
+                            { when (it) { Direction.DEBIT -> "Outgoing"; Direction.CREDIT -> "Incoming"; null -> "All" } }) { draft = draft.copy(direction = it) }
+                        FilterOptions("Source", listOf(null) + providers, draft.provider, { it?.displayName ?: "All" }) { draft = draft.copy(provider = it) }
+                    }
+                    Column(Modifier.selectableGroup()) {
+                        Text("Dates", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(bottom = 4.dp))
+                        TransactionPeriod.entries.forEach { period ->
+                            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(selectedPeriod == period, role = Role.RadioButton, onClick = {
+                                if (period == TransactionPeriod.CUSTOM) pickingDates = true else dates = period.range(today)
+                            }).padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(selected = selectedPeriod == period, onClick = null)
+                                Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                                    Text(period.label, style = MaterialTheme.typography.bodyLarge)
+                                    if (period == TransactionPeriod.CUSTOM && selectedPeriod == period) {
+                                        Text(rangeLabel(dates!!), style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-                Text("Date Range", style = MaterialTheme.typography.titleSmall)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = dateRange == null,
-                        onClick = { viewModel?.clearDateRangeFilter() },
-                        label = { Text("All time") },
-                    )
-                    FilterChip(
-                        selected = false,
-                        onClick = {
-                            val now = LocalDate.now(net.wastu.artha.core.model.AccountingTime.clock)
-                            val start = now.withDayOfMonth(1).atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
-                            val end = now.atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
-                            viewModel?.setDateRangeFilter(start, end)
-                        },
-                        label = { Text("This Month") },
-                    )
-                    FilterChip(
-                        selected = false,
-                        onClick = {
-                            val last = LocalDate.now(net.wastu.artha.core.model.AccountingTime.clock).minusMonths(1)
-                            val start = last.withDayOfMonth(1).atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
-                            val end = last.withDayOfMonth(last.lengthOfMonth()).atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
-                            viewModel?.setDateRangeFilter(start, end)
-                        },
-                        label = { Text("Last Month") },
-                    )
-                    FilterChip(
-                        selected = false,
-                        onClick = {
-                            val now = LocalDate.now(net.wastu.artha.core.model.AccountingTime.clock)
-                            val start = now.minusDays(29).atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
-                            val end = now.atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
-                            viewModel?.setDateRangeFilter(start, end)
-                        },
-                        label = { Text("Last 30 Days") },
-                    )
-                    FilterChip(
-                        selected = dateRange != null,
-                        onClick = { showDateRangePicker = true },
-                        label = { Text("Custom Range...") },
-                    )
-                }
-                if (selectedProvider != null || selectedDirection != null || dateRange != null || categoryFilter != null) {
-                    TextButton(onClick = {
-                        selectedProvider = null
-                        selectedDirection = null
-                        viewModel?.clearDateRangeFilter()
-                        viewModel?.clearCategoryFilter()
-                    }) { Text("Reset") }
+                Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    FilledTonalButton(onClick = { onApply(draft, dates, clearCategory) }, modifier = Modifier.weight(1f)) { Text("Apply") }
                 }
             }
-                if (showDateRangePicker) {
-                    val pickerState = rememberDateRangePickerState()
-                    DatePickerDialog(
-                        onDismissRequest = { showDateRangePicker = false },
-                        confirmButton = {
-                            TextButton(onClick = {
-                                val s = pickerState.selectedStartDateMillis
-                                val e = pickerState.selectedEndDateMillis ?: s
-                                if (s != null) {
-                                    viewModel?.setDateRangeFilter(net.wastu.artha.core.model.AccountingTime.pickerDay(s), e?.let(net.wastu.artha.core.model.AccountingTime::pickerDay))
-                                }
-                                showDateRangePicker = false
-                            }) { Text("Apply") }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { showDateRangePicker = false }) { Text("Cancel") }
-                        }
-                    ) {
-                        DateRangePicker(state = pickerState, modifier = Modifier.weight(1f))
-                    }
-                }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun <T> FilterOptions(title: String, options: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, style = MaterialTheme.typography.titleSmall)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.forEach { option -> FilterChip(selected = selected == option, onClick = { onSelect(option) }, label = { Text(label(option)) }) }
         }
     }
 }
@@ -258,17 +288,27 @@ fun LedgerScreen(
 private data class SearchEntry(val transaction: UnifiedTransaction, val fields: List<String>)
 private data class SearchResults(val query: String, val transactions: List<UnifiedTransaction>)
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SearchTransactionsScreen(
     ledgerState: LedgerState,
     onBack: () -> Unit,
     onTransaction: (UnifiedTransaction) -> Unit,
+    filters: TransactionFilters = TransactionFilters(),
+    viewModel: ArthaViewModel? = null,
+    onRetry: (() -> Unit)? = null,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     val keyword = query.trim()
     val focusRequester = remember { FocusRequester() }
-    val transactions = (ledgerState as? LedgerState.Ready)?.transactions.orEmpty()
+    var allSaved by rememberSaveable { mutableStateOf(false) }
+    val allTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyList<UnifiedTransaction>()) }
+    val category by viewModel?.categoryFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val scopedFilters = if (category == null) filters else TransactionFilters(direction = Direction.DEBIT)
+    val currentView = (ledgerState as? LedgerState.Ready)?.transactions.orEmpty()
+    val transactions = remember(currentView, allTransactions, scopedFilters, allSaved) {
+        transactionSearchScope(currentView, allTransactions, scopedFilters, allSaved)
+    }
     // Decode each payload once per ledger update, away from composition and scrolling.
     val index by produceState<List<SearchEntry>?>(null, transactions) {
         value = null
@@ -281,7 +321,6 @@ fun SearchTransactionsScreen(
                     transaction.cardLast4.orEmpty(),
                     transaction.userNote.orEmpty(),
                     transaction.category.orEmpty(),
-                    if (!transaction.isConfirmed) "Unconfirmed activity" else "",
                     if (transaction.isQris) "QRIS" else "",
                     formatMoney(transaction.money),
                 ) + payloadTextValues(transaction.rawPayload))
@@ -312,7 +351,7 @@ fun SearchTransactionsScreen(
                     OutlinedTextField(
                         value = query,
                         onValueChange = { query = it },
-                        placeholder = { Text("Search transactions...") },
+                        label = { Text("Search transactions") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
                     )
@@ -325,31 +364,38 @@ fun SearchTransactionsScreen(
             )
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
+            if (viewModel != null) FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = !allSaved, onClick = { allSaved = false }, label = { Text("Current view") })
+                FilterChip(selected = allSaved, onClick = { allSaved = true }, label = { Text("All saved history") })
+            }
             when {
-                ledgerState == LedgerState.Failed -> LedgerFeedback(title = "Failed to load")
+                ledgerState == LedgerState.Failed -> LedgerFeedback(title = "Couldn't load transactions", onRetry = onRetry)
                 ledgerState == LedgerState.Loading || results == null || results?.query != keyword ->
                     LedgerFeedback(loading = true)
                 else -> TransactionList(
                     transactions = results!!.transactions,
                     onTransaction = onTransaction,
                     highlightQuery = keyword,
-                    resetKey = keyword,
+                    resetKey = listOf(keyword, allSaved),
+                    resultCount = results!!.transactions.size,
                 )
             }
         }
     }
 }
 
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 private fun TransactionList(
     transactions: List<UnifiedTransaction>,
     onTransaction: (UnifiedTransaction) -> Unit,
     highlightQuery: String = "",
     resetKey: Any? = null,
-    activeFilter: String? = null,
-    onClearFilter: () -> Unit = {},
+    activeFilters: List<ActiveTransactionFilter> = emptyList(),
+    onClearFilters: () -> Unit = {},
+    emptyTitle: String? = null,
+    resultCount: Int? = null,
 ) {
     val listState = rememberLazyListState()
     var previousResetKey by rememberSaveable { mutableStateOf(resetKey?.toString()) }
@@ -377,23 +423,27 @@ private fun TransactionList(
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 4.dp, bottom = 96.dp),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
     ) {
-        if (activeFilter != null) {
-            item(key = "active_filter") {
-                FilterChip(
-                    selected = true,
-                    onClick = onClearFilter,
-                    label = { Text(activeFilter) },
-                    trailingIcon = { Icon(Icons.Default.Clear, contentDescription = "Reset filters") },
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
+        if (activeFilters.isNotEmpty()) {
+            item(key = "active_filters") {
+                FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    activeFilters.forEach { filter ->
+                        FilterChip(selected = true, onClick = filter.clear, label = { Text(filter.label) },
+                            trailingIcon = { Icon(Icons.Default.Clear, "Remove ${filter.label} filter") })
+                    }
+                    TextButton(onClick = onClearFilters) { Text("Clear all") }
+                }
             }
         }
+        resultCount?.let { count -> item(key = "results") {
+            Text("$count results", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } }
         if (transactions.isEmpty()) {
             item(key = "empty") {
                 Text(
-                    if (highlightQuery.isBlank()) "No transactions" else "No matching transactions",
+                    emptyTitle ?: if (highlightQuery.isBlank()) "No transactions" else "No matching transactions",
                     modifier = Modifier.fillMaxWidth().padding(vertical = 64.dp),
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.titleMedium,
@@ -427,7 +477,7 @@ private fun TransactionList(
 @Composable
 private fun DateGroupHeader(date: LocalDate) {
     val zone = net.wastu.artha.core.model.AccountingTime.zone
-    val today = LocalDate.now(zone)
+    val today = LocalDate.now(AccountingTime.clock)
     val dayLabel = when (date) {
         today -> "Today"
         today.minusDays(1) -> "Yesterday"
@@ -475,6 +525,7 @@ fun HighlightedText(
     modifier: Modifier = Modifier,
     fontWeight: FontWeight? = null,
     color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
+    maxLines: Int = 1,
 ) {
     val background = MaterialTheme.colorScheme.primaryContainer
     val foreground = MaterialTheme.colorScheme.onPrimaryContainer
@@ -494,184 +545,63 @@ fun HighlightedText(
         }
     }
     Text(highlighted, modifier = modifier, style = style, fontWeight = fontWeight,
-        color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        color = color, maxLines = maxLines, overflow = TextOverflow.Ellipsis)
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlightQuery: String = "") {
     val credit = transaction.direction == Direction.CREDIT
-    val payloadValues by produceState(
-        initialValue = emptyList<String>(),
-        transaction.rawPayload,
-        highlightQuery.isNotBlank(),
-    ) {
-        value = if (highlightQuery.isBlank()) emptyList() else withContext(Dispatchers.Default) {
-            payloadTextValues(transaction.rawPayload)
-        }
+    val reversed = transaction.isReversal || transaction.description.contains("(Reversed)", ignoreCase = true)
+    val status = when {
+        reversed -> "Reversed"
+        transaction.description.startsWith("Pocket Transfer:", ignoreCase = true) -> "Transfer"
+        else -> null
+    }
+    val amount = if (reversed) "Rp0" else "${if (credit) "+" else "−"}${formatMoney(transaction.money)}"
+    val payloadValues by produceState(initialValue = emptyList<String>(), transaction.rawPayload, highlightQuery.isNotBlank()) {
+        value = if (highlightQuery.isBlank()) emptyList() else withContext(Dispatchers.Default) { payloadTextValues(transaction.rawPayload) }
     }
     val snippet = remember(transaction, highlightQuery, payloadValues) {
-        if (highlightQuery.isBlank()) null else {
-            (payloadValues + transaction.provider.displayName + transaction.cardLast4.orEmpty())
-                .firstOrNull { it.contains(highlightQuery, ignoreCase = true) &&
-                    !transaction.description.contains(it, ignoreCase = true) }
-                ?.let { value ->
-                    val match = value.indexOf(highlightQuery, ignoreCase = true)
-                    val start = match
-                    (if (start > 0) "..." else "") + value.substring(start)
-                }
-        }
+        if (highlightQuery.isBlank()) null else (payloadValues + transaction.provider.displayName + transaction.cardLast4.orEmpty())
+            .firstOrNull { it.contains(highlightQuery, true) && !transaction.description.contains(it, true) }
     }
+    val fontScale = LocalDensity.current.fontScale
     Surface(onClick = onClick, color = MaterialTheme.colorScheme.surface) {
-        ListItem(
-            modifier = Modifier.height(80.dp),
-            leadingContent = {
-                val isGrouped = transaction.pocket != null && transaction.provider != Provider.JAGO
-                Box(contentAlignment = Alignment.Center) {
-                    if (isGrouped) {
-                        Box(modifier = Modifier.size(40.dp)) {
-                            Image(
-                                painter = painterResource(transaction.provider.iconRes),
-                                contentDescription = transaction.provider.displayName,
-                                modifier = Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)),
-                                contentScale = ContentScale.Crop,
-                            )
-                            Image(
-                                painter = painterResource(Provider.JAGO.iconRes),
-                                contentDescription = Provider.JAGO.displayName,
-                                modifier = Modifier
-                                    .size(18.dp)
-                                    .align(Alignment.BottomEnd)
-                                    .clip(RoundedCornerShape(4.dp)),
-                                contentScale = ContentScale.Crop,
-                            )
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Image(painterResource(transaction.provider.iconRes), transaction.provider.displayName,
+                Modifier.size(36.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val stackAmount = fontScale >= 1.3f || maxWidth < 300.dp || amount.length > 16
+                    if (stackAmount) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            HighlightedText(transaction.description, highlightQuery, MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium, maxLines = 2)
+                            HighlightedText(amount, highlightQuery, MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold, maxLines = Int.MAX_VALUE)
                         }
-                    } else {
-                        Image(
-                            painter = painterResource(transaction.provider.iconRes),
-                            contentDescription = transaction.provider.displayName,
-                            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)),
-                            contentScale = ContentScale.Crop,
-                        )
+                    } else Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        HighlightedText(transaction.description, highlightQuery, MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium, maxLines = 2)
+                        HighlightedText(amount, highlightQuery, MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                     }
                 }
-            },
-            headlineContent = {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    val isReversal = transaction.description.contains("(Reversed)", ignoreCase = true)
-                    if (isReversal) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            shape = MaterialTheme.shapes.extraSmall,
-                            modifier = Modifier.padding(end = 6.dp),
-                        ) {
-                            Text(
-                                text = "REVERSED",
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                            )
-                        }
-                    }
-                    val isPocketTransfer = transaction.description.startsWith("Pocket Transfer:", ignoreCase = true)
-                    if (isPocketTransfer) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.tertiaryContainer,
-                            shape = MaterialTheme.shapes.extraSmall,
-                            modifier = Modifier.padding(end = 6.dp),
-                        ) {
-                            Text(
-                                text = "TRANSFER",
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            )
-                        }
-                    }
-                    val badge = if (transaction.isQris) "QRIS" else transaction.cardLast4
-                    if (badge != null) {
-                        Surface(
-                            color = if (transaction.isQris) MaterialTheme.colorScheme.tertiaryContainer
-                                else MaterialTheme.colorScheme.secondaryContainer,
-                            shape = MaterialTheme.shapes.extraSmall,
-                            modifier = Modifier.padding(end = 6.dp),
-                        ) {
-                            HighlightedText(
-                                text = badge,
-                                query = highlightQuery,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = if (transaction.isQris) MaterialTheme.colorScheme.onTertiaryContainer
-                                    else MaterialTheme.colorScheme.onSecondaryContainer,
-                            )
-                        }
-                    }
-                    HighlightedText(
-                        text = transaction.description,
-                        query = highlightQuery,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            },
-            supportingContent = {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        val timeStr = formatTime(transaction.occurredAt)
-                        val catStr = transaction.category
-                        val label = listOfNotNull(timeStr, catStr?.takeIf { !credit && it.isNotBlank() }, if (!transaction.isConfirmed) "Unconfirmed activity" else null).joinToString("  ")
-                        Text(
-                            label,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = if (snippet != null) Modifier.weight(1f) else Modifier,
-                        )
-                        if (snippet != null) {
-                            HighlightedText(
-                                text = snippet,
-                                query = highlightQuery,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(start = 8.dp).weight(1f),
-                            )
-                        }
-                    }
-                    if (!transaction.userNote.isNullOrBlank()) {
-                        Text(
-                            text = "# ${transaction.userNote}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(formatTime(transaction.occurredAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (!credit && status == null && !transaction.category.isNullOrBlank()) {
+                        HighlightedText(transaction.category, highlightQuery, MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
                     }
                 }
-            },
-            trailingContent = {
-                val isReversal = transaction.description.contains("(Reversed)", ignoreCase = true)
-                val isZero = isReversal || transaction.money.amountMinor == 0L
-                val amountText = if (isZero) "Rp0" else "${if (credit) "+" else "−"}${formatMoney(transaction.money)}"
-                val amountColor = if (isZero) {
-                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                } else if (credit) {
-                    incomeColor()
-                } else {
-                    expenseColor()
+                status?.let { Text(it, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium) }
+                transaction.userNote?.takeIf { it.isNotBlank() }?.let {
+                    HighlightedText(it, highlightQuery, MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                HighlightedText(
-                    text = amountText,
-                    query = highlightQuery,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = amountColor,
-                )
-            },
-        )
+                snippet?.let { HighlightedText(it, highlightQuery, MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2) }
+            }
+        }
     }
 }
 
