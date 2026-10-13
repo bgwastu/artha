@@ -17,6 +17,7 @@ enum class AccountStatus {
 
 data class ProviderDiagnostic(
     val lastSyncEpochMillis: Long? = null,
+    val lastAttemptEpochMillis: Long? = null,
     val lastSyncSummary: String? = null,
     val lastError: String? = null,
     val accountStatus: AccountStatus = AccountStatus.UNKNOWN,
@@ -49,12 +50,20 @@ class ProviderPreferences(context: Context) {
             val ident = preferences.getString("${p.name}_identifier", null)
             ProviderDiagnostic(
                 lastSyncEpochMillis = syncTime,
+                lastAttemptEpochMillis = preferences.getLong("${p.name}_last_attempt_ms", 0).takeIf { it > 0 },
                 lastSyncSummary = summary,
                 lastError = err,
                 accountStatus = status,
                 accountIdentifier = ident,
             )
         }
+
+    fun isStale(provider: Provider, now: Long = System.currentTimeMillis()): Boolean {
+        val state = diagnostics.value[provider] ?: return true
+        val last = state.lastAttemptEpochMillis ?: return true
+        val window = if (state.accountStatus in setOf(AccountStatus.ERROR, AccountStatus.NEEDS_LOGIN, AccountStatus.APP_NOT_INSTALLED)) 5 * 60_000 else 15 * 60_000
+        return now < last || now - last >= window
+    }
 
     fun setEnabled(provider: Provider, enabled: Boolean) {
         preferences.edit { putBoolean(provider.name, enabled) }
@@ -74,6 +83,7 @@ class ProviderPreferences(context: Context) {
         val finalIdent = accountIdentifier ?: prev.accountIdentifier
         val updated = ProviderDiagnostic(
             lastSyncEpochMillis = now,
+            lastAttemptEpochMillis = now,
             lastSyncSummary = listOfNotNull(summary, coverageHint).joinToString(" · "),
             lastError = coverageHint,
             accountStatus = if (coverageHint == null) AccountStatus.CONNECTED else AccountStatus.PARTIAL,
@@ -82,6 +92,7 @@ class ProviderPreferences(context: Context) {
         current[provider] = updated
         preferences.edit {
             putLong("${provider.name}_last_sync_ms", now)
+            putLong("${provider.name}_last_attempt_ms", now)
             putString("${provider.name}_last_summary", updated.lastSyncSummary)
             if (coverageHint == null) remove("${provider.name}_last_error") else putString("${provider.name}_last_error", coverageHint)
             putString("${provider.name}_status", updated.accountStatus.name)
@@ -98,12 +109,15 @@ class ProviderPreferences(context: Context) {
     ) {
         val current = _diagnostics.value.toMutableMap()
         val prev = current[provider] ?: ProviderDiagnostic()
+        val attemptedAt = System.currentTimeMillis()
         val updated = prev.copy(
+            lastAttemptEpochMillis = attemptedAt,
             lastError = error,
             accountStatus = status,
         )
         current[provider] = updated
         preferences.edit {
+            putLong("${provider.name}_last_attempt_ms", attemptedAt)
             putString("${provider.name}_last_error", error)
             putString("${provider.name}_status", status.name)
         }

@@ -86,7 +86,7 @@ class ArthaViewModelTest {
         advanceUntilIdle()
         assertEquals(RootGateState.DENIED, model.rootGate.value)
         fail = false
-        model.enterForeground()
+        model.refresh()
         advanceUntilIdle()
         assertEquals(RootGateState.GRANTED, model.rootGate.value)
         assertEquals(1, opens)
@@ -135,6 +135,17 @@ class ArthaViewModelTest {
         assertEquals(RootGateState.DENIED, model.rootGate.value)
         assertEquals(LedgerState.Ready(emptyList()), model.ledgerState.value)
         assertEquals(false, model.refreshing.value)
+    }
+
+    @Test fun unchangedForegroundDoesNotRepeatImports() = runTest(dispatcher) {
+        var calls = 0
+        val model = ArthaViewModel(RootAccess { true }, { ledger }, ingest = { calls++; emptyMap() }, computationDispatcher = dispatcher)
+        model.enterForeground(); advanceUntilIdle()
+        model.enterForeground(); advanceUntilIdle()
+        assertEquals(1, calls)
+        model.refresh(); advanceUntilIdle()
+        assertEquals(2, calls)
+        model.lock()
     }
 
     private fun model(rootAccess: RootAccess) = ArthaViewModel(rootAccess, { opens++; ledger }, computationDispatcher = dispatcher)

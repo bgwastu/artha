@@ -34,12 +34,15 @@ class IngestionCoordinator(
 
     init { require(adaptersByProvider.size == adapters.size) { "Only one adapter per Provider is allowed." } }
 
-    suspend fun ingestAll(): Map<Provider, String> = mutex.withLock {
+    suspend fun ingestAll(force: Boolean = true): Map<Provider, String> = mutex.withLock {
+        val selected = adaptersByProvider.keys.filter { provider ->
+            preferences == null || (provider in preferences.importEnabled.value && (force || preferences.isStale(provider)))
+        }
+        if (selected.isEmpty()) return@withLock emptyMap()
         check(rootAccess.verify()) { "Root access unavailable" }
         beforeBatch()
         try { buildMap {
-            for (provider in adaptersByProvider.keys) {
-                if (preferences != null && provider !in preferences.importEnabled.value) continue
+            for (provider in selected) {
                 _syncingProvider.value = provider
                 put(provider, importAndRecord(provider))
             }

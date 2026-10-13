@@ -79,6 +79,29 @@ class RoomLedgerRepositoryTest {
     }
 
     @Test
+    fun versionOneHistorySurvivesTheIndexedMigration() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "ledger-migration-test.db"
+        context.deleteDatabase(name)
+        try {
+            android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath(name), null).use { old ->
+                old.execSQL("CREATE TABLE unified_transactions (provider TEXT NOT NULL, providerTransactionId TEXT NOT NULL, direction TEXT NOT NULL, amountMinor INTEGER NOT NULL, currencyCode TEXT NOT NULL, occurredAtEpochMillis INTEGER NOT NULL, description TEXT NOT NULL, rawPayload TEXT NOT NULL, pocketId TEXT, pocketName TEXT, ingestedAtEpochMillis INTEGER NOT NULL, PRIMARY KEY(provider, providerTransactionId))")
+                old.execSQL("INSERT INTO unified_transactions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", arrayOf("JAGO", "provider-id-1", "DEBIT", 25000000, "IDR", transaction.occurredAt.toEpochMilli(), "Test payment", "{\"original\":true}", "main", "Main Pocket", 1))
+                old.version = 1
+            }
+            val migrated = Room.databaseBuilder(context, LedgerDatabase::class.java, name)
+                .addMigrations(LedgerDatabase.Migration1To2).addCallback(LedgerDatabase.AppendOnlyCallback).build()
+            try {
+                assertEquals(listOf(transaction), RoomLedgerRepository(migrated.transactions()).observeTransactions().first())
+                try {
+                    migrated.openHelper.writableDatabase.execSQL("DELETE FROM unified_transactions")
+                    fail("Migration must retain append-only protection")
+                } catch (_: SQLiteException) { }
+            } finally { migrated.close() }
+        } finally { context.deleteDatabase(name) }
+    }
+
+    @Test
     fun transactionsSurviveClosingAndReopeningTheLedger() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "ledger-persistence-test.db"

@@ -345,9 +345,11 @@ private fun TransactionList(
     val listState = rememberLazyListState()
     LaunchedEffect(resetKey) { listState.scrollToItem(0) }
 
-    val groupedByDay = remember(transactions) {
-        val zone = net.wastu.artha.core.model.AccountingTime.zone
-        transactions.groupBy { LocalDate.ofInstant(it.occurredAt, zone) }
+    val groupedByDay by produceState<Map<LocalDate, List<UnifiedTransaction>>>(emptyMap(), transactions) {
+        value = withContext(Dispatchers.Default) {
+            val zone = net.wastu.artha.core.model.AccountingTime.zone
+            transactions.groupBy { LocalDate.ofInstant(it.occurredAt, zone) }
+        }
     }
 
     LazyColumn(

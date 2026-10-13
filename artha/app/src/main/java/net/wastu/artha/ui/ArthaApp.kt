@@ -24,7 +24,7 @@ fun ArthaApp(model: ArthaViewModel) {
 
     Surface {
         if (rootGate == RootGateState.DENIED && ledger is net.wastu.artha.ui.LedgerState.Ready && providerCounts.values.sum() == 0) {
-            RootGateScreen(state = rootGate, onRetry = model::enterForeground)
+            RootGateScreen(state = rootGate, onRetry = model::refresh)
         } else {
             HomeScreen(
                 ledgerState = ledger,

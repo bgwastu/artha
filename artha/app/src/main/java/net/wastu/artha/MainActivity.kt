@@ -37,6 +37,7 @@ class MainActivity : ComponentActivity() {
                                     net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(application)
                                 }
                             },
+                            ingestStale = { application.ingestion.ingestAll(force = false) },
                             syncSingle = {
                                 application.ingestion.syncProvider(it).also {
                                     net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(application)

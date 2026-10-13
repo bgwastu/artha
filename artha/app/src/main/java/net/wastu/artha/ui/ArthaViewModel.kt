@@ -25,6 +25,7 @@ class ArthaViewModel(
     private val ledger: () -> LedgerRepository,
     private val clock: Clock = AccountingTime.clock,
     private val ingest: (suspend () -> Map<Provider, String>)? = null,
+    private val ingestStale: (suspend () -> Map<Provider, String>)? = null,
     private val syncSingle: (suspend (Provider) -> String)? = null,
     private val preferences: ProviderPreferences? = null,
     val syncingProvider: StateFlow<Provider?> = MutableStateFlow<Provider?>(null).asStateFlow(),
@@ -113,19 +114,20 @@ class ArthaViewModel(
                 }
             }
         }
-        if (_rootGate.value == RootGateState.DENIED) refresh() else automaticRefresh()
+        automaticRefresh()
     }
 
     private fun automaticRefresh() {
         val now = clock.millis()
         if (lastAutomaticRefresh != Long.MIN_VALUE && now - lastAutomaticRefresh < 15 * 60_000) return
         lastAutomaticRefresh = now
-        refresh()
+        importHistory(null, automatic = true)
     }
 
     fun refresh() { importHistory(null) }
     fun syncProvider(provider: Provider) { importHistory(provider) }
-    private fun importHistory(provider: Provider?) {
+    private fun importHistory(provider: Provider?, automatic: Boolean = false) {
+        if (automatic && preferences != null && importEnabled.value.none { preferences.isStale(it, clock.millis()) }) return
         if (ingestionJob?.isActive == true) return
         _refreshing.value = true
         ingestionJob = viewModelScope.launch {
@@ -135,7 +137,7 @@ class ArthaViewModel(
                 _rootGate.value = if (granted) RootGateState.GRANTED else RootGateState.DENIED
                 if (!granted) return@launch
                 val result = if (provider != null && syncSingle != null) mapOf(provider to syncSingle.invoke(provider))
-                    else ingest?.invoke().orEmpty()
+                    else if (automatic && ingestStale != null) ingestStale.invoke() else ingest?.invoke().orEmpty()
                 _ingestionStatus.value = _ingestionStatus.value + result
                 if (result.isNotEmpty() && driveSyncState.value.isEnabled) driveSyncManager?.syncNow()
             } catch (cancelled: CancellationException) { throw cancelled }

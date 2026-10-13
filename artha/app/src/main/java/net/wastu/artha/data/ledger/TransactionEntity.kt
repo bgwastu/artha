@@ -1,6 +1,7 @@
 package net.wastu.artha.data.ledger
 
 import androidx.room.Entity
+import androidx.room.Index
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.Pocket
@@ -8,7 +9,8 @@ import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import java.time.Instant
 
-@Entity(tableName = "unified_transactions", primaryKeys = ["provider", "providerTransactionId"])
+@Entity(tableName = "unified_transactions", primaryKeys = ["provider", "providerTransactionId"],
+    indices = [Index(value = ["occurredAtEpochMillis", "provider", "providerTransactionId"], orders = [Index.Order.DESC, Index.Order.ASC, Index.Order.ASC])])
 data class TransactionEntity(
     val provider: String,
     val providerTransactionId: String,
