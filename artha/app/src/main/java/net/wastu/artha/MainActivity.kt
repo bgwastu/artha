@@ -46,6 +46,7 @@ class MainActivity : ComponentActivity() {
                             syncingProvider = application.ingestion.syncingProvider,
                             analysisStore = application.analysisStore,
                             driveSyncManager = application.driveSyncManager,
+                            spendingState = application.spending.state,
                         ).also {
                             if (initialDest != null) it.setTargetDestination(initialDest)
                         }

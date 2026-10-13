@@ -2,8 +2,6 @@ package net.wastu.artha.data.analysis
 
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.UnifiedTransaction
-import net.wastu.artha.ui.CategorySpending
-import net.wastu.artha.ui.MonthSpendingAnalysis
 import java.time.YearMonth
 import java.time.ZoneId
 import org.json.JSONObject
@@ -14,7 +12,7 @@ object BudgetAnalyzer {
         allTransactions: List<UnifiedTransaction>,
         aiSummary: String? = null,
     ): MonthSpendingAnalysis {
-        val zone = ZoneId.systemDefault()
+        val zone = net.wastu.artha.core.model.AccountingTime.zone
         val currentMonthTxs = allTransactions.filter { YearMonth.from(it.occurredAt.atZone(zone)) == month }
         val prevMonth = month.minusMonths(1)
         val prevMonthTxs = allTransactions.filter { YearMonth.from(it.occurredAt.atZone(zone)) == prevMonth }

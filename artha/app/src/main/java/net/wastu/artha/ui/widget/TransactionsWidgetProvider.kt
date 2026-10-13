@@ -15,20 +15,11 @@ import net.wastu.artha.MainActivity
 import net.wastu.artha.R
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.UnifiedTransaction
-import net.wastu.artha.data.analysis.AnalysisStore
-import net.wastu.artha.data.analysis.CategoryClassifier
-import net.wastu.artha.data.ledger.LedgerDatabase
-import net.wastu.artha.data.ledger.RoomLedgerRepository
-import net.wastu.artha.data.providers.ProviderPreferences
-import net.wastu.artha.data.reconciliation.LedgerReconciler
 import net.wastu.artha.ui.formatMoney
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 class TransactionsWidgetProvider : AppWidgetProvider() {
@@ -80,31 +71,10 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
             itemTemplateFlags,
         )
 
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val database = runCatching { LedgerDatabase.create(context) }.getOrNull()
-                val ledger = database?.let { RoomLedgerRepository(it.transactions()) }
-                val rawTxs = ledger?.observeTransactions()?.firstOrNull().orEmpty()
-                val snapshot = runCatching { net.wastu.artha.data.analysis.TransactionMetadata.migrate(AnalysisStore(context).snapshot.value, rawTxs) }.getOrNull()
-                val enabled = runCatching { ProviderPreferences(context).enabled.value }.getOrNull()
-
-                val enriched = rawTxs.map { tx ->
-                    val id = tx.key
-                    val note = snapshot?.userNotes?.get(id) ?: tx.userNote
-                    val isCredit = tx.direction == Direction.CREDIT
-                    val cat = if (isCredit) null else {
-                        snapshot?.categories?.get(id) ?: CategoryClassifier.classify(tx, note).category
-                    }
-                    tx.copy(
-                        userNote = note,
-                        category = cat,
-                        isReversal = tx.rawPayload.contains("\"isReversal\":true") || tx.description.contains("(Reversed)"),
-                    )
-                }
-
-                val reconciled = LedgerReconciler.reconcileLedger(enriched)
-                    .filter { enabled == null || it.provider in enabled }
-                    .take(40)
+        WidgetRefresh.schedule("transactions", pendingResult) {
+                val app = context.applicationContext as net.wastu.artha.ArthaApplication
+                val enabled = app.providerPreferences.enabled.value
+                val reconciled = widgetSpending(context).transactions.filter { it.provider in enabled }.take(40)
 
                 val dateFormatter = DateTimeFormatter.ofPattern("d MMM", Locale.US)
 
@@ -117,8 +87,8 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                         val builder = RemoteViews.RemoteCollectionItems.Builder()
-                        for ((idx, tx) in reconciled.withIndex()) {
-                            builder.addItem(idx.toLong(), buildTransactionItemView(context, tx, dateFormatter))
+                        for (tx in reconciled) {
+                            builder.addItem(java.util.UUID.nameUUIDFromBytes(tx.key.toByteArray()).mostSignificantBits, buildTransactionItemView(context, tx, dateFormatter))
                         }
                         views.setRemoteAdapter(R.id.widget_transactions_list, builder.build())
                         appWidgetManager.updateAppWidget(appWidgetId, views)
@@ -134,9 +104,6 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
                         appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.widget_transactions_list)
                     }
                 }
-            } finally {
-                pendingResult?.finish()
-            }
         }
     }
 
@@ -167,7 +134,7 @@ internal fun buildTransactionItemView(
     }
     views.setTextViewText(R.id.widget_item_description, title)
 
-    val zone = ZoneId.systemDefault()
+    val zone = net.wastu.artha.core.model.AccountingTime.zone
     val localDate = tx.occurredAt.atZone(zone).toLocalDate()
     val today = java.time.LocalDate.now(zone)
     val timeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
@@ -183,6 +150,7 @@ internal fun buildTransactionItemView(
     if (!isCredit && !tx.category.isNullOrBlank()) {
         subtitleParts += tx.category
     }
+    if (!tx.isConfirmed) subtitleParts += "Unconfirmed order"
     if (!tx.userNote.isNullOrBlank()) {
         subtitleParts += "#${tx.userNote}"
     }
@@ -226,30 +194,12 @@ private class TransactionsRemoteViewsFactory(
     override fun onCreate() {}
 
     override fun onDataSetChanged() {
-        runBlocking {
-            val database = runCatching { LedgerDatabase.create(context) }.getOrNull()
-            val ledger = database?.let { RoomLedgerRepository(it.transactions()) }
-            val rawTxs = ledger?.observeTransactions()?.firstOrNull().orEmpty()
-            val snapshot = runCatching { net.wastu.artha.data.analysis.TransactionMetadata.migrate(AnalysisStore(context).snapshot.value, rawTxs) }.getOrNull()
-            val enabled = runCatching { ProviderPreferences(context).enabled.value }.getOrNull()
-
-            val enriched = rawTxs.map { tx ->
-                val id = tx.key
-                val note = snapshot?.userNotes?.get(id) ?: tx.userNote
-                val isCredit = tx.direction == Direction.CREDIT
-                val cat = if (isCredit) null else {
-                    snapshot?.categories?.get(id) ?: CategoryClassifier.classify(tx, note).category
-                }
-                tx.copy(
-                    userNote = note,
-                    category = cat,
-                    isReversal = tx.rawPayload.contains("\"isReversal\":true") || tx.description.contains("(Reversed)"),
-                )
-            }
-
-            transactions = LedgerReconciler.reconcileLedger(enriched)
-                .filter { enabled == null || it.provider in enabled }
-                .take(40)
+        runBlocking(Dispatchers.IO) {
+            try {
+                val app = context.applicationContext as net.wastu.artha.ArthaApplication
+                val enabled = app.providerPreferences.enabled.value
+                transactions = widgetSpending(context).transactions.filter { it.provider in enabled }.take(40)
+            } catch (_: Exception) { /* Keep the last valid collection. */ }
         }
     }
 
@@ -268,7 +218,7 @@ private class TransactionsRemoteViewsFactory(
 
     override fun getViewTypeCount(): Int = 1
 
-    override fun getItemId(position: Int): Long = position.toLong()
+    override fun getItemId(position: Int): Long = transactions.getOrNull(position)?.let { java.util.UUID.nameUUIDFromBytes(it.key.toByteArray()).mostSignificantBits } ?: position.toLong()
 
     override fun hasStableIds(): Boolean = true
 }

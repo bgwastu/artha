@@ -9,9 +9,11 @@ import net.wastu.artha.data.ledger.RoomLedgerRepository
 class ArthaApplication : Application() {
     val rootAccess by lazy { LibsuRootAccess(applicationContext) }
 
-    // These lazy properties must only be touched after the Root Gate grants access.
+    private val applicationScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+    // Stored history is readable independently of root; imports still require root.
     private val database by lazy { LedgerDatabase.create(applicationContext) }
     val ledger by lazy { RoomLedgerRepository(database.transactions()) }
+    val spending by lazy { net.wastu.artha.data.analysis.SpendingRepository(ledger, analysisStore, applicationScope) }
     val providerPreferences by lazy { net.wastu.artha.data.providers.ProviderPreferences(applicationContext) }
     val analysisStore by lazy { net.wastu.artha.data.analysis.AnalysisStore(applicationContext) }
     val driveSyncManager by lazy { net.wastu.artha.data.sync.DriveSyncManager(applicationContext, { ledger }, analysisStore, rootAccess) }

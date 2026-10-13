@@ -20,9 +20,10 @@ fun ArthaApp(model: ArthaViewModel) {
     val providerCounts by model.providerCounts.collectAsStateWithLifecycle()
 
     LifecycleEventEffect(Lifecycle.Event.ON_START) { model.enterForeground() }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { model.stopForegroundImports() }
 
     Surface {
-        if (rootGate == RootGateState.DENIED) {
+        if (rootGate == RootGateState.DENIED && ledger is net.wastu.artha.ui.LedgerState.Ready && providerCounts.values.sum() == 0) {
             RootGateScreen(state = rootGate, onRetry = model::enterForeground)
         } else {
             HomeScreen(

@@ -14,7 +14,7 @@ private val IndonesianLocale = Locale.forLanguageTag("id-ID")
 
 private val TransactionDateFormatter: DateTimeFormatter = DateTimeFormatter
     .ofPattern("d MMM yyyy, HH:mm", Locale.US)
-    .withZone(ZoneId.systemDefault())
+    .withZone(net.wastu.artha.core.model.AccountingTime.zone)
 
 private val CachedCurrencyFormat = ThreadLocal.withInitial {
     NumberFormat.getCurrencyInstance(IndonesianLocale).apply {
@@ -50,6 +50,6 @@ fun formatDate(instant: Instant): String = TransactionDateFormatter.format(insta
 
 private val TransactionTimeFormatter: DateTimeFormatter = DateTimeFormatter
     .ofPattern("HH:mm", Locale.US)
-    .withZone(ZoneId.systemDefault())
+    .withZone(net.wastu.artha.core.model.AccountingTime.zone)
 
 fun formatTime(instant: Instant): String = TransactionTimeFormatter.format(instant)

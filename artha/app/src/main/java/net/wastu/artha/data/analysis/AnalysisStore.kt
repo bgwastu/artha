@@ -189,6 +189,18 @@ class AnalysisStore(context: Context) {
     }
 
     @Synchronized
+    fun commitMonthSummary(month: String, summary: String, fingerprint: String, input: AnalysisSnapshot): Boolean {
+        val current = _snapshot.value
+        if (current.userNotes != input.userNotes || current.categories != input.categories || current.knowledge != input.knowledge ||
+            current.aiConfig != input.aiConfig || current.customCategories != input.customCategories ||
+            current.manualCategories != input.manualCategories || current.monthlyNotes[month] != input.monthlyNotes[month]) return false
+        applyMergedSnapshot(current.copy(monthlySummaries = current.monthlySummaries + (month to summary),
+            analysisFingerprints = current.analysisFingerprints + (month to fingerprint),
+            updatedAt = current.updatedAt + ("monthSummary:$month" to System.currentTimeMillis())))
+        return true
+    }
+
+    @Synchronized
     fun clearAllClassifications() {
         val current = _snapshot.value
         val now = System.currentTimeMillis()

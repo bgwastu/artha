@@ -2,43 +2,16 @@ package net.wastu.artha.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import net.wastu.artha.core.model.Direction
-import net.wastu.artha.core.model.Money
-import net.wastu.artha.core.model.Provider
-import net.wastu.artha.core.model.UnifiedTransaction
-import net.wastu.artha.core.root.RootAccess
-import net.wastu.artha.core.root.RootGateState
-import net.wastu.artha.data.ledger.LedgerRepository
 import java.time.Clock
-import java.util.UUID
-import java.util.Locale
 import java.time.YearMonth
-import java.time.ZoneId
-import net.wastu.artha.data.analysis.AnalysisStore
-import net.wastu.artha.data.analysis.AnalysisSnapshot
-import net.wastu.artha.data.analysis.AiConfig
-import net.wastu.artha.data.analysis.AiAnalysisService
-import net.wastu.artha.data.analysis.CategoryClassifier
-import net.wastu.artha.data.analysis.CategoryConstants
-import net.wastu.artha.data.analysis.FeedbackResult
-import net.wastu.artha.data.reconciliation.LedgerReconciler
-import net.wastu.artha.data.analysis.BudgetAnalyzer
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.launch
-import org.json.JSONObject
-import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+import net.wastu.artha.core.model.*
+import net.wastu.artha.core.root.*
+import net.wastu.artha.data.analysis.*
+import net.wastu.artha.data.ledger.LedgerRepository
+import net.wastu.artha.data.providers.ProviderPreferences
+import net.wastu.artha.data.sync.DriveSyncManager
 
 sealed interface LedgerState {
     data object Loading : LedgerState
@@ -46,45 +19,19 @@ sealed interface LedgerState {
     data object Failed : LedgerState
 }
 
-sealed interface EntryState {
-    data object Idle : EntryState
-    data object Saving : EntryState
-    data object Saved : EntryState
-    data object Failed : EntryState
-}
-
-data class CategorySpending(
-    val category: String,
-    val amountMinor: Long,
-    val sharePercent: Float,
-    val previousMonthAmountMinor: Long,
-    val deltaPercent: Float?,
-    val deltaAmountMinor: Long,
-    val transactions: List<UnifiedTransaction>,
-)
-
-data class MonthSpendingAnalysis(
-    val month: YearMonth,
-    val totalPersonalSpendingMinor: Long,
-    val previousMonthTotalMinor: Long,
-    val totalDeltaPercent: Float?,
-    val categories: List<CategorySpending>,
-    val monthlyAiSummary: String?,
-    val unconfirmedSpendingMinor: Long = 0,
-    val unsupportedCurrencyCount: Int = 0,
-)
-
+@OptIn(kotlinx.coroutines.FlowPreview::class)
 class ArthaViewModel(
     private val rootAccess: RootAccess,
     private val ledger: () -> LedgerRepository,
-    private val clock: Clock = Clock.systemUTC(),
+    private val clock: Clock = AccountingTime.clock,
     private val ingest: (suspend () -> Map<Provider, String>)? = null,
     private val syncSingle: (suspend (Provider) -> String)? = null,
-    private val preferences: net.wastu.artha.data.providers.ProviderPreferences? = null,
-    val syncingProvider: kotlinx.coroutines.flow.StateFlow<Provider?> = MutableStateFlow<Provider?>(null).asStateFlow(),
+    private val preferences: ProviderPreferences? = null,
+    val syncingProvider: StateFlow<Provider?> = MutableStateFlow<Provider?>(null).asStateFlow(),
     val analysisStore: AnalysisStore? = null,
-    val driveSyncManager: net.wastu.artha.data.sync.DriveSyncManager? = null,
-    private val computationDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default,
+    val driveSyncManager: DriveSyncManager? = null,
+    private val computationDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val spendingState: StateFlow<SpendingState>? = null,
 ) : ViewModel() {
     private val _rootGate = MutableStateFlow(RootGateState.LOCKED)
     val rootGate = _rootGate.asStateFlow()
@@ -92,417 +39,182 @@ class ArthaViewModel(
     val ledgerState = _ledgerState.asStateFlow()
     private val _providerCounts = MutableStateFlow<Map<Provider, Int>>(emptyMap())
     val providerCounts = _providerCounts.asStateFlow()
-    private val _entryState = MutableStateFlow<EntryState>(EntryState.Idle)
-    val entryState = _entryState.asStateFlow()
-
     val analysisSnapshot = analysisStore?.snapshot ?: MutableStateFlow(AnalysisSnapshot()).asStateFlow()
-    private val _selectedMonth = MutableStateFlow(YearMonth.now(clock))
+    private val _selectedMonth = MutableStateFlow(YearMonth.now(clock.withZone(AccountingTime.zone)))
     val selectedMonth = _selectedMonth.asStateFlow()
     private val _dateRangeFilter = MutableStateFlow<Pair<Long?, Long?>?>(null)
     val dateRangeFilter = _dateRangeFilter.asStateFlow()
-    private val _analyzingMonths = MutableStateFlow<Set<YearMonth>>(emptySet())
-    val analyzingMonths = _analyzingMonths.asStateFlow()
-    val analyzingAi = _analyzingMonths.map { it.isNotEmpty() }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
-    private val monthAnalysisJobs = ConcurrentHashMap<YearMonth, Job>()
-    private val monthDebounceJobs = ConcurrentHashMap<YearMonth, Job>()
     private val _targetDestination = MutableStateFlow<String?>(null)
     val targetDestination = _targetDestination.asStateFlow()
-    fun setTargetDestination(dest: String?) { _targetDestination.value = dest }
-    private val analysisScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val _monthAnalysis = MutableStateFlow(BudgetAnalyzer.analyzeMonth(YearMonth.now(clock), emptyList(), null))
     private val _reconciledCache = MutableStateFlow<List<UnifiedTransaction>>(emptyList())
+    private val _monthAnalysis = MutableStateFlow(BudgetAnalyzer.analyzeMonth(_selectedMonth.value, emptyList()))
     val monthAnalysis = _monthAnalysis.asStateFlow()
-
-    val enabledProviders = preferences?.enabled ?: MutableStateFlow(Provider.entries.toSet()).asStateFlow()
+    private val _analyzingMonths = MutableStateFlow<Set<YearMonth>>(emptySet())
+    val analyzingMonths = _analyzingMonths.asStateFlow()
+    private val _analysisErrors = MutableStateFlow<Map<YearMonth, String>>(emptyMap())
+    val analysisErrors = _analysisErrors.asStateFlow()
+    private val monthJobs = mutableMapOf<YearMonth, Job>()
+    private val failedFingerprints = mutableMapOf<YearMonth, String>()
     private val _refreshing = MutableStateFlow(false)
     val refreshing = _refreshing.asStateFlow()
     private val _ingestionStatus = MutableStateFlow<Map<Provider, String>>(emptyMap())
     val ingestionStatus = _ingestionStatus.asStateFlow()
-    private var ingestionJob: Job? = null
-
-    fun setProviderEnabled(provider: Provider, enabled: Boolean) {
-        if (_rootGate.value == RootGateState.GRANTED) preferences?.setEnabled(provider, enabled)
-    }
-
-
-
+    val enabledProviders = preferences?.enabled ?: MutableStateFlow(Provider.entries.toSet()).asStateFlow()
     val importEnabled = preferences?.importEnabled ?: MutableStateFlow(Provider.entries.toSet()).asStateFlow()
-    fun setImportEnabled(provider: Provider, enabled: Boolean) { preferences?.setImportEnabled(provider, enabled) }
-
     val providerDiagnostics = preferences?.diagnostics ?: MutableStateFlow(emptyMap<Provider, net.wastu.artha.data.providers.ProviderDiagnostic>()).asStateFlow()
     val driveSyncState = driveSyncManager?.syncState ?: MutableStateFlow(net.wastu.artha.data.sync.DriveSyncState()).asStateFlow()
+    private var observerJob: Job? = null
+    private var ingestionJob: Job? = null
+    private var lastAutomaticRefresh = Long.MIN_VALUE
 
+    fun setTargetDestination(dest: String?) { _targetDestination.value = dest }
+    fun setProviderEnabled(provider: Provider, enabled: Boolean) { preferences?.setEnabled(provider, enabled) }
+    fun setImportEnabled(provider: Provider, enabled: Boolean) { preferences?.setImportEnabled(provider, enabled) }
     fun setDriveSyncEnabled(enabled: Boolean) { driveSyncManager?.setEnabled(enabled) }
     fun setDriveAccountEmail(email: String?) { driveSyncManager?.setAccountEmail(email) }
-    fun setDriveEncryptionPassword(password: String) { driveSyncManager?.setEncryptionPassword(password) }
-    fun syncDriveNow() {
-        viewModelScope.launch { driveSyncManager?.syncNow() }
-    }
+    fun setDriveEncryptionPassword(password: String) { viewModelScope.launch(Dispatchers.IO) { driveSyncManager?.setEncryptionPassword(password) } }
+    fun syncDriveNow() { viewModelScope.launch { driveSyncManager?.syncNow() } }
+    fun restoreDriveBackup() { viewModelScope.launch { driveSyncManager?.restoreNow() } }
 
-    fun restoreDriveBackup() {
-        viewModelScope.launch { driveSyncManager?.restoreNow() }
-    }
-
-    fun syncProvider(provider: Provider) {
-        if (_rootGate.value != RootGateState.GRANTED || ingestionJob?.isActive == true) return
-        val currentSession = session
-        ingestionJob = viewModelScope.launch {
-            try {
-                if (!rootAccess.verify()) {
-                    lock()
-                    _rootGate.value = RootGateState.DENIED
-                    return@launch
+    fun enterForeground() {
+        if (observerJob?.isActive != true) {
+            observerJob = viewModelScope.launch {
+                val state = spendingState ?: spendingFlow(ledger(), analysisSnapshot, computationDispatcher,
+                    migrate = { analysisStore?.migrateMetadata(it) }).stateIn(this, SharingStarted.Eagerly, SpendingState.Loading)
+                launch {
+                    combine(state, enabledProviders, _dateRangeFilter) { projection, enabled, dates ->
+                        when (projection) {
+                            SpendingState.Loading -> LedgerState.Loading
+                            SpendingState.Failed -> LedgerState.Failed
+                            is SpendingState.Ready -> {
+                                _providerCounts.value = projection.providerCounts
+                                _reconciledCache.value = projection.transactions
+                                val (start, end) = dates ?: (null to null)
+                                LedgerState.Ready(projection.transactions.filter { tx ->
+                                    val millis = tx.occurredAt.toEpochMilli()
+                                    tx.provider in enabled && (start == null || millis >= start) &&
+                                        (end == null || millis < AccountingTime.dayAfter(end))
+                                })
+                            }
+                        }
+                    }.flowOn(computationDispatcher).collect { _ledgerState.value = it }
                 }
-                if (syncSingle != null) {
-                    val status = syncSingle.invoke(provider)
-                    if (currentSession == session) {
-                        _ingestionStatus.value = _ingestionStatus.value + (provider to status)
+                launch(computationDispatcher) {
+                    combine(_reconciledCache, _selectedMonth, analysisSnapshot) { rows, month, snapshot ->
+                        BudgetAnalyzer.analyzeMonth(month, rows, snapshot.monthlySummaries[month.toString()])
+                    }.collect { if (it.month == _selectedMonth.value) _monthAnalysis.value = it }
+                }
+                launch {
+                    combine(_reconciledCache, _selectedMonth, analysisSnapshot, _refreshing) { rows, month, snapshot, importing ->
+                        if (importing) null else month to fingerprint(month, rows, snapshot)
+                    }.distinctUntilChanged().debounce(2000).collect { input ->
+                        input?.let { (month, _) -> analyzeMonth(month, debounceMs = 0) }
                     }
-                } else if (ingest != null) {
-                    val status = ingest.invoke()
-                    if (currentSession == session) _ingestionStatus.value = status
                 }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
             }
         }
+        if (_rootGate.value == RootGateState.DENIED) refresh() else automaticRefresh()
     }
 
-    fun refresh() {
-        if (ingest == null || _rootGate.value != RootGateState.GRANTED || ingestionJob?.isActive == true) return
-        val currentSession = session
+    private fun automaticRefresh() {
+        val now = clock.millis()
+        if (lastAutomaticRefresh != Long.MIN_VALUE && now - lastAutomaticRefresh < 15 * 60_000) return
+        lastAutomaticRefresh = now
+        refresh()
+    }
+
+    fun refresh() { importHistory(null) }
+    fun syncProvider(provider: Provider) { importHistory(provider) }
+    private fun importHistory(provider: Provider?) {
+        if (ingestionJob?.isActive == true) return
         _refreshing.value = true
         ingestionJob = viewModelScope.launch {
             try {
-                if (!rootAccess.verify()) {
-                    lock()
-                    _rootGate.value = RootGateState.DENIED
-                    return@launch
-                }
-                val status = ingest.invoke()
-                if (currentSession == session) _ingestionStatus.value = status
-                if (!rootAccess.verify() && currentSession == session) {
-                    lock()
-                    _rootGate.value = RootGateState.DENIED
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                if (currentSession == session) {
-                    if (!rootAccess.verify()) {
-                        lock()
-                        _rootGate.value = RootGateState.DENIED
-                    } else _ingestionStatus.value = Provider.entries.associateWith { "Unavailable" }
-                }
-            } finally {
-                if (currentSession == session) _refreshing.value = false
-            }
-        }
-        if (driveSyncManager?.syncState?.value?.isEnabled == true) {
-            viewModelScope.launch(Dispatchers.IO) {
-                runCatching { driveSyncManager.syncNow() }
-            }
+                _rootGate.value = RootGateState.CHECKING
+                val granted = try { rootAccess.verify() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { false }
+                _rootGate.value = if (granted) RootGateState.GRANTED else RootGateState.DENIED
+                if (!granted) return@launch
+                val result = if (provider != null && syncSingle != null) mapOf(provider to syncSingle.invoke(provider))
+                    else ingest?.invoke().orEmpty()
+                _ingestionStatus.value = _ingestionStatus.value + result
+                if (result.isNotEmpty() && driveSyncState.value.isEnabled) driveSyncManager?.syncNow()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (e: Exception) { _ingestionStatus.value = _ingestionStatus.value + ((provider ?: Provider.JAGO) to (e.message ?: "Import unavailable")) }
+            finally { _refreshing.value = false }
         }
     }
 
-    private var sessionJob: Job? = null
-    private var appendJob: Job? = null
-    private var session = 0L
-
-    fun enterForeground() {
-        if (_rootGate.value == RootGateState.GRANTED && sessionJob?.isActive == true) {
-            refresh()
-            return
-        }
-        lock()
-        val currentSession = session
-        _rootGate.value = RootGateState.CHECKING
-        sessionJob = viewModelScope.launch {
-            try {
-                if (!rootAccess.verify()) {
-                    if (currentSession == session) _rootGate.value = RootGateState.DENIED
-                    return@launch
-                }
-                if (currentSession != session) return@launch
-                _rootGate.value = RootGateState.GRANTED
-                launch(Dispatchers.Default) {
-                    combine(_reconciledCache, _selectedMonth, analysisSnapshot) { reconciledAll, month, analysis ->
-                        val monthKey = month.toString()
-                        val summary = analysis.monthlySummaries[monthKey]
-                        BudgetAnalyzer.analyzeMonth(month, reconciledAll, summary)
-                    }.collect { result ->
-                        _monthAnalysis.value = result
-                        val month = result.month
-                        val monthKey = month.toString()
-                        if (result.categories.isNotEmpty() && month !in _analyzingMonths.value) {
-                            val snap = analysisSnapshot.value
-                            val allTxs = _reconciledCache.value
-                            val zone = ZoneId.systemDefault()
-                            val monthTxs = allTxs.filter {
-                                it.direction == Direction.DEBIT && YearMonth.from(it.occurredAt.atZone(zone)) == month
-                            }
-                            val currentFp = BudgetAnalyzer.computeMonthFingerprint(
-                                monthTransactions = monthTxs,
-                                monthlyNote = snap.monthlyNotes[monthKey].orEmpty(),
-                                knowledge = snap.knowledge,
-                                customCategories = snap.customCategories,
-                            )
-                            val lastFp = snap.analysisFingerprints[monthKey]
-                            if (lastFp == null || lastFp != currentFp || snap.monthlySummaries[monthKey] == null) {
-                                analyzeMonth(month)
-                            }
-                        }
-                    }
-                }
-
-                var initialLoaded = false
-                combine(
-                    ledger().observeTransactions(),
-                    enabledProviders,
-                    analysisSnapshot,
-                    _dateRangeFilter,
-                ) { rawTransactions, enabled, analysis, dateRange ->
-                    analysisStore?.migrateMetadata(rawTransactions)
-                    val currentAnalysis = analysisStore?.snapshot?.value ?: net.wastu.artha.data.analysis.TransactionMetadata.migrate(analysis, rawTransactions)
-                    _providerCounts.value = rawTransactions.groupingBy { it.provider }.eachCount()
-                    val enriched = rawTransactions.map { tx ->
-                        val id = tx.key
-                        val note = currentAnalysis.userNotes[id] ?: tx.userNote
-                        val isCredit = tx.direction == Direction.CREDIT
-                        val classification = if (isCredit) null else CategoryClassifier.classify(tx, note)
-                        val cat = if (isCredit) null else (currentAnalysis.categories[id] ?: classification?.category)
-                        val reason = if (isCredit) null else (currentAnalysis.reasons[id] ?: classification?.reason)
-                        tx.copy(
-                            userNote = note,
-                            category = cat,
-                            classificationIsManual = id in currentAnalysis.manualCategories,
-                            aiReasoning = reason,
-                            isReversal = tx.rawPayload.contains("\"isReversal\":true") || tx.description.contains("(Reversed)"),
-                        )
-                    }
-                    val reconciledAll = LedgerReconciler.reconcileLedger(enriched)
-                    _reconciledCache.value = reconciledAll
-                    val filteredByProvider = reconciledAll.filter { it.provider in enabled }
-                    if (dateRange != null) {
-                        val (start, end) = dateRange
-                        filteredByProvider.filter { tx ->
-                            val epoch = tx.occurredAt.toEpochMilli()
-                            (start == null || epoch >= start) && (end == null || epoch <= end + 86_399_999L)
-                        }
-                    } else {
-                        filteredByProvider
-                    }
-                }.flowOn(computationDispatcher).collect { transactions ->
-                    _ledgerState.value = LedgerState.Ready(transactions)
-                    if (!initialLoaded) {
-                        initialLoaded = true
-                        refresh()
-                    }
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                if (currentSession != session) return@launch
-                if (_rootGate.value == RootGateState.GRANTED) {
-                    _ledgerState.value = LedgerState.Failed
-                } else {
-                    _rootGate.value = RootGateState.DENIED
-                }
-            }
+    fun stopForegroundImports() {
+        if (ingestionJob?.isActive == true) {
+            ingestionJob?.cancel(); lastAutomaticRefresh = Long.MIN_VALUE; _rootGate.value = RootGateState.LOCKED
         }
     }
-
-    /** Called synchronously on backgrounding; no financial state stays on screen. */
     fun lock() {
-        session++
-        sessionJob?.cancel()
-        appendJob?.cancel()
-        ingestionJob?.cancel()
-        _refreshing.value = false
-        _ingestionStatus.value = emptyMap()
-        _rootGate.value = RootGateState.LOCKED
-        _ledgerState.value = LedgerState.Loading
-        _entryState.value = EntryState.Idle
-    }
-
-    fun resetEntry() {
-        if (_entryState.value != EntryState.Saving) _entryState.value = EntryState.Idle
-    }
-
-    fun appendManual(provider: Provider, direction: Direction, money: Money, description: String) {
-        if (_rootGate.value != RootGateState.GRANTED || _entryState.value == EntryState.Saving) return
-        if (description.isBlank()) return
-        val currentSession = session
-        _entryState.value = EntryState.Saving
-        appendJob = viewModelScope.launch {
-            try {
-                if (!rootAccess.verify()) {
-                    lock()
-                    _rootGate.value = RootGateState.DENIED
-                    return@launch
-                }
-                if (currentSession != session) return@launch
-                val now = clock.instant()
-                val transaction = UnifiedTransaction(
-                    provider = provider,
-                    providerTransactionId = "manual:${UUID.randomUUID()}",
-                    direction = direction,
-                    money = money,
-                    occurredAt = now,
-                    description = description.trim(),
-                    rawPayload = JSONObject()
-                        .put("origin", "manual")
-                        .put("provider", provider.name)
-                        .put("direction", direction.name)
-                        .put("amountMinor", money.amountMinor)
-                        .put("currencyCode", money.currencyCode)
-                        .put("occurredAt", now.toString())
-                        .put("description", description.trim())
-                        .toString(),
-                )
-                ledger().append(listOf(transaction))
-                if (currentSession == session) _entryState.value = EntryState.Saved
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                if (currentSession == session) _entryState.value = EntryState.Failed
-            }
-        }
+        stopForegroundImports(); observerJob?.cancel(); monthJobs.values.forEach(Job::cancel); monthJobs.clear()
+        lastAutomaticRefresh = Long.MIN_VALUE
+        _rootGate.value = RootGateState.LOCKED; _ledgerState.value = LedgerState.Loading
     }
     fun setAnalysisMonth(month: YearMonth) {
-        val currentMax = YearMonth.now(clock)
-        if (month <= currentMax) {
-            _selectedMonth.value = month
-        }
+        if (month <= YearMonth.now(clock.withZone(AccountingTime.zone))) _selectedMonth.value = month
     }
     fun setDateRangeFilter(startMillis: Long?, endMillis: Long?) {
-        _dateRangeFilter.value = if (startMillis == null && endMillis == null) null else (startMillis to endMillis)
+        _dateRangeFilter.value = if (startMillis == null && endMillis == null) null else startMillis to endMillis
     }
     fun clearDateRangeFilter() { _dateRangeFilter.value = null }
     fun setUserNote(transaction: UnifiedTransaction, note: String) {
-        val key = transaction.key
-        _reconciledCache.value = _reconciledCache.value.map { if (it.key == key) it.copy(userNote = note) else it }
-        viewModelScope.launch(Dispatchers.IO) { analysisStore?.setUserNote(key, note) }
-        analyzeMonth(YearMonth.from(transaction.occurredAt.atZone(ZoneId.systemDefault())), forceReanalyze = true, debounceMs = 800L)
+        viewModelScope.launch(Dispatchers.IO) { analysisStore?.setUserNote(transaction.key, note) }
     }
-
-    fun applyKnowledgeRewrite(rewritten: String) {
-        analysisStore?.setKnowledge(rewritten)
-        analyzeCurrentMonth()
-    }
-
-    fun updateAiConfig(config: AiConfig) { analysisStore?.setAiConfig(config) }
-    fun addCustomCategory(category: String) { analysisStore?.addCustomCategory(category) }
-    fun removeCustomCategory(category: String) { analysisStore?.removeCustomCategory(category) }
-    fun resetCategoriesToDefault() { analysisStore?.resetCategoriesToDefault() }
-
     fun setTransactionCategory(transaction: UnifiedTransaction, category: String) {
-        val key = transaction.key
-        _reconciledCache.value = _reconciledCache.value.map { if (it.key == key) it.copy(category = category) else it }
-        viewModelScope.launch(Dispatchers.IO) { analysisStore?.setClassification(key, category, "", manual = true) }
-        analyzeMonth(YearMonth.from(transaction.occurredAt.atZone(ZoneId.systemDefault())), forceReanalyze = true, debounceMs = 600L)
+        viewModelScope.launch(Dispatchers.IO) { analysisStore?.setClassification(transaction.key, category, "", manual = true) }
     }
-
-    fun setCategoryIcon(category: String, iconKey: String?) { analysisStore?.setCategoryIcon(category, iconKey) }
-
-    fun setMonthlyNote(month: String, note: String) {
-        analysisStore?.setMonthlyNote(month, note)
-        val ym = runCatching { YearMonth.parse(month) }.getOrNull()
-        if (ym != null) analyzeMonth(ym, forceReanalyze = true, debounceMs = 800L)
-        else analyzeCurrentMonth()
-    }
-
+    fun applyKnowledgeRewrite(rewritten: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setKnowledge(rewritten) } }
+    fun updateAiConfig(config: AiConfig) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setAiConfig(config) } }
+    fun addCustomCategory(category: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.addCustomCategory(category) } }
+    fun removeCustomCategory(category: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.removeCustomCategory(category) } }
+    fun resetCategoriesToDefault() { viewModelScope.launch(Dispatchers.IO) { analysisStore?.resetCategoriesToDefault() } }
+    fun setCategoryIcon(category: String, iconKey: String?) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setCategoryIcon(category, iconKey) } }
+    fun setMonthlyNote(month: String, note: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setMonthlyNote(month, note) } }
     fun recategorizeAll() { analyzeCurrentMonth() }
 
-    fun analyzeMonth(month: YearMonth, forceReanalyze: Boolean = false, debounceMs: Long = 600L) {
-        // Cancel any pending debounce timer for this month
-        monthDebounceJobs[month]?.cancel()
-        // Cancel any running in-flight network request for this month
-        monthAnalysisJobs[month]?.cancel()
+    private fun monthTransactions(month: YearMonth, rows: List<UnifiedTransaction>) = rows.filter {
+        YearMonth.from(it.occurredAt.atZone(AccountingTime.zone)) == month && BudgetAnalyzer.isSpending(it)
+    }
+    private fun fingerprint(month: YearMonth, rows: List<UnifiedTransaction>, snapshot: AnalysisSnapshot): String =
+        BudgetAnalyzer.computeMonthFingerprint(monthTransactions(month, rows), snapshot.monthlyNotes[month.toString()].orEmpty(),
+            snapshot.knowledge + "\n${snapshot.aiConfig.baseUrl}\n${snapshot.aiConfig.model}\n${snapshot.aiConfig.apiKey.hashCode()}", snapshot.customCategories)
 
-        val debounceJob = analysisScope.launch {
-            if (debounceMs > 0L && !forceReanalyze) {
-                delay(debounceMs)
-            }
-
-            val snap = analysisSnapshot.value
-            val monthStr = month.toString()
-            val allTxs = _reconciledCache.value
-            val zone = ZoneId.systemDefault()
-            val monthTxs = allTxs.filter {
-                it.direction == Direction.DEBIT && YearMonth.from(it.occurredAt.atZone(zone)) == month
-            }
-            if (monthTxs.isEmpty()) return@launch
-
-            val monthlyNote = snap.monthlyNotes[monthStr].orEmpty()
-            val currentFingerprint = BudgetAnalyzer.computeMonthFingerprint(
-                monthTransactions = monthTxs,
-                monthlyNote = monthlyNote,
-                knowledge = snap.knowledge,
-                customCategories = snap.customCategories,
-            )
-            val lastFingerprint = snap.analysisFingerprints[monthStr]
-            if (!forceReanalyze && lastFingerprint != null && lastFingerprint == currentFingerprint && snap.monthlySummaries[monthStr] != null) {
-                return@launch
-            }
-
-            val analysisJob = launch {
-                _analyzingMonths.value = _analyzingMonths.value + month
-                try {
-                    val result = AiAnalysisService.analyzeMonth(
-                        snap.aiConfig,
-                        snap.knowledge,
-                        monthStr,
-                        monthTxs,
-                        snap.customCategories,
-                        monthlyNote,
-                    )
-                    analysisStore?.setBatchClassifications(result.classifications)
-                    analysisStore?.setMonthlySummary(monthStr, result.monthlySummary)
-                    analysisStore?.setMonthFingerprint(monthStr, currentFingerprint)
-
-                    val currentCache = _reconciledCache.value
-                    val updated = currentCache.map { tx ->
-                        val clean = tx.key
-                        val aiCat = result.classifications[clean]?.first
-                        val aiReason = result.classifications[clean]?.second
-                        if (aiCat != null && clean !in analysisSnapshot.value.manualCategories) tx.copy(category = aiCat, aiReasoning = aiReason) else tx
-                    }
-                    _reconciledCache.value = updated
-                    _monthAnalysis.value = BudgetAnalyzer.analyzeMonth(month, updated, result.monthlySummary)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (e: Exception) {
-                    android.util.Log.e("ArthaAi", "AI Analysis failed for $month", e)
-                } finally {
-                    _analyzingMonths.value = _analyzingMonths.value - month
-                    monthAnalysisJobs.remove(month)
+    fun analyzeMonth(month: YearMonth, forceReanalyze: Boolean = false, debounceMs: Long = 600) {
+        val config = analysisSnapshot.value.aiConfig
+        if (analysisStore == null || config.baseUrl.isBlank() || config.model.isBlank() || config.apiKey.isBlank()) return
+        monthJobs[month]?.cancel()
+        val job = viewModelScope.launch {
+            if (debounceMs > 0) delay(debounceMs)
+            val snapshot = analysisSnapshot.value
+            val rows = _reconciledCache.value
+            val transactions = monthTransactions(month, rows)
+            if (transactions.isEmpty()) return@launch
+            val fp = fingerprint(month, rows, snapshot)
+            if (!forceReanalyze && (failedFingerprints[month] == fp || snapshot.analysisFingerprints[month.toString()] == fp)) return@launch
+            _analyzingMonths.update { it + month }
+            _analysisErrors.update { it - month }
+            try {
+                val result = AiAnalysisService.analyzeMonth(snapshot.aiConfig, snapshot.knowledge, month.toString(), transactions,
+                    snapshot.customCategories, snapshot.monthlyNotes[month.toString()].orEmpty())
+                ensureActive()
+                if (fingerprint(month, _reconciledCache.value, analysisSnapshot.value) != fp) return@launch
+                withContext(Dispatchers.IO) { analysisStore.commitMonthSummary(month.toString(), result.monthlySummary, fp, snapshot) }
+                failedFingerprints.remove(month)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (e: Exception) {
+                failedFingerprints[month] = fp
+                _analysisErrors.update { it + (month to (e.message ?: "AI commentary unavailable; local insights are current.")) }
+            } finally {
+                if (monthJobs[month] === coroutineContext[Job]) {
+                    monthJobs.remove(month); _analyzingMonths.update { it - month }
                 }
             }
-            monthAnalysisJobs[month] = analysisJob
         }
-        monthDebounceJobs[month] = debounceJob
+        monthJobs[month] = job
     }
-
-    fun analyzeCurrentMonth() {
-        analyzeMonth(_selectedMonth.value, forceReanalyze = true)
-    }
-
-    fun submitAiFeedback(transaction: UnifiedTransaction, feedback: String, onResult: (FeedbackResult) -> Unit) {
-        analysisScope.launch {
-            try {
-                val snap = analysisSnapshot.value
-                val res = AiAnalysisService.submitFeedback(snap.aiConfig, snap.knowledge, transaction, feedback, snap.customCategories)
-                analysisStore?.setClassification(transaction.key, res.category, res.reason)
-                onResult(res)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                val fallbackReason = "Updated based on your input: $feedback"
-                analysisStore?.setClassification(transaction.key, transaction.category ?: CategoryConstants.UNCATEGORIZED, fallbackReason)
-                onResult(FeedbackResult(transaction.category ?: CategoryConstants.UNCATEGORIZED, fallbackReason, "${analysisSnapshot.value.knowledge}\n- ${transaction.description}: $feedback"))
-            }
-        }
-    }
+    fun analyzeCurrentMonth() { analyzeMonth(_selectedMonth.value, forceReanalyze = true) }
 }

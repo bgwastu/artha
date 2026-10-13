@@ -73,9 +73,9 @@ import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.ui.AVAILABLE_CATEGORY_ICONS
 import net.wastu.artha.ui.ArthaViewModel
-import net.wastu.artha.ui.CategorySpending
+import net.wastu.artha.data.analysis.CategorySpending
 import net.wastu.artha.ui.MarkdownText
-import net.wastu.artha.ui.MonthSpendingAnalysis
+import net.wastu.artha.data.analysis.MonthSpendingAnalysis
 import net.wastu.artha.ui.categoryIconFor
 import net.wastu.artha.ui.formatDate
 import net.wastu.artha.ui.formatMoney
@@ -274,7 +274,7 @@ private fun MonthSummaryCard(
     val monthTitle = remember(month) {
         month.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US))
     }
-    val canGoNext = remember(month) { month < YearMonth.now() }
+    val canGoNext = remember(month) { month < YearMonth.now(net.wastu.artha.core.model.AccountingTime.clock) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
 
     Card(

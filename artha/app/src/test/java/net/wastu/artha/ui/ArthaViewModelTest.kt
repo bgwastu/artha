@@ -36,13 +36,13 @@ class ArthaViewModelTest {
     fun tearDown() { Dispatchers.resetMain() }
 
     @Test
-    fun rootDenialNeverInitializesTheLedger() = runTest(dispatcher) {
+    fun rootDenialStillAllowsReadingSavedLedger() = runTest(dispatcher) {
         val model = model(RootAccess { false })
         model.enterForeground()
         advanceUntilIdle()
         assertEquals(RootGateState.DENIED, model.rootGate.value)
-        assertEquals(0, opens)
-        assertEquals(LedgerState.Loading, model.ledgerState.value)
+        assertEquals(1, opens)
+        assertEquals(LedgerState.Ready(emptyList()), model.ledgerState.value)
         model.lock()
     }
 
@@ -61,7 +61,7 @@ class ArthaViewModelTest {
         model.enterForeground()
         advanceUntilIdle()
         assertEquals(RootGateState.DENIED, model.rootGate.value)
-        assertEquals(1, opens)
+        assertEquals(2, opens)
         model.lock()
     }
 
@@ -75,7 +75,7 @@ class ArthaViewModelTest {
         permission.complete(true)
         advanceUntilIdle()
         assertEquals(RootGateState.LOCKED, model.rootGate.value)
-        assertEquals(0, opens)
+        assertEquals(1, opens)
     }
 
     @Test
@@ -124,7 +124,7 @@ class ArthaViewModelTest {
     }
 
     @Test
-    fun refreshDenialLocksPreviouslyOpenedLedger() = runTest(dispatcher) {
+    fun refreshDenialKeepsSavedLedgerReadable() = runTest(dispatcher) {
         var granted = true
         val model = ArthaViewModel(RootAccess { granted }, { ledger }, ingest = { emptyMap() }, computationDispatcher = dispatcher)
         model.enterForeground()
@@ -133,7 +133,7 @@ class ArthaViewModelTest {
         model.refresh()
         advanceUntilIdle()
         assertEquals(RootGateState.DENIED, model.rootGate.value)
-        assertEquals(LedgerState.Loading, model.ledgerState.value)
+        assertEquals(LedgerState.Ready(emptyList()), model.ledgerState.value)
         assertEquals(false, model.refreshing.value)
     }
 

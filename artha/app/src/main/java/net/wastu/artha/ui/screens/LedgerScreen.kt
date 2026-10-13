@@ -121,7 +121,7 @@ fun LedgerScreen(
                 resetKey = selectedProvider to selectedDirection,
                 activeFilter = run {
                     val dateLabel = dateRange?.let { (start, end) ->
-                        val zone = ZoneId.systemDefault()
+                        val zone = net.wastu.artha.core.model.AccountingTime.zone
                         val fmt = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.US)
                         val s = start?.let { fmt.format(java.time.Instant.ofEpochMilli(it).atZone(zone).toLocalDate()) }
                         val e = end?.let { fmt.format(java.time.Instant.ofEpochMilli(it).atZone(zone).toLocalDate()) }
@@ -185,8 +185,8 @@ fun LedgerScreen(
                         selected = false,
                         onClick = {
                             val now = LocalDate.now()
-                            val start = now.withDayOfMonth(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                            val end = now.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                            val start = now.withDayOfMonth(1).atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
+                            val end = now.atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
                             viewModel?.setDateRangeFilter(start, end)
                         },
                         label = { Text("This Month") },
@@ -195,8 +195,8 @@ fun LedgerScreen(
                         selected = false,
                         onClick = {
                             val last = LocalDate.now().minusMonths(1)
-                            val start = last.withDayOfMonth(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                            val end = last.withDayOfMonth(last.lengthOfMonth()).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                            val start = last.withDayOfMonth(1).atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
+                            val end = last.withDayOfMonth(last.lengthOfMonth()).atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
                             viewModel?.setDateRangeFilter(start, end)
                         },
                         label = { Text("Last Month") },
@@ -205,8 +205,8 @@ fun LedgerScreen(
                         selected = false,
                         onClick = {
                             val now = LocalDate.now()
-                            val start = now.minusDays(30).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                            val end = now.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                            val start = now.minusDays(30).atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
+                            val end = now.atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
                             viewModel?.setDateRangeFilter(start, end)
                         },
                         label = { Text("Last 30 Days") },
@@ -233,7 +233,7 @@ fun LedgerScreen(
                                 val s = pickerState.selectedStartDateMillis
                                 val e = pickerState.selectedEndDateMillis ?: s
                                 if (s != null) {
-                                    viewModel?.setDateRangeFilter(s, e)
+                                    viewModel?.setDateRangeFilter(net.wastu.artha.core.model.AccountingTime.pickerDay(s), e?.let(net.wastu.artha.core.model.AccountingTime::pickerDay))
                                 }
                                 showDateRangePicker = false
                             }) { Text("Apply") }
@@ -346,7 +346,7 @@ private fun TransactionList(
     LaunchedEffect(resetKey) { listState.scrollToItem(0) }
 
     val groupedByDay = remember(transactions) {
-        val zone = ZoneId.systemDefault()
+        val zone = net.wastu.artha.core.model.AccountingTime.zone
         transactions.groupBy { LocalDate.ofInstant(it.occurredAt, zone) }
     }
 
@@ -402,7 +402,7 @@ private fun TransactionList(
 
 @Composable
 private fun DateGroupHeader(date: LocalDate) {
-    val zone = ZoneId.systemDefault()
+    val zone = net.wastu.artha.core.model.AccountingTime.zone
     val today = LocalDate.now(zone)
     val dayLabel = when (date) {
         today -> "Today"

@@ -11,20 +11,11 @@ import android.widget.RemoteViews
 import net.wastu.artha.MainActivity
 import net.wastu.artha.R
 import net.wastu.artha.core.model.Money
-import net.wastu.artha.data.analysis.AnalysisStore
 import net.wastu.artha.data.analysis.BudgetAnalyzer
-import net.wastu.artha.data.analysis.CategoryClassifier
-import net.wastu.artha.data.ledger.LedgerDatabase
-import net.wastu.artha.data.ledger.RoomLedgerRepository
-import net.wastu.artha.data.reconciliation.LedgerReconciler
 import net.wastu.artha.ui.formatMoney
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.launch
 
 class AnalysisWidgetProvider : AppWidgetProvider() {
 
@@ -61,22 +52,11 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val nowMonth = YearMonth.now()
+        WidgetRefresh.schedule("analysis", pendingResult) {
+                val nowMonth = YearMonth.now(net.wastu.artha.core.model.AccountingTime.clock)
                 val monthTitle = nowMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US))
 
-                val database = runCatching { LedgerDatabase.create(context) }.getOrNull()
-                val ledger = database?.let { RoomLedgerRepository(it.transactions()) }
-                val transactions = ledger?.observeTransactions()?.firstOrNull().orEmpty()
-                val snapshot = runCatching { net.wastu.artha.data.analysis.TransactionMetadata.migrate(AnalysisStore(context).snapshot.value, transactions) }.getOrNull()
-
-                val reconciled = LedgerReconciler.reconcileLedger(transactions).map { tx ->
-                    val key = tx.key
-                    val cat = snapshot?.categories?.get(key)
-                        ?: CategoryClassifier.classify(tx, snapshot?.userNotes?.get(key)).category
-                    tx.copy(category = cat)
-                }
+                val reconciled = widgetSpending(context).transactions
                 val analysis = BudgetAnalyzer.analyzeMonth(nowMonth, reconciled)
                 val totalCurrent = analysis.totalPersonalSpendingMinor
                 val delta = analysis.totalDeltaPercent
@@ -133,9 +113,6 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
                     views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
                     appWidgetManager.updateAppWidget(appWidgetId, views)
                 }
-            } finally {
-                pendingResult?.finish()
-            }
         }
     }
 

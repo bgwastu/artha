@@ -74,6 +74,7 @@ fun HomeScreen(
     var showCategoriesSheet by rememberSaveable { mutableStateOf(false) }
     var showKnowledgeEditor by rememberSaveable { mutableStateOf(false) }
     var selectedTransaction by remember { mutableStateOf<UnifiedTransaction?>(null) }
+    val rootGate by viewModel?.rootGate?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(net.wastu.artha.core.root.RootGateState.LOCKED) }
     val targetDest by viewModel?.targetDestination?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     androidx.compose.runtime.LaunchedEffect(targetDest) {
         targetDest?.let {
@@ -169,6 +170,11 @@ fun HomeScreen(
                     }
                 }
                 Column(Modifier.weight(1f)) {
+                    if (rootGate == net.wastu.artha.core.root.RootGateState.DENIED) {
+                        androidx.compose.material3.TextButton(onClick = onRefresh, modifier = Modifier.padding(horizontal = 16.dp)) {
+                            Text("Root unavailable · viewing saved history · tap to retry imports")
+                        }
+                    }
                         when (destination) {
                             Destination.TRANSACTIONS -> LedgerScreen(
                                 state = ledgerState,
