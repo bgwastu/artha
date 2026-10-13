@@ -72,6 +72,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.wastu.artha.core.model.Money
@@ -233,49 +234,51 @@ private fun MonthSummaryCard(
     val canGoNext = month < YearMonth.now(net.wastu.artha.core.model.AccountingTime.clock)
     var showMenu by remember { mutableStateOf(false) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
-    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.fillMaxWidth().pointerInput(month, canGoNext) {
-            detectHorizontalDragGestures(onHorizontalDrag = { _, amount -> dragOffset += amount },
-                onDragEnd = {
-                    if (dragOffset < -60f && canGoNext) onNextMonth() else if (dragOffset > 60f) onPreviousMonth()
-                    dragOffset = 0f
-                }, onDragCancel = { dragOffset = 0f })
-        }) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onPreviousMonth) { Icon(Icons.Default.ChevronLeft, "Previous month") }
-                Text(monthTitle, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                IconButton(onClick = onNextMonth, enabled = canGoNext) { Icon(Icons.Default.ChevronRight, "Next month") }
-                Box {
-                    IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Month options") }
-                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                        DropdownMenuItem(text = { Text("Monthly note") }, onClick = { showMenu = false; onEditNote() })
-                        DropdownMenuItem(text = { Text("Manage categories") }, onClick = { showMenu = false; onOpenCategories() })
-                    }
+    Column(Modifier.fillMaxWidth().pointerInput(month, canGoNext) {
+        detectHorizontalDragGestures(onHorizontalDrag = { _, amount -> dragOffset += amount },
+            onDragEnd = {
+                if (dragOffset < -60f && canGoNext) onNextMonth() else if (dragOffset > 60f) onPreviousMonth()
+                dragOffset = 0f
+            }, onDragCancel = { dragOffset = 0f })
+    }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onPreviousMonth) { Icon(Icons.Default.ChevronLeft, "Previous month") }
+            Text(monthTitle, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+            IconButton(onClick = onNextMonth, enabled = canGoNext) { Icon(Icons.Default.ChevronRight, "Next month") }
+            Box {
+                IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Month options") }
+                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    DropdownMenuItem(text = { Text("Monthly note") }, onClick = { showMenu = false; onEditNote() })
+                    DropdownMenuItem(text = { Text("Manage categories") }, onClick = { showMenu = false; onOpenCategories() })
+                    DropdownMenuItem(text = { Text("Spending scope") }, onClick = { showMenu = false; onOpenScope() })
                 }
             }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(if (canGoNext) "Confirmed spending" else "Confirmed spending to date",
-                    style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
-                IconButton(onClick = onOpenScope) { Icon(Icons.Default.Info, "What counts in spending") }
-            }
-            Text(formatAmountMinor(analysis.totalPersonalSpendingMinor), style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold)
-            if (!canGoNext && analysis.previousMonthTotalMinor > 0) {
-                Text("Previous full month ${formatAmountMinor(analysis.previousMonthTotalMinor)}",
+        }
+        Surface(onClick = onOpenScope, color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Spending total. What counts in spending" }) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(if (canGoNext) "Confirmed spending" else "Confirmed spending to date", style = MaterialTheme.typography.labelMedium)
+                    Icon(Icons.Default.Info, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(formatAmountMinor(analysis.totalPersonalSpendingMinor), style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold)
+                if (!canGoNext && analysis.previousMonthTotalMinor > 0) {
+                    Text("Previous full month ${formatAmountMinor(analysis.previousMonthTotalMinor)}",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else if (canGoNext) analysis.totalDeltaPercent?.let { delta ->
+                    Text("${kotlin.math.abs(delta).toInt()}% ${if (delta < 0) "less" else "more"} than previous month",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (analysis.unconfirmedSpendingMinor > 0) Text(
+                    "Unconfirmed ${formatAmountMinor(analysis.unconfirmedSpendingMinor)} excluded",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else if (canGoNext) analysis.totalDeltaPercent?.let { delta ->
-                Text("${kotlin.math.abs(delta).toInt()}% ${if (delta < 0) "less" else "more"} than previous month",
+                if (analysis.unsupportedCurrencyCount > 0) Text("${analysis.unsupportedCurrencyCount} non-IDR records excluded",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (!monthlyNote.isNullOrBlank()) Text(monthlyNote, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = onEditNote).padding(vertical = 12.dp),
+                    style = MaterialTheme.typography.bodySmall)
             }
-            if (analysis.unconfirmedSpendingMinor > 0) Text(
-                "Unconfirmed ${formatAmountMinor(analysis.unconfirmedSpendingMinor)} excluded",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (analysis.unsupportedCurrencyCount > 0) Text("${analysis.unsupportedCurrencyCount} non-IDR records excluded",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (!monthlyNote.isNullOrBlank()) Text(monthlyNote, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onEditNote).padding(vertical = 12.dp),
-                style = MaterialTheme.typography.bodySmall)
         }
     }
 }
