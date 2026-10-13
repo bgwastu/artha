@@ -47,6 +47,8 @@ data class UnifiedTransaction(
     val aiReasoning: String? = null,
     val isReversal: Boolean = false,
 ) {
+    val key: String get() = "${provider.name}:$providerTransactionId"
+
     init {
         require(providerTransactionId.isNotBlank())
         require(description.isNotBlank())

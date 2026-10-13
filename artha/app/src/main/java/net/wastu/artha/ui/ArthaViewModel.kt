@@ -258,14 +258,16 @@ class ArthaViewModel(
                     analysisSnapshot,
                     _dateRangeFilter,
                 ) { rawTransactions, enabled, analysis, dateRange ->
+                    analysisStore?.migrateMetadata(rawTransactions)
+                    val currentAnalysis = analysisStore?.snapshot?.value ?: net.wastu.artha.data.analysis.TransactionMetadata.migrate(analysis, rawTransactions)
                     _providerCounts.value = rawTransactions.groupingBy { it.provider }.eachCount()
                     val enriched = rawTransactions.map { tx ->
-                        val id = tx.providerTransactionId.substringAfter(":")
-                        val note = analysis.userNotes[id] ?: tx.userNote
+                        val id = tx.key
+                        val note = currentAnalysis.userNotes[id] ?: tx.userNote
                         val isCredit = tx.direction == Direction.CREDIT
                         val classification = if (isCredit) null else CategoryClassifier.classify(tx, note)
-                        val cat = if (isCredit) null else (analysis.categories[id] ?: classification?.category)
-                        val reason = if (isCredit) null else (analysis.reasons[id] ?: classification?.reason)
+                        val cat = if (isCredit) null else (currentAnalysis.categories[id] ?: classification?.category)
+                        val reason = if (isCredit) null else (currentAnalysis.reasons[id] ?: classification?.reason)
                         tx.copy(
                             userNote = note,
                             category = cat,
@@ -372,27 +374,11 @@ class ArthaViewModel(
         _dateRangeFilter.value = if (startMillis == null && endMillis == null) null else (startMillis to endMillis)
     }
     fun clearDateRangeFilter() { _dateRangeFilter.value = null }
-    fun setUserNote(transactionId: String, note: String) {
-        val cleanId = transactionId.substringAfter(":")
-        val currentTxs = _reconciledCache.value
-        val tx = currentTxs.firstOrNull { it.providerTransactionId.endsWith(cleanId) }
-
-        val updatedTxs = currentTxs.map {
-            if (it.providerTransactionId.endsWith(cleanId)) {
-                it.copy(userNote = note)
-            } else it
-        }
-        _reconciledCache.value = updatedTxs
-        analysisStore?.setUserNote(transactionId, note)
-
-        if (tx != null && tx.direction == Direction.DEBIT) {
-            val txMonth = YearMonth.from(tx.occurredAt.atZone(ZoneId.systemDefault()))
-            analyzeMonth(txMonth, forceReanalyze = true, debounceMs = 800L)
-        }
-    }
-
     fun setUserNote(transaction: UnifiedTransaction, note: String) {
-        setUserNote(transaction.providerTransactionId, note)
+        val key = transaction.key
+        _reconciledCache.value = _reconciledCache.value.map { if (it.key == key) it.copy(userNote = note) else it }
+        viewModelScope.launch(Dispatchers.IO) { analysisStore?.setUserNote(key, note) }
+        analyzeMonth(YearMonth.from(transaction.occurredAt.atZone(ZoneId.systemDefault())), forceReanalyze = true, debounceMs = 800L)
     }
 
     fun applyKnowledgeRewrite(rewritten: String) {
@@ -405,31 +391,11 @@ class ArthaViewModel(
     fun removeCustomCategory(category: String) { analysisStore?.removeCustomCategory(category) }
     fun resetCategoriesToDefault() { analysisStore?.resetCategoriesToDefault() }
 
-    fun setTransactionCategory(transactionId: String, category: String) {
-        val cleanId = transactionId.substringAfter(":")
-        // 1. Immediately update in-memory reconciled cache on frame 0
-        val currentTxs = _reconciledCache.value
-        val updatedTxs = currentTxs.map { tx ->
-            if (tx.providerTransactionId.endsWith(cleanId)) {
-                tx.copy(category = category)
-            } else tx
-        }
-        _reconciledCache.value = updatedTxs
-
-        // 2. Immediately recompute month analysis on frame 0
-        val month = _selectedMonth.value
-        val summary = analysisSnapshot.value.monthlySummaries[month.toString()]
-        _monthAnalysis.value = BudgetAnalyzer.analyzeMonth(month, updatedTxs, summary)
-
-        // 3. Persist to store asynchronously
-        analysisStore?.setClassification(transactionId, category, "")
-
-        // 4. Trigger debounced AI analysis to update month summary
-        val tx = updatedTxs.firstOrNull { it.providerTransactionId.endsWith(cleanId) }
-        if (tx != null) {
-            val txMonth = YearMonth.from(tx.occurredAt.atZone(ZoneId.systemDefault()))
-            analyzeMonth(txMonth, forceReanalyze = true, debounceMs = 600L)
-        }
+    fun setTransactionCategory(transaction: UnifiedTransaction, category: String) {
+        val key = transaction.key
+        _reconciledCache.value = _reconciledCache.value.map { if (it.key == key) it.copy(category = category) else it }
+        viewModelScope.launch(Dispatchers.IO) { analysisStore?.setClassification(key, category, "", manual = true) }
+        analyzeMonth(YearMonth.from(transaction.occurredAt.atZone(ZoneId.systemDefault())), forceReanalyze = true, debounceMs = 600L)
     }
 
     fun setCategoryIcon(category: String, iconKey: String?) { analysisStore?.setCategoryIcon(category, iconKey) }
@@ -441,30 +407,7 @@ class ArthaViewModel(
         else analyzeCurrentMonth()
     }
 
-    fun recategorizeAll() {
-        analysisStore?.clearAllClassifications()
-
-        // 1. Immediately re-run CategoryClassifier over all reconciled transactions locally on frame 0!
-        val currentTxs = _reconciledCache.value
-        val snap = analysisSnapshot.value
-        val resetTxs = currentTxs.map { tx ->
-            if (tx.direction == Direction.CREDIT) tx.copy(category = null)
-            else {
-                val cleanId = tx.providerTransactionId.substringAfter(":")
-                val note = snap.userNotes[cleanId] ?: tx.userNote
-                val heuristic = CategoryClassifier.classify(tx, note)
-                tx.copy(category = heuristic.category, aiReasoning = heuristic.reason)
-            }
-        }
-        _reconciledCache.value = resetTxs
-
-        // 2. Immediately update month analysis on frame 0!
-        val month = _selectedMonth.value
-        _monthAnalysis.value = BudgetAnalyzer.analyzeMonth(month, resetTxs, null)
-
-        // 3. Immediately trigger fresh AI analysis for current month (cancel previous, 0ms debounce)
-        analyzeMonth(month, forceReanalyze = true, debounceMs = 0L)
-    }
+    fun recategorizeAll() { analyzeCurrentMonth() }
 
     fun analyzeMonth(month: YearMonth, forceReanalyze: Boolean = false, debounceMs: Long = 600L) {
         // Cancel any pending debounce timer for this month
@@ -515,10 +458,10 @@ class ArthaViewModel(
 
                     val currentCache = _reconciledCache.value
                     val updated = currentCache.map { tx ->
-                        val clean = tx.providerTransactionId.substringAfter(":")
+                        val clean = tx.key
                         val aiCat = result.classifications[clean]?.first
                         val aiReason = result.classifications[clean]?.second
-                        if (aiCat != null) tx.copy(category = aiCat, aiReasoning = aiReason) else tx
+                        if (aiCat != null && clean !in analysisSnapshot.value.manualCategories) tx.copy(category = aiCat, aiReasoning = aiReason) else tx
                     }
                     _reconciledCache.value = updated
                     _monthAnalysis.value = BudgetAnalyzer.analyzeMonth(month, updated, result.monthlySummary)
@@ -545,13 +488,13 @@ class ArthaViewModel(
             try {
                 val snap = analysisSnapshot.value
                 val res = AiAnalysisService.submitFeedback(snap.aiConfig, snap.knowledge, transaction, feedback, snap.customCategories)
-                analysisStore?.setClassification(transaction.providerTransactionId, res.category, res.reason)
+                analysisStore?.setClassification(transaction.key, res.category, res.reason)
                 onResult(res)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 val fallbackReason = "Updated based on your input: $feedback"
-                analysisStore?.setClassification(transaction.providerTransactionId, transaction.category ?: CategoryConstants.UNCATEGORIZED, fallbackReason)
+                analysisStore?.setClassification(transaction.key, transaction.category ?: CategoryConstants.UNCATEGORIZED, fallbackReason)
                 onResult(FeedbackResult(transaction.category ?: CategoryConstants.UNCATEGORIZED, fallbackReason, "${analysisSnapshot.value.knowledge}\n- ${transaction.description}: $feedback"))
             }
         }

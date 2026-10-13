@@ -85,11 +85,11 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
                 val database = runCatching { LedgerDatabase.create(context) }.getOrNull()
                 val ledger = database?.let { RoomLedgerRepository(it.transactions()) }
                 val rawTxs = ledger?.observeTransactions()?.firstOrNull().orEmpty()
-                val snapshot = runCatching { AnalysisStore(context).snapshot.value }.getOrNull()
+                val snapshot = runCatching { net.wastu.artha.data.analysis.TransactionMetadata.migrate(AnalysisStore(context).snapshot.value, rawTxs) }.getOrNull()
                 val enabled = runCatching { ProviderPreferences(context).enabled.value }.getOrNull()
 
                 val enriched = rawTxs.map { tx ->
-                    val id = tx.providerTransactionId.substringAfter(":")
+                    val id = tx.key
                     val note = snapshot?.userNotes?.get(id) ?: tx.userNote
                     val isCredit = tx.direction == Direction.CREDIT
                     val cat = if (isCredit) null else {
@@ -230,11 +230,11 @@ private class TransactionsRemoteViewsFactory(
             val database = runCatching { LedgerDatabase.create(context) }.getOrNull()
             val ledger = database?.let { RoomLedgerRepository(it.transactions()) }
             val rawTxs = ledger?.observeTransactions()?.firstOrNull().orEmpty()
-            val snapshot = runCatching { AnalysisStore(context).snapshot.value }.getOrNull()
+            val snapshot = runCatching { net.wastu.artha.data.analysis.TransactionMetadata.migrate(AnalysisStore(context).snapshot.value, rawTxs) }.getOrNull()
             val enabled = runCatching { ProviderPreferences(context).enabled.value }.getOrNull()
 
             val enriched = rawTxs.map { tx ->
-                val id = tx.providerTransactionId.substringAfter(":")
+                val id = tx.key
                 val note = snapshot?.userNotes?.get(id) ?: tx.userNote
                 val isCredit = tx.direction == Direction.CREDIT
                 val cat = if (isCredit) null else {

@@ -84,10 +84,10 @@ fun TransactionDetailsSheet(
     val snapshot = viewModel?.analysisSnapshot?.collectAsStateWithLifecycle()?.value
     val availableCategories = snapshot?.customCategories ?: net.wastu.artha.data.analysis.INITIAL_DEFAULT_CATEGORIES
     var showCategoryPicker by remember { mutableStateOf(false) }
-    var currentCategory by remember(transaction.providerTransactionId, transaction.category) {
-        mutableStateOf(transaction.category ?: "Uncategorized")
+    var currentCategory by remember(transaction.key, transaction.category, snapshot?.categories) {
+        mutableStateOf(snapshot?.categories?.get(transaction.key) ?: transaction.category ?: "Uncategorized")
     }
-    val txIdKey = remember(transaction.providerTransactionId) { transaction.providerTransactionId.substringAfter(":") }
+    val txIdKey = remember(transaction.providerTransactionId) { transaction.key }
     var currentNote by remember(transaction.providerTransactionId, transaction.userNote, snapshot?.userNotes) {
         mutableStateOf(snapshot?.userNotes?.get(txIdKey) ?: transaction.userNote.orEmpty())
     }
@@ -115,7 +115,7 @@ fun TransactionDetailsSheet(
                 categoryIcons = snapshot?.categoryIcons ?: emptyMap(),
                 onSelectCategory = { selected ->
                     currentCategory = selected
-                    viewModel?.setTransactionCategory(transaction.providerTransactionId, selected)
+                    viewModel?.setTransactionCategory(transaction, selected)
                     showCategoryPicker = false
                 },
                 onCreateCategory = { created ->

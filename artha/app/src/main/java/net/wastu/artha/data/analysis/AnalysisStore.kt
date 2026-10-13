@@ -28,6 +28,7 @@ data class AnalysisSnapshot(
     val updatedAt: Map<String, Long> = emptyMap(),
     val deletedCategories: Map<String, Long> = emptyMap(),
     val analysisFingerprints: Map<String, String> = emptyMap(),
+    val manualCategories: Set<String> = emptySet(),
 )
 
 val INITIAL_DEFAULT_CATEGORIES = listOf(
@@ -91,12 +92,13 @@ class AnalysisStore(context: Context) {
             updatedAt = parseLongMap(updatedAtJson),
             deletedCategories = parseLongMap(deletedCatsJson),
             analysisFingerprints = parseMap(fingerprintsJson),
+            manualCategories = parseList(prefs.getString("manual_categories", "[]") ?: "[]").toSet(),
         )
     }
 
     @Synchronized
     fun setUserNote(transactionId: String, note: String) {
-        val key = normalizeKey(transactionId)
+        val key = transactionId
         val now = System.currentTimeMillis()
         val currentNotes = _snapshot.value.userNotes.toMutableMap()
         val currentUpdated = _snapshot.value.updatedAt.toMutableMap()
@@ -114,21 +116,25 @@ class AnalysisStore(context: Context) {
     }
 
     @Synchronized
-    fun setClassification(transactionId: String, category: String, reason: String) {
-        val key = normalizeKey(transactionId)
+    fun setClassification(transactionId: String, category: String, reason: String, manual: Boolean = true) {
+        val key = transactionId
         val now = System.currentTimeMillis()
         val currentCategories = _snapshot.value.categories.toMutableMap()
         val currentReasons = _snapshot.value.reasons.toMutableMap()
         val currentUpdated = _snapshot.value.updatedAt.toMutableMap()
+        if (!manual && key in _snapshot.value.manualCategories) return
+        val manualKeys = if (manual) _snapshot.value.manualCategories + key else _snapshot.value.manualCategories
         currentCategories[key] = category
         currentReasons[key] = reason
         currentUpdated["cat:$key"] = now
         prefs.edit {
+            putString("manual_categories", JSONArray(manualKeys.toList()).toString())
             putString("categories", JSONObject(currentCategories as Map<*, *>).toString())
             putString("reasons", JSONObject(currentReasons as Map<*, *>).toString())
             putString("updated_at_map", JSONObject(currentUpdated as Map<*, *>).toString())
         }
         _snapshot.value = _snapshot.value.copy(
+            manualCategories = manualKeys,
             categories = currentCategories,
             reasons = currentReasons,
             updatedAt = currentUpdated,
@@ -138,27 +144,7 @@ class AnalysisStore(context: Context) {
 
     @Synchronized
     fun setBatchClassifications(updates: Map<String, Pair<String, String>>) {
-        val now = System.currentTimeMillis()
-        val currentCategories = _snapshot.value.categories.toMutableMap()
-        val currentReasons = _snapshot.value.reasons.toMutableMap()
-        val currentUpdated = _snapshot.value.updatedAt.toMutableMap()
-        for ((id, pair) in updates) {
-            val key = normalizeKey(id)
-            currentCategories[key] = pair.first
-            currentReasons[key] = pair.second
-            currentUpdated["cat:$key"] = now
-        }
-        prefs.edit {
-            putString("categories", JSONObject(currentCategories as Map<*, *>).toString())
-            putString("reasons", JSONObject(currentReasons as Map<*, *>).toString())
-            putString("updated_at_map", JSONObject(currentUpdated as Map<*, *>).toString())
-        }
-        _snapshot.value = _snapshot.value.copy(
-            categories = currentCategories,
-            reasons = currentReasons,
-            updatedAt = currentUpdated,
-        )
-        runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
+        applyMergedSnapshot(TransactionMetadata.applyAutomatic(_snapshot.value, updates, System.currentTimeMillis()))
     }
 
     @Synchronized
@@ -204,22 +190,16 @@ class AnalysisStore(context: Context) {
 
     @Synchronized
     fun clearAllClassifications() {
-        val currentUpdated = _snapshot.value.updatedAt.filterKeys { !it.startsWith("cat:") && !it.startsWith("monthSummary:") }
-        prefs.edit {
-            putString("categories", "{}")
-            putString("reasons", "{}")
-            putString("monthly_summaries", "{}")
-            putString("analysis_fingerprints", "{}")
-            putString("updated_at_map", JSONObject(currentUpdated as Map<*, *>).toString())
-        }
-        _snapshot.value = _snapshot.value.copy(
-            categories = emptyMap(),
-            reasons = emptyMap(),
-            monthlySummaries = emptyMap(),
-            analysisFingerprints = emptyMap(),
-            updatedAt = currentUpdated,
-        )
-        runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
+        val current = _snapshot.value
+        val now = System.currentTimeMillis()
+        val times = current.updatedAt.toMutableMap()
+        current.categories.keys.filter { it !in current.manualCategories }.forEach { times["cat:$it"] = now }
+        current.monthlySummaries.keys.forEach { times["monthSummary:$it"] = now }
+        applyMergedSnapshot(current.copy(
+            categories = current.categories.filterKeys { it in current.manualCategories },
+            reasons = current.reasons.filterKeys { it in current.manualCategories },
+            monthlySummaries = emptyMap(), analysisFingerprints = emptyMap(), updatedAt = times,
+        ))
     }
 
     @Synchronized
@@ -337,7 +317,10 @@ class AnalysisStore(context: Context) {
     fun restoreSnapshot(remote: AnalysisSnapshot) {
         val local = _snapshot.value
         val merged = net.wastu.artha.data.sync.SyncMerger.mergeAnalysis(local, remote)
-        applyMergedSnapshot(merged.copy(aiConfig = local.aiConfig))
+        applyMergedSnapshot(merged.copy(aiConfig = local.aiConfig,
+            categories = merged.categories + local.categories.filterKeys { it in local.manualCategories },
+            reasons = merged.reasons + local.reasons.filterKeys { it in local.manualCategories },
+            manualCategories = merged.manualCategories + local.manualCategories))
     }
 
     @Synchronized
@@ -357,12 +340,17 @@ class AnalysisStore(context: Context) {
             putString("updated_at_map", JSONObject(merged.updatedAt as Map<*, *>).toString())
             putString("deleted_categories_map", JSONObject(merged.deletedCategories as Map<*, *>).toString())
             putString("analysis_fingerprints", JSONObject(merged.analysisFingerprints as Map<*, *>).toString())
+            putString("manual_categories", JSONArray(merged.manualCategories.toList()).toString())
         }
         _snapshot.value = merged
         runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
     }
 
-    private fun normalizeKey(id: String): String = id.substringAfter(":")
+    @Synchronized
+    fun migrateMetadata(transactions: List<net.wastu.artha.core.model.UnifiedTransaction>) {
+        val migrated = TransactionMetadata.migrate(_snapshot.value, transactions)
+        if (migrated != _snapshot.value) applyMergedSnapshot(migrated)
+    }
 
     private fun parseMap(json: String): Map<String, String> {
         val map = mutableMapOf<String, String>()

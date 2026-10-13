@@ -49,6 +49,7 @@ object SyncBundleSerializer {
             .put("updatedAt", JSONObject(a.updatedAt as Map<*, *>))
             .put("deletedCategories", JSONObject(a.deletedCategories as Map<*, *>))
             .put("analysisFingerprints", JSONObject(a.analysisFingerprints as Map<*, *>))
+            .put("manualCategories", JSONArray(a.manualCategories.toList()))
         root.put("analysis", analysisObj)
 
         // 2. Transactions
@@ -108,6 +109,7 @@ object SyncBundleSerializer {
             updatedAt = parseLongMap(analysisObj.optJSONObject("updatedAt")),
             deletedCategories = parseLongMap(analysisObj.optJSONObject("deletedCategories")),
             analysisFingerprints = parseStringMap(analysisObj.optJSONObject("analysisFingerprints")),
+            manualCategories = parseStringList(analysisObj.optJSONArray("manualCategories")).toSet(),
         )
 
         val txArray = root.getJSONArray("transactions")
@@ -198,10 +200,12 @@ object SyncMerger {
         // 1. Categories & Reasons (keyed by "cat:$txKey")
         val mergedCategories = mutableMapOf<String, String>()
         val mergedReasons = mutableMapOf<String, String>()
-        for (k in (local.categories.keys + remote.categories.keys)) {
+        for (k in (local.categories.keys + remote.categories.keys +
+            local.updatedAt.keys.filter { it.startsWith("cat:") }.map { it.removePrefix("cat:") } +
+            remote.updatedAt.keys.filter { it.startsWith("cat:") }.map { it.removePrefix("cat:") })) {
             val localTime = local.updatedAt["cat:$k"] ?: if (k in local.categories) 1L else 0L
             val remoteTime = remote.updatedAt["cat:$k"] ?: if (k in remote.categories) 1L else 0L
-            if (remoteTime > localTime) {
+            if (remoteTime > localTime || (remoteTime == localTime && remote.categories[k].orEmpty() > local.categories[k].orEmpty())) {
                 remote.categories[k]?.let { mergedCategories[k] = it }
                 remote.reasons[k]?.let { mergedReasons[k] = it }
             } else {
@@ -292,6 +296,7 @@ object SyncMerger {
             updatedAt = mergedUpdatedAt,
             deletedCategories = mergedDeletedCategories,
             analysisFingerprints = mergedFingerprints,
+            manualCategories = (local.manualCategories + remote.manualCategories).filter { it in mergedCategories }.toSet(),
         )
     }
 
@@ -322,7 +327,7 @@ object SyncMerger {
         for (k in allKeys.distinct()) {
             val lTime = localTimes["$prefix$k"] ?: if (k in localMap) 1L else 0L
             val rTime = remoteTimes["$prefix$k"] ?: if (k in remoteMap) 1L else 0L
-            val chosen = if (rTime > lTime) remoteMap[k] else localMap[k]
+            val chosen = if (rTime > lTime || (rTime == lTime && remoteMap[k].orEmpty() > localMap[k].orEmpty())) remoteMap[k] else localMap[k]
             if (!chosen.isNullOrBlank()) {
                 result[k] = chosen
             }

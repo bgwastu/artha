@@ -53,7 +53,7 @@ object AiAnalysisService {
         for (tx in expensesOnly) {
             txArray.put(
                 JSONObject()
-                    .put("id", tx.providerTransactionId.substringAfter(":"))
+                    .put("id", tx.key)
                     .put("title", tx.description)
                     .put("provider", tx.provider.displayName)
                     .put("amountRupiah", tx.money.amountMinor / 100L)

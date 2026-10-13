@@ -69,8 +69,7 @@ object BudgetAnalyzer {
         val code = p?.optString("code").orEmpty()
         if (code in setOf("TDD02", "TDC02", "TDC03", "TDC08", "TDC12", "SAD01", "SAD02", "SAC01", "SAC02")) return false
         if (p?.optJSONObject("fields")?.optString("f22") == "INTERNAL") return false
-        val cat = tx.category ?: CategoryClassifier.classify(tx, tx.userNote).category
-        return cat != CategoryConstants.INVESTMENTS_TRANSFERS
+        return true // Accounting exclusion is source evidence, never an editable display category.
     }
 
     fun computeMonthFingerprint(

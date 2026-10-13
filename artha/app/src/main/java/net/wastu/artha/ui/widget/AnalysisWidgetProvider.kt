@@ -69,10 +69,10 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
                 val database = runCatching { LedgerDatabase.create(context) }.getOrNull()
                 val ledger = database?.let { RoomLedgerRepository(it.transactions()) }
                 val transactions = ledger?.observeTransactions()?.firstOrNull().orEmpty()
-                val snapshot = runCatching { AnalysisStore(context).snapshot.value }.getOrNull()
+                val snapshot = runCatching { net.wastu.artha.data.analysis.TransactionMetadata.migrate(AnalysisStore(context).snapshot.value, transactions) }.getOrNull()
 
                 val reconciled = LedgerReconciler.reconcileLedger(transactions).map { tx ->
-                    val key = tx.providerTransactionId.substringAfter(":")
+                    val key = tx.key
                     val cat = snapshot?.categories?.get(key)
                         ?: CategoryClassifier.classify(tx, snapshot?.userNotes?.get(key)).category
                     tx.copy(category = cat)
