@@ -2,94 +2,90 @@
 
 package net.wastu.artha.data.ingestion
 
-import android.database.sqlite.SQLiteDatabase
-import android.util.Base64
-import net.wastu.artha.core.model.Direction
-import net.wastu.artha.core.model.Money
-import net.wastu.artha.core.model.Provider
-import net.wastu.artha.core.model.UnifiedTransaction
-import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.time.Instant
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import net.wastu.artha.core.model.UnifiedTransaction
+import net.wastu.artha.data.providers.AccountStatus
 import org.json.JSONObject
 
 internal class TokopediaOrderReader(private val files: RootFileReader) {
     suspend fun transactions(): List<UnifiedTransaction> = withContext(Dispatchers.IO) {
-        try {
-            val blk = files.read("/data/data/com.tokopedia.tkpd/files/keva/repo/LOGIN_SESSION_v2/LOGIN_SESSION_v2.blk")
-            val token = decryptSessionToken(blk)
-            check(!token.isNullOrBlank()) { "Tokopedia session missing or unrecognized. Please log in again." }
-            val cookies = readCookies()
-            fetchOrders(token, cookies)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
+        val sessionPath = "$BASE/files/keva/repo/LOGIN_SESSION_v2/LOGIN_SESSION_v2.blk"
+        val devicePath = "$BASE/files/keva/repo/GCM_STORAGE_v2/GCM_STORAGE_v2.blk"
+        val cookiePath = "$BASE/shared_prefs/ttnetCookieStore.xml"
+        val snapshot = files.stableBatch(listOf(sessionPath, devicePath, cookiePath))
+        val token = TokopediaProviderParser.sessionToken(snapshot[sessionPath])
+        val sessionId = TokopediaProviderParser.sessionId(snapshot[devicePath])
+        val cookies = TokopediaProviderParser.nativeCookies(snapshot[cookiePath])
+        val cursors = mutableSetOf<String>()
+        var cursor: Any? = null
+        repeat(MAX_PAGES) {
+            coroutineContext.ensureActive()
+            val response = fetchPage(token, sessionId, cookies, TokopediaProviderParser.request(cursor))
+            val page = TokopediaProviderParser.page(response)
+            // Lynx cards are presentation data. Their displayed totals and creation
+            // dates do not establish settled payments or refund credits.
+            TokopediaProviderParser.requireVerifiedPayments(page)
+            if (!page.hasMore) return@withContext emptyList()
+            val next = page.nextCursor ?: throw ProviderReadException(AccountStatus.ERROR,
+                "Tokopedia history has more pages but no cursor. Saved history is kept.")
+            if (!cursors.add(next.toString())) throw ProviderReadException(AccountStatus.ERROR,
+                "Tokopedia repeated a history cursor. Saved history is kept.")
+            cursor = next
         }
+        throw ProviderReadException(AccountStatus.ERROR,
+            "Tokopedia history reached its page limit. Saved history is kept.")
     }
 
-    private fun decryptSessionToken(blk: ByteArray): String? {
-        val key = "ggggtttttujkrrrr".toByteArray(Charsets.UTF_8)
-        val iv = "tokopedia1234567".toByteArray(Charsets.UTF_8)
-        val text = blk.toString(Charsets.ISO_8859_1)
-        for (match in Regex("[A-Za-z0-9+/=\\n]{40,}").findAll(text)) {
-            val b64 = match.value.replace("\n", "").trim()
-            val raw = runCatching { Base64.decode(b64, Base64.DEFAULT) }.getOrNull() ?: continue
-            if (raw.size >= 16 && raw.size % 16 == 0) {
-                val pt = runCatching {
-                    val cipher = javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding")
-                    cipher.init(
-                        javax.crypto.Cipher.DECRYPT_MODE,
-                        javax.crypto.spec.SecretKeySpec(key, "AES"),
-                        javax.crypto.spec.IvParameterSpec(iv),
-                    )
-                    String(cipher.doFinal(raw), Charsets.UTF_8)
-                }.getOrNull() ?: continue
-                if (pt.startsWith("eyJ")) return pt
-            }
-        }
-        return null
-    }
-
-    private suspend fun readCookies(): String = files.readSqlite("/data/data/com.tokopedia.tkpd/app_webview/Default/Cookies") { db ->
-        db.rawQuery("SELECT name, value FROM cookies WHERE host_key LIKE '%tokopedia%'", null).use { cursor ->
-            buildList { while (cursor.moveToNext()) {
-                val name = cursor.getString(0).orEmpty(); val value = cursor.getString(1).orEmpty()
-                if (name.isNotBlank() && value.isNotBlank()) add("$name=$value")
-            } }.joinToString("; ")
-        }
-    }
-
-    private fun fetchOrders(token: String, cookies: String): List<UnifiedTransaction> {
-        val connection = URL("https://oec-api.tiktokv.com/api/v1/trade/bff/order_list/get")
-            .openConnection() as HttpURLConnection
+    private fun fetchPage(token: String, sessionId: String, cookies: String, body: JSONObject): JSONObject {
+        val connection = URL(ENDPOINT).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 10_000
             connection.readTimeout = 10_000
             connection.instanceFollowRedirects = false
             connection.doOutput = true
-            connection.setRequestProperty("Authorization", "Bearer $token")
-            connection.setRequestProperty("Accounts-Authorization", "Bearer $token")
+            // TTSTokoSessionInterceptor in the audited APK uses these headers.
+            connection.setRequestProperty("Tokopro-Accounts-Authorization", "Bearer $token")
+            connection.setRequestProperty("Tokopro-SessionId", sessionId)
             if (cookies.isNotBlank()) connection.setRequestProperty("Cookie", cookies)
             connection.setRequestProperty("Content-Type", "application/json")
-            connection.setRequestProperty("User-Agent", "com.tokopedia.tkpd/45.0.5 (Android 16)")
-            val body = JSONObject().put("fe_version", "2").put("page_size", 20).toString()
-            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            requireHttpSuccess(connection.responseCode, "Tokopedia")
-            val response = connection.inputStream.bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
-            val list = response.optJSONObject("data")?.optJSONArray("order_list")
-                ?: throw ProviderReadException(net.wastu.artha.data.providers.AccountStatus.ERROR,
-                    "Tokopedia's experimental response is unsupported. Saved history is kept.")
-            val rows = ImportRows()
-            for (i in 0 until list.length()) rows.readRow {
-                ProviderRowParser.tokopedia(list.getJSONObject(i))
+            connection.setRequestProperty("User-Agent", "TokopediaPro/45.0.5 (Android; zh_CN) Cronet")
+            connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            TokopediaProviderParser.requireResponse(
+                connection.responseCode,
+                connection.getHeaderField("Tokopro-Toko-Login"),
+                connection.getHeaderField("Bdturing-Verify"),
+                connection.getHeaderField("X-Vc-Bdturing-Parameters"),
+            )
+            val text = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                val buffer = CharArray(8_192)
+                val result = StringBuilder()
+                while (true) {
+                    val size = reader.read(buffer)
+                    if (size < 0) break
+                    if (result.length + size > MAX_RESPONSE_CHARS) throw ProviderReadException(AccountStatus.ERROR,
+                        "Tokopedia history response is too large. Saved history is kept.")
+                    result.append(buffer, 0, size)
+                }
+                result.toString()
             }
-            return rows.finish()
+            return try { JSONObject(text) } catch (_: org.json.JSONException) {
+                throw ProviderReadException(AccountStatus.ERROR,
+                    "Tokopedia returned an unsupported history response. Saved history is kept.")
+            }
         } finally {
             connection.disconnect()
         }
+    }
+
+    private companion object {
+        const val BASE = "/data/data/com.tokopedia.tkpd"
+        const val ENDPOINT = "https://oec-api.tiktokv.com/api/v1/trade/bff/order_list/get"
+        const val MAX_PAGES = 20
+        const val MAX_RESPONSE_CHARS = 2_000_000
     }
 }
