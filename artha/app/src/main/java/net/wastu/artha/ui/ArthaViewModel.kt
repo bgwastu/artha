@@ -45,15 +45,20 @@ class ArthaViewModel(
     val selectedMonth = _selectedMonth.asStateFlow()
     private val _dateRangeFilter = MutableStateFlow<Pair<Long?, Long?>?>(null)
     val dateRangeFilter = _dateRangeFilter.asStateFlow()
+    private val _categoryFilter = MutableStateFlow<String?>(null)
+    val categoryFilter = _categoryFilter.asStateFlow()
     private val _targetDestination = MutableStateFlow<String?>(null)
     val targetDestination = _targetDestination.asStateFlow()
     private val _reconciledCache = MutableStateFlow<List<UnifiedTransaction>>(emptyList())
+    val allTransactions = _reconciledCache.asStateFlow()
     private val _monthAnalysis = MutableStateFlow(BudgetAnalyzer.analyzeMonth(_selectedMonth.value, emptyList()))
     val monthAnalysis = _monthAnalysis.asStateFlow()
     private val _analyzingMonths = MutableStateFlow<Set<YearMonth>>(emptySet())
     val analyzingMonths = _analyzingMonths.asStateFlow()
     private val _analysisErrors = MutableStateFlow<Map<YearMonth, String>>(emptyMap())
     val analysisErrors = _analysisErrors.asStateFlow()
+    private val _settingsError = MutableStateFlow<String?>(null)
+    val settingsError = _settingsError.asStateFlow()
     private val monthJobs = mutableMapOf<YearMonth, Job>()
     private val failedFingerprints = mutableMapOf<YearMonth, String>()
     private val _refreshing = MutableStateFlow(false)
@@ -83,7 +88,7 @@ class ArthaViewModel(
                 val state = spendingState ?: spendingFlow(ledger(), analysisSnapshot, computationDispatcher,
                     migrate = { analysisStore?.migrateMetadata(it) }).stateIn(this, SharingStarted.Eagerly, SpendingState.Loading)
                 launch {
-                    combine(state, enabledProviders, _dateRangeFilter) { projection, enabled, dates ->
+                    combine(state, enabledProviders, _dateRangeFilter, _categoryFilter) { projection, enabled, dates, category ->
                         when (projection) {
                             SpendingState.Loading -> LedgerState.Loading
                             SpendingState.Failed -> LedgerState.Failed
@@ -93,7 +98,7 @@ class ArthaViewModel(
                                 val (start, end) = dates ?: (null to null)
                                 LedgerState.Ready(projection.transactions.filter { tx ->
                                     val millis = tx.occurredAt.toEpochMilli()
-                                    tx.provider in enabled && (start == null || millis >= start) &&
+                                    (category != null || tx.provider in enabled) && (category == null || tx.category == category && BudgetAnalyzer.isSpending(tx)) && (start == null || millis >= start) &&
                                         (end == null || millis < AccountingTime.dayAfter(end))
                                 })
                             }
@@ -101,20 +106,21 @@ class ArthaViewModel(
                     }.flowOn(computationDispatcher).collect { _ledgerState.value = it }
                 }
                 launch(computationDispatcher) {
-                    combine(_reconciledCache, _selectedMonth, analysisSnapshot) { rows, month, snapshot ->
-                        BudgetAnalyzer.analyzeMonth(month, rows, snapshot.monthlySummaries[month.toString()])
+                    combine(_reconciledCache, _selectedMonth, analysisSnapshot.map { it.monthlySummaries }.distinctUntilChanged()) { rows, month, summaries ->
+                        BudgetAnalyzer.analyzeMonth(month, rows, summaries[month.toString()])
                     }.collect { if (it.month == _selectedMonth.value) _monthAnalysis.value = it }
                 }
                 launch {
                     combine(_reconciledCache, _selectedMonth, analysisSnapshot, _refreshing) { rows, month, snapshot, importing ->
                         if (importing) null else month to fingerprint(month, rows, snapshot)
-                    }.distinctUntilChanged().debounce(2000).collect { input ->
+                    }.flowOn(computationDispatcher).distinctUntilChanged().debounce(2000).collect { input ->
                         input?.let { (month, _) -> analyzeMonth(month, debounceMs = 0) }
                     }
                 }
             }
         }
         automaticRefresh()
+        analyzeMonth(_selectedMonth.value)
     }
 
     private fun automaticRefresh() {
@@ -163,6 +169,13 @@ class ArthaViewModel(
         _dateRangeFilter.value = if (startMillis == null && endMillis == null) null else startMillis to endMillis
     }
     fun clearDateRangeFilter() { _dateRangeFilter.value = null }
+    fun clearCategoryFilter() { _categoryFilter.value = null }
+    fun openCategoryTransactions(category: String) {
+        val month = selectedMonth.value
+        setDateRangeFilter(month.atDay(1).atStartOfDay(AccountingTime.zone).toInstant().toEpochMilli(),
+            month.atEndOfMonth().atStartOfDay(AccountingTime.zone).toInstant().toEpochMilli())
+        _categoryFilter.value = category; setTargetDestination("TRANSACTIONS")
+    }
     fun setUserNote(transaction: UnifiedTransaction, note: String) {
         viewModelScope.launch(Dispatchers.IO) { analysisStore?.setUserNote(transaction.key, note) }
     }
@@ -170,46 +183,53 @@ class ArthaViewModel(
         viewModelScope.launch(Dispatchers.IO) { analysisStore?.setClassification(transaction.key, category, "", manual = true) }
     }
     fun applyKnowledgeRewrite(rewritten: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setKnowledge(rewritten) } }
-    fun updateAiConfig(config: AiConfig) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setAiConfig(config) } }
+    fun updateAiConfig(config: AiConfig) { viewModelScope.launch(Dispatchers.IO) {
+        try { analysisStore?.setAiConfig(config); _settingsError.value = null }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (e: Exception) { _settingsError.value = e.message ?: "AI settings could not be saved securely." }
+    } }
     fun addCustomCategory(category: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.addCustomCategory(category) } }
     fun removeCustomCategory(category: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.removeCustomCategory(category) } }
     fun resetCategoriesToDefault() { viewModelScope.launch(Dispatchers.IO) { analysisStore?.resetCategoriesToDefault() } }
     fun setCategoryIcon(category: String, iconKey: String?) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setCategoryIcon(category, iconKey) } }
     fun setMonthlyNote(month: String, note: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setMonthlyNote(month, note) } }
-    fun recategorizeAll() { analyzeCurrentMonth() }
 
     private fun monthTransactions(month: YearMonth, rows: List<UnifiedTransaction>) = rows.filter {
         YearMonth.from(it.occurredAt.atZone(AccountingTime.zone)) == month && BudgetAnalyzer.isSpending(it)
     }
     private fun fingerprint(month: YearMonth, rows: List<UnifiedTransaction>, snapshot: AnalysisSnapshot): String =
-        BudgetAnalyzer.computeMonthFingerprint(monthTransactions(month, rows), snapshot.monthlyNotes[month.toString()].orEmpty(),
-            snapshot.knowledge + "\n${snapshot.aiConfig.baseUrl}\n${snapshot.aiConfig.model}\n${snapshot.aiConfig.apiKey.hashCode()}", snapshot.customCategories)
+        BudgetAnalyzer.computeMonthFingerprint(rows.filter {
+            YearMonth.from(it.occurredAt.atZone(AccountingTime.zone)) in setOf(month, month.minusMonths(1)) &&
+                (BudgetAnalyzer.isSpending(it) || !it.isConfirmed && it.direction == Direction.DEBIT && it.money.currencyCode == "IDR")
+        }, snapshot.monthlyNotes[month.toString()].orEmpty(),
+            snapshot.knowledge + "\n${snapshot.aiConfig.baseUrl}\n${snapshot.aiConfig.model}\n${snapshot.aiConfig.apiKey}\n${if (month == YearMonth.now(clock.withZone(AccountingTime.zone))) java.time.LocalDate.now(clock.withZone(AccountingTime.zone)) else month}", snapshot.customCategories)
 
     fun analyzeMonth(month: YearMonth, forceReanalyze: Boolean = false, debounceMs: Long = 600) {
+        if (_refreshing.value && !forceReanalyze) return
         val config = analysisSnapshot.value.aiConfig
         if (analysisStore == null || config.baseUrl.isBlank() || config.model.isBlank() || config.apiKey.isBlank()) return
         monthJobs[month]?.cancel()
         val job = viewModelScope.launch {
-            if (debounceMs > 0) delay(debounceMs)
-            val snapshot = analysisSnapshot.value
-            val rows = _reconciledCache.value
-            val transactions = monthTransactions(month, rows)
-            if (transactions.isEmpty()) return@launch
-            val fp = fingerprint(month, rows, snapshot)
-            if (!forceReanalyze && (failedFingerprints[month] == fp || snapshot.analysisFingerprints[month.toString()] == fp)) return@launch
-            _analyzingMonths.update { it + month }
-            _analysisErrors.update { it - month }
             try {
-                val result = AiAnalysisService.analyzeMonth(snapshot.aiConfig, snapshot.knowledge, month.toString(), transactions,
-                    snapshot.customCategories, snapshot.monthlyNotes[month.toString()].orEmpty())
-                ensureActive()
-                if (fingerprint(month, _reconciledCache.value, analysisSnapshot.value) != fp) return@launch
-                withContext(Dispatchers.IO) { analysisStore.commitMonthSummary(month.toString(), result.monthlySummary, fp, snapshot) }
-                failedFingerprints.remove(month)
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (e: Exception) {
-                failedFingerprints[month] = fp
-                _analysisErrors.update { it + (month to (e.message ?: "AI commentary unavailable; local insights are current.")) }
+                if (debounceMs > 0) delay(debounceMs)
+                val snapshot = analysisSnapshot.value
+                val rows = _reconciledCache.value
+                if (monthTransactions(month, rows).isEmpty()) return@launch
+                val fp = withContext(computationDispatcher) { fingerprint(month, rows, snapshot) }
+                if (!forceReanalyze && (failedFingerprints[month] == fp || snapshot.analysisFingerprints[month.toString()] == fp)) return@launch
+                _analyzingMonths.update { it + month }; _analysisErrors.update { it - month }
+                try {
+                    val result = AiAnalysisService.analyzeMonth(snapshot.aiConfig, snapshot.knowledge, month.toString(), rows,
+                        snapshot.customCategories, snapshot.monthlyNotes[month.toString()].orEmpty())
+                    ensureActive()
+                    if (withContext(computationDispatcher) { fingerprint(month, _reconciledCache.value, analysisSnapshot.value) } != fp) return@launch
+                    val committed = withContext(Dispatchers.IO) { analysisStore.commitMonthSummary(month.toString(), result.monthlySummary, fp, snapshot) }
+                    if (committed) failedFingerprints.remove(month)
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (e: Exception) {
+                    failedFingerprints[month] = fp
+                    _analysisErrors.update { it + (month to (e.message ?: "AI commentary unavailable; local insights are current.")) }
+                }
             } finally {
                 if (monthJobs[month] === coroutineContext[Job]) {
                     monthJobs.remove(month); _analyzingMonths.update { it - month }

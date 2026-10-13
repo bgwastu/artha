@@ -1,6 +1,5 @@
 package net.wastu.artha.ui.screens
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -25,13 +24,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.EditNote
-import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
@@ -46,7 +42,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -60,9 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -70,7 +63,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.wastu.artha.core.model.Money
-import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.ui.AVAILABLE_CATEGORY_ICONS
 import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.data.analysis.CategorySpending
@@ -86,7 +78,6 @@ import java.util.Locale
 @Composable
 fun AnalysisScreen(
     viewModel: ArthaViewModel,
-    onTransactionClick: (UnifiedTransaction) -> Unit,
     showCategoriesSheet: Boolean = false,
     onOpenCategoriesSheet: () -> Unit = {},
     onDismissCategoriesSheet: () -> Unit = {},
@@ -98,6 +89,7 @@ fun AnalysisScreen(
     val snapshot by viewModel.analysisSnapshot.collectAsStateWithLifecycle()
     val analyzingMonths by viewModel.analyzingMonths.collectAsStateWithLifecycle()
     val selectedMonth by viewModel.selectedMonth.collectAsStateWithLifecycle()
+    val analysisErrors by viewModel.analysisErrors.collectAsStateWithLifecycle()
     val isMonthAnalyzing = selectedMonth in analyzingMonths
 
     var showMonthlyNoteDialog by remember { mutableStateOf(false) }
@@ -204,7 +196,7 @@ fun AnalysisScreen(
                 CategorySpendingCard(
                     category = cat,
                     categoryIcons = snapshot.categoryIcons,
-                    onTransactionClick = onTransactionClick,
+                    onOpenCategory = viewModel::openCategoryTransactions,
                 )
             }
         }
@@ -213,10 +205,13 @@ fun AnalysisScreen(
         item(key = "ai_insights_bottom") {
             AiInsightsCard(
                 summary = analysis.monthlyAiSummary,
-                model = snapshot.aiConfig.model,
                 isAnalyzing = isMonthAnalyzing,
                 onReanalyze = { viewModel.analyzeMonth(selectedMonth, forceReanalyze = true) },
-                onRecategorizeAll = { viewModel.recategorizeAll() },
+                localSummary = analysis.localSummary,
+                error = analysisErrors[selectedMonth],
+                savedAt = snapshot.updatedAt["monthSummary:$selectedMonth"],
+                configured = snapshot.aiConfig.baseUrl.isNotBlank() && snapshot.aiConfig.model.isNotBlank() && snapshot.aiConfig.apiKey.isNotBlank(),
+                onConfigure = { viewModel.setTargetDestination("SETTINGS") },
                 onOpenKnowledge = onOpenKnowledgeEditor,
             )
         }
@@ -413,7 +408,7 @@ fun MonthlyNoteDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "Explain what you spent on this month (e.g. trips, big purchases, home repairs). AI uses this context to categorize transactions and provide advice.",
+                    "Explain what you spent on this month (e.g. trips, big purchases, home repairs). AI uses this context to explain spending and provide commentary; your categories are kept.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -427,7 +422,7 @@ fun MonthlyNoteDialog(
         },
         confirmButton = {
             FilledTonalButton(onClick = { onSave(text) }) {
-                Text("Save & Analyze")
+                Text("Save context")
             }
         },
         dismissButton = {
@@ -440,292 +435,44 @@ fun MonthlyNoteDialog(
 
 @Composable
 private fun AiInsightsCard(
-    summary: String?,
-    model: String,
-    isAnalyzing: Boolean,
-    onReanalyze: () -> Unit,
-    onRecategorizeAll: () -> Unit,
-    onOpenKnowledge: () -> Unit,
+    summary: String?, isAnalyzing: Boolean, onReanalyze: () -> Unit,
+    onOpenKnowledge: () -> Unit, localSummary: String, error: String?, savedAt: Long?,
+    configured: Boolean, onConfigure: () -> Unit,
 ) {
-    var showRecategorizeConfirm by remember { mutableStateOf(false) }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        shape = RoundedCornerShape(14.dp),
-    ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    Icons.Default.AutoAwesome,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp),
-                )
-                Text(
-                    "AI Monthly Summary",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
-                )
-                Surface(
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                    shape = RoundedCornerShape(6.dp),
-                ) {
-                    Text(
-                        model.substringAfter("/").take(16),
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                        fontWeight = FontWeight.Medium,
-                    )
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Spending insights", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            MarkdownText(markdown = localSummary, style = MaterialTheme.typography.bodySmall)
+            HorizontalDivider()
+            Text("AI commentary", style = MaterialTheme.typography.titleSmall)
+            if (savedAt != null) Text("Saved ${formatDate(java.time.Instant.ofEpochMilli(savedAt))} · local totals are current", style = MaterialTheme.typography.labelSmall)
+            if (!summary.isNullOrBlank()) MarkdownText(markdown = summary, style = MaterialTheme.typography.bodySmall)
+            else Text(if (configured) "Commentary refreshes after changed imports settle." else "Local insights are ready. Add an AI provider for optional commentary.", style = MaterialTheme.typography.bodySmall)
+            if (error != null) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onClick = if (configured) onReanalyze else onConfigure, enabled = !isAnalyzing) {
+                    Text(if (isAnalyzing) "Refreshing…" else if (configured) "Refresh commentary" else "Set up AI")
                 }
-            }
-
-            val (summaryPart, recommendationsPart) = remember(summary) {
-                val raw = summary ?: ""
-                if ("RECOMMENDATIONS:" in raw) {
-                    val parts = raw.split("RECOMMENDATIONS:", limit = 2)
-                    parts[0].trim() to parts[1].trim()
-                } else {
-                    raw.trim() to ""
-                }
-            }
-
-            if (summaryPart.isNotBlank()) {
-                MarkdownText(
-                    markdown = summaryPart,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    bulletColor = MaterialTheme.colorScheme.primary,
-                )
-            } else {
-                Text(
-                    "AI analyzes expenses automatically in the background based on your Knowledge rules and Monthly Note.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            if (recommendationsPart.isNotBlank()) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Lightbulb,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Text(
-                        "Recommendations",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-                MarkdownText(
-                    markdown = recommendationsPart,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    bulletColor = MaterialTheme.colorScheme.tertiary,
-                )
-            }
-
-            // Action Buttons: Re-analyze and Recategorize All
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FilledTonalButton(
-                    onClick = onReanalyze,
-                    enabled = !isAnalyzing,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    if (isAnalyzing) {
-                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Analyzing...", style = MaterialTheme.typography.labelMedium)
-                    } else {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Re-analyze", style = MaterialTheme.typography.labelMedium)
-                    }
-                }
-
-                OutlinedButton(
-                    onClick = { showRecategorizeConfirm = true },
-                    enabled = !isAnalyzing,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Recategorize", style = MaterialTheme.typography.labelMedium)
-                }
-            }
-
-            OutlinedButton(
-                onClick = onOpenKnowledge,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Default.AutoStories, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Knowledge Base Rules")
+                TextButton(onClick = onOpenKnowledge) { Text("Personal context") }
             }
         }
-    }
-
-    if (showRecategorizeConfirm) {
-        AlertDialog(
-            onDismissRequest = { showRecategorizeConfirm = false },
-            title = { Text("Recategorize All?", fontWeight = FontWeight.Bold) },
-            text = {
-                Text("This will reset all transaction categories (including manual overrides) and re-classify expenses with AI based on your Knowledge rules and Monthly Note.")
-            },
-            confirmButton = {
-                FilledTonalButton(onClick = {
-                    onRecategorizeAll()
-                    showRecategorizeConfirm = false
-                }) {
-                    Text("Reset & Recategorize")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRecategorizeConfirm = false }) {
-                    Text("Cancel")
-                }
-            },
-        )
     }
 }
 
 @Composable
-private fun CategorySpendingCard(
-    category: CategorySpending,
-    categoryIcons: Map<String, String>,
-    onTransactionClick: (UnifiedTransaction) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        shape = RoundedCornerShape(12.dp),
-    ) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            // Line 1: Category Name with Icon + Amount
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    val icon = categoryIconFor(category.category, categoryIcons)
-                    Icon(
-                        icon,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Text(
-                        category.category,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                Text(
-                    formatAmountMinor(category.amountMinor),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+private fun CategorySpendingCard(category: CategorySpending, categoryIcons: Map<String, String>, onOpenCategory: (String) -> Unit) {
+    Card(Modifier.fillMaxWidth().clickable { onOpenCategory(category.category) },
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(categoryIconFor(category.category, categoryIcons), contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(category.category, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                Text(formatAmountMinor(category.amountMinor), fontWeight = FontWeight.Bold)
+                Icon(Icons.Default.ChevronRight, contentDescription = "View category transactions", modifier = Modifier.size(20.dp))
             }
-
-            // Line 2: Share and tx count + Subtle Delta
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "${category.sharePercent.toInt()}% (${category.transactions.size} tx)",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                val delta = category.deltaPercent
-                if (delta != null && category.previousMonthAmountMinor > 0L) {
-                    val symbol = if (delta < 0) "▼" else "▲"
-                    Text(
-                        "$symbol ${kotlin.math.abs(delta).toInt()}% vs last month",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                    )
-                }
-            }
-
-            // Line 3: Thin 3dp progress bar
-            LinearProgressIndicator(
-                progress = { (category.sharePercent / 100f).coerceIn(0.01f, 1f) },
-                modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(1.5.dp)),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceVariant,
-            )
-
-            // Expandable list of transactions
-            if (expanded) {
-                HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    for (tx in category.transactions) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainer,
-                            modifier = Modifier.fillMaxWidth().clickable { onTransactionClick(tx) },
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Image(
-                                    painter = painterResource(tx.provider.iconRes),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp).clip(RoundedCornerShape(4.dp)),
-                                )
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        tx.description,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Text(
-                                        formatDate(tx.occurredAt),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                Text(
-                                    formatMoney(tx.money),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            Text("${category.sharePercent.toInt()}% · ${category.transactions.size} payments", style = MaterialTheme.typography.labelSmall)
+            LinearProgressIndicator(progress = { (category.sharePercent / 100f).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
         }
     }
 }
@@ -740,7 +487,7 @@ fun KnowledgeEditorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Knowledge Base Rules", fontWeight = FontWeight.Bold) },
+        title = { Text("Personal Context Rules", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(

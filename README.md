@@ -9,10 +9,10 @@ Artha helps people in Indonesia understand their spending on rooted Android phon
 - **Unified timeline:** Automatically collect transactions and reconcile duplicates across providers.
 - **Order details:** See food items, shopping purchases, and ride routes.
 - **Monthly spending:** Compare categories and totals with the previous month.
-- **AI insights:** Use personal notes to refine categories and spending recommendations.
+- **Spending insights:** Local summaries are ready immediately; optional AI commentary refreshes in the background and keeps manual categories.
 - **Search and filters:** Find transactions by keyword, provider, or date range.
 - **Homescreen widgets:** Check recent transactions and monthly spending without opening the app.
-- **Encrypted sync:** Back up and merge your ledger through Google Drive, encrypted on-device.
+- **Encrypted backup:** Back up through Google Drive and explicitly restore missing history, encrypted on-device.
 
 ## Providers
 

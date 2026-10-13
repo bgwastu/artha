@@ -53,6 +53,7 @@ class AnalysisStore(context: Context) {
     private val appContext = context.applicationContext
     private val prefs: SharedPreferences = context.getSharedPreferences("artha_analysis_store", Context.MODE_PRIVATE)
 
+    private val secret = StoredSecret(prefs, "artha_ai_config_key", "ai_api_key")
     private val _snapshot = MutableStateFlow(loadSnapshot())
     val snapshot: StateFlow<AnalysisSnapshot> = _snapshot.asStateFlow()
 
@@ -63,7 +64,7 @@ class AnalysisStore(context: Context) {
         val summariesJson = prefs.getString("monthly_summaries", "{}") ?: "{}"
         val knowledge = prefs.getString("knowledge", "") ?: ""
         val baseUrl = prefs.getString("ai_base_url", "") ?: ""
-        val apiKey = prefs.getString("ai_api_key", "") ?: ""
+        val apiKey = secret.read()
         val model = prefs.getString("ai_model", "") ?: ""
         val customCategoriesJson = prefs.getString("custom_categories", null)
         val customCategories = if (customCategoriesJson == null) {
@@ -143,11 +144,6 @@ class AnalysisStore(context: Context) {
     }
 
     @Synchronized
-    fun setBatchClassifications(updates: Map<String, Pair<String, String>>) {
-        applyMergedSnapshot(TransactionMetadata.applyAutomatic(_snapshot.value, updates, System.currentTimeMillis()))
-    }
-
-    @Synchronized
     fun setKnowledge(knowledgeText: String) {
         val clean = knowledgeText.trim()
         val now = System.currentTimeMillis()
@@ -162,30 +158,17 @@ class AnalysisStore(context: Context) {
 
     @Synchronized
     fun setAiConfig(config: AiConfig) {
+        if (config.baseUrl.isNotBlank()) AiAnalysisService.endpoint(config.baseUrl)
+        secret.save(config.apiKey.trim())
         val now = System.currentTimeMillis()
         val currentUpdated = _snapshot.value.updatedAt.toMutableMap()
         currentUpdated["aiConfig"] = now
         prefs.edit {
             putString("ai_base_url", config.baseUrl.trim())
-            putString("ai_api_key", config.apiKey.trim())
             putString("ai_model", config.model.trim())
             putString("updated_at_map", JSONObject(currentUpdated as Map<*, *>).toString())
         }
         _snapshot.value = _snapshot.value.copy(aiConfig = config, updatedAt = currentUpdated)
-    }
-
-    @Synchronized
-    fun setMonthlySummary(month: String, summary: String) {
-        val now = System.currentTimeMillis()
-        val currentSummaries = _snapshot.value.monthlySummaries.toMutableMap()
-        val currentUpdated = _snapshot.value.updatedAt.toMutableMap()
-        currentSummaries[month] = summary.trim()
-        currentUpdated["monthSummary:$month"] = now
-        prefs.edit {
-            putString("monthly_summaries", JSONObject(currentSummaries as Map<*, *>).toString())
-            putString("updated_at_map", JSONObject(currentUpdated as Map<*, *>).toString())
-        }
-        _snapshot.value = _snapshot.value.copy(monthlySummaries = currentSummaries, updatedAt = currentUpdated)
     }
 
     @Synchronized
@@ -198,28 +181,6 @@ class AnalysisStore(context: Context) {
             analysisFingerprints = current.analysisFingerprints + (month to fingerprint),
             updatedAt = current.updatedAt + ("monthSummary:$month" to System.currentTimeMillis())))
         return true
-    }
-
-    @Synchronized
-    fun clearAllClassifications() {
-        val current = _snapshot.value
-        val now = System.currentTimeMillis()
-        val times = current.updatedAt.toMutableMap()
-        current.categories.keys.filter { it !in current.manualCategories }.forEach { times["cat:$it"] = now }
-        current.monthlySummaries.keys.forEach { times["monthSummary:$it"] = now }
-        applyMergedSnapshot(current.copy(
-            categories = current.categories.filterKeys { it in current.manualCategories },
-            reasons = current.reasons.filterKeys { it in current.manualCategories },
-            monthlySummaries = emptyMap(), analysisFingerprints = emptyMap(), updatedAt = times,
-        ))
-    }
-
-    @Synchronized
-    fun setMonthFingerprint(month: String, fingerprint: String) {
-        val current = _snapshot.value.analysisFingerprints.toMutableMap()
-        current[month] = fingerprint
-        prefs.edit { putString("analysis_fingerprints", JSONObject(current as Map<*, *>).toString()) }
-        _snapshot.value = _snapshot.value.copy(analysisFingerprints = current)
     }
 
     @Synchronized
@@ -238,14 +199,6 @@ class AnalysisStore(context: Context) {
             putString("updated_at_map", JSONObject(currentUpdated as Map<*, *>).toString())
         }
         _snapshot.value = _snapshot.value.copy(monthlyNotes = current, updatedAt = currentUpdated)
-    }
-
-    @Synchronized
-    fun setCustomCategories(categories: List<String>) {
-        val clean = categories.map { it.trim() }.filter { it.isNotBlank() }.distinct()
-        val json = JSONArray(clean).toString()
-        prefs.edit { putString("custom_categories", json) }
-        _snapshot.value = _snapshot.value.copy(customCategories = clean)
     }
 
     @Synchronized
@@ -337,13 +290,13 @@ class AnalysisStore(context: Context) {
 
     @Synchronized
     fun applyMergedSnapshot(merged: AnalysisSnapshot) {
+        val merged = merged.copy(aiConfig = _snapshot.value.aiConfig)
         prefs.edit {
             putString("user_notes", JSONObject(merged.userNotes as Map<*, *>).toString())
             putString("categories", JSONObject(merged.categories as Map<*, *>).toString())
             putString("reasons", JSONObject(merged.reasons as Map<*, *>).toString())
             putString("knowledge", merged.knowledge)
             putString("ai_base_url", merged.aiConfig.baseUrl)
-            putString("ai_api_key", merged.aiConfig.apiKey)
             putString("ai_model", merged.aiConfig.model)
             putString("monthly_summaries", JSONObject(merged.monthlySummaries as Map<*, *>).toString())
             putString("custom_categories", JSONArray(merged.customCategories).toString())

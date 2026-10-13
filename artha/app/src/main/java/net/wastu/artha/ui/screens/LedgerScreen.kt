@@ -98,6 +98,8 @@ fun LedgerScreen(
     var selectedProvider by rememberSaveable { mutableStateOf<Provider?>(null) }
     var selectedDirection by rememberSaveable { mutableStateOf<Direction?>(null) }
     val dateRange by viewModel?.dateRangeFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val categoryFilter by viewModel?.categoryFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    LaunchedEffect(categoryFilter) { if (categoryFilter != null) { selectedProvider = null; selectedDirection = Direction.DEBIT } }
     var showDateRangePicker by remember { mutableStateOf(false) }
     val visibleProviders = remember(enabledProviders) {
         Provider.entries.filter { it in enabledProviders }
@@ -118,7 +120,7 @@ fun LedgerScreen(
             TransactionList(
                 transactions = filtered,
                 onTransaction = onTransaction,
-                resetKey = selectedProvider to selectedDirection,
+                resetKey = listOf(selectedProvider, selectedDirection, dateRange, categoryFilter),
                 activeFilter = run {
                     val dateLabel = dateRange?.let { (start, end) ->
                         val zone = net.wastu.artha.core.model.AccountingTime.zone
@@ -128,6 +130,7 @@ fun LedgerScreen(
                         if (s != null && e != null) "$s to $e" else s ?: e ?: "Date range"
                     }
                     listOfNotNull(
+                        categoryFilter?.let { "$it · all sources" },
                         selectedProvider?.displayName,
                         selectedDirection?.let { if (it == Direction.CREDIT) "Incoming" else "Outgoing" },
                         dateLabel
@@ -137,6 +140,7 @@ fun LedgerScreen(
                     selectedProvider = null
                     selectedDirection = null
                     viewModel?.clearDateRangeFilter()
+                    viewModel?.clearCategoryFilter()
                 },
             )
         }
@@ -184,7 +188,7 @@ fun LedgerScreen(
                     FilterChip(
                         selected = false,
                         onClick = {
-                            val now = LocalDate.now()
+                            val now = LocalDate.now(net.wastu.artha.core.model.AccountingTime.clock)
                             val start = now.withDayOfMonth(1).atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
                             val end = now.atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
                             viewModel?.setDateRangeFilter(start, end)
@@ -194,7 +198,7 @@ fun LedgerScreen(
                     FilterChip(
                         selected = false,
                         onClick = {
-                            val last = LocalDate.now().minusMonths(1)
+                            val last = LocalDate.now(net.wastu.artha.core.model.AccountingTime.clock).minusMonths(1)
                             val start = last.withDayOfMonth(1).atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
                             val end = last.withDayOfMonth(last.lengthOfMonth()).atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
                             viewModel?.setDateRangeFilter(start, end)
@@ -204,8 +208,8 @@ fun LedgerScreen(
                     FilterChip(
                         selected = false,
                         onClick = {
-                            val now = LocalDate.now()
-                            val start = now.minusDays(30).atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
+                            val now = LocalDate.now(net.wastu.artha.core.model.AccountingTime.clock)
+                            val start = now.minusDays(29).atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
                             val end = now.atStartOfDay(net.wastu.artha.core.model.AccountingTime.zone).toInstant().toEpochMilli()
                             viewModel?.setDateRangeFilter(start, end)
                         },
@@ -217,10 +221,12 @@ fun LedgerScreen(
                         label = { Text("Custom Range...") },
                     )
                 }
-                if (selectedProvider != null || selectedDirection != null) {
+                if (selectedProvider != null || selectedDirection != null || dateRange != null || categoryFilter != null) {
                     TextButton(onClick = {
                         selectedProvider = null
                         selectedDirection = null
+                        viewModel?.clearDateRangeFilter()
+                        viewModel?.clearCategoryFilter()
                     }) { Text("Reset") }
                 }
             }
@@ -273,6 +279,9 @@ fun SearchTransactionsScreen(
                     transaction.description,
                     transaction.provider.displayName,
                     transaction.cardLast4.orEmpty(),
+                    transaction.userNote.orEmpty(),
+                    transaction.category.orEmpty(),
+                    if (!transaction.isConfirmed) "Unconfirmed order" else "",
                     if (transaction.isQris) "QRIS" else "",
                     formatMoney(transaction.money),
                 ) + payloadTextValues(transaction.rawPayload))
@@ -600,7 +609,7 @@ fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlig
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val timeStr = formatTime(transaction.occurredAt)
                         val catStr = transaction.category
-                        val label = if (!credit && !catStr.isNullOrBlank()) "$timeStr - $catStr" else timeStr
+                        val label = listOfNotNull(timeStr, catStr?.takeIf { !credit && it.isNotBlank() }, if (!transaction.isConfirmed) "Unconfirmed order" else null).joinToString(" · ")
                         Text(
                             label,
                             style = MaterialTheme.typography.bodySmall,

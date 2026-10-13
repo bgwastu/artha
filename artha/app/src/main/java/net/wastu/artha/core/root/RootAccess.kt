@@ -1,6 +1,6 @@
 package net.wastu.artha.core.root
 
-/** A fresh verification must succeed before accessing the Ledger or any Provider. */
+/** Imports require root; saved ledger viewing is independent of this gate. */
 fun interface RootAccess {
     suspend fun verify(): Boolean
 }

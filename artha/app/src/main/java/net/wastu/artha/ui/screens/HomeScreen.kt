@@ -68,6 +68,7 @@ fun HomeScreen(
     onProviderEnabled: (Provider, Boolean) -> Unit = { _, _ -> },
     viewModel: ArthaViewModel? = null,
 ) {
+    val saveableStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     var destination by rememberSaveable { mutableStateOf(Destination.TRANSACTIONS) }
     var showSearch by rememberSaveable { mutableStateOf(false) }
     var showFilter by rememberSaveable { mutableStateOf(false) }
@@ -175,6 +176,7 @@ fun HomeScreen(
                             Text("Root unavailable · viewing saved history · tap to retry imports")
                         }
                     }
+                    saveableStateHolder.SaveableStateProvider(destination.name) {
                         when (destination) {
                             Destination.TRANSACTIONS -> LedgerScreen(
                                 state = ledgerState,
@@ -189,7 +191,6 @@ fun HomeScreen(
                                 if (viewModel != null) {
                                     AnalysisScreen(
                                         viewModel = viewModel,
-                                        onTransactionClick = { selectedTransaction = it },
                                         showCategoriesSheet = showCategoriesSheet,
                                         onOpenCategoriesSheet = { showCategoriesSheet = true },
                                         onDismissCategoriesSheet = { showCategoriesSheet = false },
@@ -207,6 +208,7 @@ fun HomeScreen(
                                 viewModel = viewModel,
                             )
                         }
+                    }
                 }
             }
         }
@@ -221,7 +223,9 @@ fun HomeScreen(
         }
     }
 
-    selectedTransaction?.let { transaction ->
+    val latestTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyList<UnifiedTransaction>()) }
+    selectedTransaction?.let { selected ->
+        val transaction = latestTransactions.firstOrNull { it.key == selected.key } ?: selected
         TransactionDetailsSheet(transaction, viewModel = viewModel, onDismiss = { selectedTransaction = null })
     }
 }

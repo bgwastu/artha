@@ -86,7 +86,7 @@ class RoomLedgerRepositoryTest {
         try {
             android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath(name), null).use { old ->
                 old.execSQL("CREATE TABLE unified_transactions (provider TEXT NOT NULL, providerTransactionId TEXT NOT NULL, direction TEXT NOT NULL, amountMinor INTEGER NOT NULL, currencyCode TEXT NOT NULL, occurredAtEpochMillis INTEGER NOT NULL, description TEXT NOT NULL, rawPayload TEXT NOT NULL, pocketId TEXT, pocketName TEXT, ingestedAtEpochMillis INTEGER NOT NULL, PRIMARY KEY(provider, providerTransactionId))")
-                old.execSQL("INSERT INTO unified_transactions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", arrayOf("JAGO", "provider-id-1", "DEBIT", 25000000, "IDR", transaction.occurredAt.toEpochMilli(), "Test payment", "{\"original\":true}", "main", "Main Pocket", 1))
+                old.execSQL("INSERT INTO unified_transactions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", arrayOf<Any>("JAGO", "provider-id-1", "DEBIT", 25000000, "IDR", transaction.occurredAt.toEpochMilli(), "Test payment", "{\"original\":true}", "main", "Main Pocket", 1))
                 old.version = 1
             }
             val migrated = Room.databaseBuilder(context, LedgerDatabase::class.java, name)

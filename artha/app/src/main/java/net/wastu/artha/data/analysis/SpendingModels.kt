@@ -22,5 +22,6 @@ data class MonthSpendingAnalysis(
     val monthlyAiSummary: String?,
     val unconfirmedSpendingMinor: Long = 0,
     val unsupportedCurrencyCount: Int = 0,
+    val localSummary: String = "",
 )
 

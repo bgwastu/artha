@@ -3,7 +3,6 @@ package net.wastu.artha.data.analysis
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.UnifiedTransaction
 import java.time.YearMonth
-import java.time.ZoneId
 import org.json.JSONObject
 
 object BudgetAnalyzer {
@@ -58,7 +57,19 @@ object BudgetAnalyzer {
             monthlyAiSummary = aiSummary,
             unconfirmedSpendingMinor = currentMonthTxs.filter { !it.isConfirmed && it.direction == Direction.DEBIT && it.money.currencyCode == "IDR" }.sumOf { it.money.amountMinor },
             unsupportedCurrencyCount = currentMonthTxs.count { it.money.currencyCode != "IDR" },
-        )
+        ).let { it.copy(localSummary = localSummary(it)) }
+    }
+
+    fun localSummary(analysis: MonthSpendingAnalysis): String {
+        fun rupiah(amount: Long) = net.wastu.artha.core.model.formatMinorAmount(java.math.BigInteger.valueOf(amount))
+        if (analysis.totalPersonalSpendingMinor == 0L) return "- No confirmed personal spending recorded for this month."
+        return buildString {
+            append("- Confirmed spending: ${rupiah(analysis.totalPersonalSpendingMinor)}.\n")
+            analysis.categories.firstOrNull()?.let { append("- Largest category: ${it.category}, ${rupiah(it.amountMinor)} (${it.sharePercent.toInt()}%).\n") }
+            if (analysis.previousMonthTotalMinor > 0) append("- Previous complete month: ${rupiah(analysis.previousMonthTotalMinor)}.\n")
+            val largest = analysis.categories.flatMap { it.transactions }.maxByOrNull { it.money.amountMinor }
+            largest?.let { append("- Largest payment: ${it.description}, ${rupiah(it.money.amountMinor)}.") }
+        }.trim()
     }
 
     fun isSpending(tx: UnifiedTransaction): Boolean {
@@ -80,11 +91,12 @@ object BudgetAnalyzer {
         customCategories: List<String>,
     ): String {
         val md = java.security.MessageDigest.getInstance("SHA-256")
+        md.update("commentary-v2\n".toByteArray(Charsets.UTF_8))
         md.update("note:${monthlyNote.trim()}\n".toByteArray(Charsets.UTF_8))
         md.update("knowledge:${knowledge.trim()}\n".toByteArray(Charsets.UTF_8))
         md.update("cats:${customCategories.sorted().joinToString(",")}\n".toByteArray(Charsets.UTF_8))
-        for (tx in monthTransactions.sortedBy { it.providerTransactionId }) {
-            md.update("${tx.providerTransactionId}:${tx.money.amountMinor}:${tx.direction}:${tx.userNote.orEmpty()}:${tx.category.orEmpty()}\n".toByteArray(Charsets.UTF_8))
+        for (tx in monthTransactions.sortedBy { it.key }) {
+            md.update("${tx.key}:${tx.money.amountMinor}:${tx.money.currencyCode}:${tx.occurredAt}:${tx.description}:${tx.direction}:${tx.userNote.orEmpty()}:${tx.category.orEmpty()}\n".toByteArray(Charsets.UTF_8))
         }
         return md.digest().joinToString("") { "%02x".format(it) }
     }

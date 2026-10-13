@@ -85,6 +85,7 @@ fun ProvidersScreen(
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showAccountDialog by remember { mutableStateOf(false) }
 
+    val settingsError by viewModel?.settingsError?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val snapshot by viewModel?.analysisSnapshot?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val importEnabled by viewModel?.importEnabled?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(Provider.entries.toSet()) }
     val diagnostics by viewModel?.providerDiagnostics?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap()) }
@@ -113,6 +114,7 @@ fun ProvidersScreen(
         contentPadding = PaddingValues(vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (settingsError != null) item(key = "settings_error") { Text(settingsError!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) }
         item(key = "section_providers") {
             Text(
                 "CONNECTED FINANCIAL SOURCES",
@@ -193,7 +195,7 @@ fun ProvidersScreen(
             item(key = "section_ai_header") {
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "AI INTELLIGENCE & CATEGORIZATION",
+                    "OPTIONAL AI COMMENTARY",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
@@ -231,7 +233,7 @@ fun ProvidersScreen(
                         }
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "AI Categorization Engine",
+                                "AI Commentary Provider",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                             )
@@ -918,6 +920,7 @@ fun AiConfigDialog(
                     value = apiKey,
                     onValueChange = { apiKey = it },
                     label = { Text("API Key / Bearer") },
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )

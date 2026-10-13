@@ -40,7 +40,7 @@ class ArthaUiTest {
     }
 
     @Test
-    fun deniedRootShowsOnlyTheLockedInterface() {
+    fun deniedRootOffersRetryForAnEmptyLedger() {
         var opened = false
         val viewModel = ArthaViewModel(RootAccess { false }, { opened = true; object : net.wastu.artha.data.ledger.LedgerRepository {
             override fun observeTransactions() = kotlinx.coroutines.flow.flowOf(emptyList<UnifiedTransaction>())
@@ -48,7 +48,7 @@ class ArthaUiTest {
         } })
         model = viewModel
         compose.setContent { ArthaTheme(dynamicColor = false) { ArthaApp(viewModel) } }
-        compose.waitForIdle()
+        compose.waitUntil(10_000) { viewModel.rootGate.value == net.wastu.artha.core.root.RootGateState.DENIED && viewModel.ledgerState.value is LedgerState.Ready }
         compose.onNodeWithText("Root access required").assertExists()
         compose.onNodeWithText("Retry Root Gate").performClick()
         compose.waitForIdle()
@@ -79,13 +79,15 @@ class ArthaUiTest {
                 ),
             )
         }
-        val viewModel = ArthaViewModel(RootAccess { true }, { ledger })
+        // A root denial must leave saved data and details available.
+        val viewModel = ArthaViewModel(RootAccess { false }, { ledger })
         model = viewModel
         compose.setContent { ArthaTheme(dynamicColor = false) { ArthaApp(viewModel) } }
         compose.waitUntil(10_000) {
             (viewModel.ledgerState.value as? LedgerState.Ready)?.transactions?.size == 1
         }
         compose.waitForIdle()
+        compose.waitUntil(10_000) { compose.onAllNodes(hasText("Kopi Kenangan")).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Add transaction", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithText("Kopi Kenangan").assertIsDisplayed()
         compose.onNodeWithText("QRIS", useUnmergedTree = true).assertIsDisplayed()

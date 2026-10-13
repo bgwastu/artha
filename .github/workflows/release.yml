@@ -37,11 +37,22 @@ jobs:
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: python3 tools/release/android-key.py
-      - name: Build signed APK
+      - name: Check and build signed APK
         env:
           VERSION_NAME: ${{ steps.version.outputs.name }}
           VERSION_CODE: ${{ steps.version.outputs.number }}
-        run: ./artha/gradlew -p artha -ParthaVersionName="$VERSION_NAME" -ParthaVersionCode="$VERSION_CODE" assembleRelease
+        run: ./artha/gradlew -p artha -ParthaVersionName="$VERSION_NAME" -ParthaVersionCode="$VERSION_CODE" testDebugUnitTest assembleDebug assembleRelease
+      - name: Verify release signing identity
+        run: |
+          python3 - <<'PY'
+          import os, re, subprocess
+          signer = os.path.join(os.environ['ANDROID_HOME'], 'build-tools', '36.0.0', 'apksigner')
+          output = subprocess.check_output([signer, 'verify', '--print-certs', 'artha/app/build/outputs/apk/release/app-release.apk'], text=True)
+          actual = re.search(r'certificate SHA-256 digest: (\w+)', output).group(1).lower()
+          expected = re.sub(r'[:\s]', '', os.environ['ARTHA_ANDROID_CERTIFICATE_SHA256']).lower()
+          if not expected or actual != expected:
+              raise SystemExit('APK signing certificate does not match the release identity')
+          PY
       - name: Stage APK
         env:
           VERSION_NAME: ${{ steps.version.outputs.name }}

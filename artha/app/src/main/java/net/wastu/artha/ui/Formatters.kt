@@ -16,35 +16,8 @@ private val TransactionDateFormatter: DateTimeFormatter = DateTimeFormatter
     .ofPattern("d MMM yyyy, HH:mm", Locale.US)
     .withZone(net.wastu.artha.core.model.AccountingTime.zone)
 
-private val CachedCurrencyFormat = ThreadLocal.withInitial {
-    NumberFormat.getCurrencyInstance(IndonesianLocale).apply {
-        currency = Currency.getInstance("IDR")
-        minimumFractionDigits = 0
-        maximumFractionDigits = 0
-    }
-}
-
-fun formatMoney(money: Money): String {
-    if (money.currencyCode == "IDR" && money.amountMinor % 100L == 0L) {
-        val rupiah = money.amountMinor / 100L
-        return requireNotNull(CachedCurrencyFormat.get()).format(rupiah)
-    }
-    return formatMinorAmount(BigInteger.valueOf(money.amountMinor), money.currencyCode)
-}
-
-fun formatMinorAmount(amountMinor: BigInteger, currencyCode: String = "IDR"): String {
-    if (currencyCode == "IDR") {
-        val rupiah = amountMinor.divide(BigInteger.valueOf(100)).toLong()
-        return requireNotNull(CachedCurrencyFormat.get()).format(rupiah)
-    }
-    val currency = Currency.getInstance(currencyCode)
-    val amount = BigDecimal(amountMinor, currency.defaultFractionDigits)
-    return NumberFormat.getCurrencyInstance(IndonesianLocale).apply {
-        this.currency = currency
-        minimumFractionDigits = if (amount.stripTrailingZeros().scale() <= 0) 0 else currency.defaultFractionDigits
-        maximumFractionDigits = currency.defaultFractionDigits
-    }.format(amount)
-}
+fun formatMoney(money: Money): String = net.wastu.artha.core.model.formatMoney(money)
+fun formatMinorAmount(amountMinor: BigInteger, currencyCode: String = "IDR"): String = net.wastu.artha.core.model.formatMinorAmount(amountMinor, currencyCode)
 
 fun formatDate(instant: Instant): String = TransactionDateFormatter.format(instant)
 

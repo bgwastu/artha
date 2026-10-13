@@ -10,8 +10,6 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 abstract class LedgerDatabase : RoomDatabase() {
     abstract fun transactions(): TransactionDao
 
-
-
     companion object {
         fun create(context: Context): LedgerDatabase = Room.databaseBuilder(
             context.applicationContext,
