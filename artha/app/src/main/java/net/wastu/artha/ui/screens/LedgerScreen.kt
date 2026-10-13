@@ -281,7 +281,7 @@ fun SearchTransactionsScreen(
                     transaction.cardLast4.orEmpty(),
                     transaction.userNote.orEmpty(),
                     transaction.category.orEmpty(),
-                    if (!transaction.isConfirmed) "Unconfirmed order" else "",
+                    if (!transaction.isConfirmed) "Unconfirmed activity" else "",
                     if (transaction.isQris) "QRIS" else "",
                     formatMoney(transaction.money),
                 ) + payloadTextValues(transaction.rawPayload))
@@ -622,7 +622,7 @@ fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlig
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val timeStr = formatTime(transaction.occurredAt)
                         val catStr = transaction.category
-                        val label = listOfNotNull(timeStr, catStr?.takeIf { !credit && it.isNotBlank() }, if (!transaction.isConfirmed) "Unconfirmed order" else null).joinToString(" · ")
+                        val label = listOfNotNull(timeStr, catStr?.takeIf { !credit && it.isNotBlank() }, if (!transaction.isConfirmed) "Unconfirmed activity" else null).joinToString(" · ")
                         Text(
                             label,
                             style = MaterialTheme.typography.bodySmall,

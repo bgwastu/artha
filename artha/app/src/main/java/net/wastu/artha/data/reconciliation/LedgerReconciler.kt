@@ -22,7 +22,13 @@ object LedgerReconciler {
             payload.optJSONObject("fields")?.optString("f22") == "INTERNAL"
         val refund = code.endsWith("-R", true) || code == "GPC02" ||
             tx.description.contains("refund", true) || tx.description.contains("reversal", true)
-        val confirmed = tx.provider == Provider.JAGO || origin == "gopay-order-history" || origin == "grab-wallet-api" || origin == "grab-rides-detail-api"
+        private val walletDirection = payload.optJSONObject("item")?.let {
+            it.optString("direction").ifBlank { it.optString("paymentType") }.uppercase(Locale.ROOT)
+        }
+        // Older Grab imports guessed DEBIT. Keep those rows, but require source direction
+        // evidence before treating an old wallet row as a confirmed payment.
+        val confirmed = tx.provider == Provider.JAGO || origin == "gopay-order-history" ||
+            origin == "grab-wallet-api" && walletDirection == tx.direction.name
         val funding = payload.optBoolean("isWalletFunding") || payload.optBoolean("isPocketTransfer") || internal ||
             (tx.provider == Provider.JAGO && code in setOf("OTD10", "TFD70") &&
                 listOf("gopay", "ovo", "shopeepay", "top up", "topup").any { it in merchant }) ||

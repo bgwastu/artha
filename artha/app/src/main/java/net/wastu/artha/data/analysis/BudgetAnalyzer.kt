@@ -91,12 +91,12 @@ object BudgetAnalyzer {
         customCategories: List<String>,
     ): String {
         val md = java.security.MessageDigest.getInstance("SHA-256")
-        md.update("commentary-v2\n".toByteArray(Charsets.UTF_8))
+        md.update("commentary-v3\n".toByteArray(Charsets.UTF_8))
         md.update("note:${monthlyNote.trim()}\n".toByteArray(Charsets.UTF_8))
         md.update("knowledge:${knowledge.trim()}\n".toByteArray(Charsets.UTF_8))
         md.update("cats:${customCategories.sorted().joinToString(",")}\n".toByteArray(Charsets.UTF_8))
         for (tx in monthTransactions.sortedBy { it.key }) {
-            md.update("${tx.key}:${tx.money.amountMinor}:${tx.money.currencyCode}:${tx.occurredAt}:${tx.description}:${tx.direction}:${tx.userNote.orEmpty()}:${tx.category.orEmpty()}\n".toByteArray(Charsets.UTF_8))
+            md.update("${tx.key}:${tx.money.amountMinor}:${tx.money.currencyCode}:${tx.occurredAt}:${tx.description}:${tx.direction}:${tx.isConfirmed}:${tx.isReversal}:${tx.userNote.orEmpty()}:${tx.category.orEmpty()}\n".toByteArray(Charsets.UTF_8))
         }
         return md.digest().joinToString("") { "%02x".format(it) }
     }

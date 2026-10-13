@@ -84,6 +84,13 @@ class AiCommentaryTest {
         assertTrue(formatMoney(Money(1234)).contains("12,34"))
     }
 
+    @Test fun paymentConfirmationAndReversalChangesInvalidateSavedCommentary() {
+        val row = UnifiedTransaction(Provider.GRAB, "grab:1", Direction.DEBIT, Money(100), Instant.parse("2026-10-02T00:00:00Z"), "Payment", "{}")
+        fun fingerprint(value: UnifiedTransaction) = BudgetAnalyzer.computeMonthFingerprint(listOf(value), "", "", emptyList())
+        assertNotEquals(fingerprint(row), fingerprint(row.copy(isConfirmed = false)))
+        assertNotEquals(fingerprint(row), fingerprint(row.copy(isReversal = true)))
+    }
+
     @Test fun canceledCommentaryDoesNotWaitForTheServerOrProduceAResult() = runBlocking {
         val started = CompletableDeferred<Unit>()
         val release = java.util.concurrent.CountDownLatch(1)

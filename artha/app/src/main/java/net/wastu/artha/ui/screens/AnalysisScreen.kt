@@ -354,7 +354,7 @@ private fun MonthSummaryCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
 
             if (analysis.unconfirmedSpendingMinor > 0) {
-                Text("Unconfirmed orders: ${formatAmountMinor(analysis.unconfirmedSpendingMinor)} · excluded from total", style = MaterialTheme.typography.bodySmall)
+                Text("Unconfirmed activity: ${formatAmountMinor(analysis.unconfirmedSpendingMinor)} · excluded from total", style = MaterialTheme.typography.bodySmall)
             }
             if (analysis.unsupportedCurrencyCount > 0) {
                 Text("${analysis.unsupportedCurrencyCount} non-IDR transactions excluded", style = MaterialTheme.typography.bodySmall)

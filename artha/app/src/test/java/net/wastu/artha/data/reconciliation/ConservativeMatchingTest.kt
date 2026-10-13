@@ -71,4 +71,16 @@ class ConservativeMatchingTest {
         val row = LedgerReconciler.reconcileLedger(listOf(topup)).single()
         assertFalse(BudgetAnalyzer.isSpending(row))
     }
+
+    @Test fun legacyWalletDirectionGuessesCannotInflateConfirmedSpending() {
+        val missing = tx(Provider.GRAB, "grab:unknown", "Old wallet row", payload = """{"origin":"grab-wallet-api","item":{}}""")
+        val guessedDebit = missing.copy(providerTransactionId = "grab:credit", rawPayload = """{"origin":"grab-wallet-api","item":{"direction":"CREDIT"}}""")
+        val rows = LedgerReconciler.reconcileLedger(listOf(missing, guessedDebit))
+        assertTrue(rows.none { it.isConfirmed })
+        assertEquals(0L, BudgetAnalyzer.analyzeMonth(YearMonth.of(2026, 10), rows).totalPersonalSpendingMinor)
+        assertEquals(2, rows.size)
+        assertEquals(Direction.DEBIT, guessedDebit.direction) // Raw facts remain immutable.
+        val verified = missing.copy(rawPayload = """{"origin":"grab-wallet-api","item":{"direction":"DEBIT"}}""")
+        assertTrue(LedgerReconciler.reconcileLedger(listOf(verified)).single().isConfirmed)
+    }
 }
