@@ -75,6 +75,13 @@ class SettledPaymentProjectionTest {
         assertEquals(15_000_000L, total(rows))
     }
 
+    @Test fun directCardReceiptCannotBeSwallowedByAnUnidentifiedWalletCharge() {
+        val paidByCard = receipt().copy(cardLast4 = "1234")
+        val rows = LedgerReconciler.reconcileLedger(listOf(paidByCard, wallet()))
+        assertEquals(2, rows.size)
+        assertEquals(15_000_000L, total(rows))
+    }
+
     @Test fun bankReversalStillFindsItsChargeAfterReceiptEnrichment() {
         val payment = bank()
         val refund = payment.copy(providerTransactionId = "jago:refund", direction = Direction.CREDIT,

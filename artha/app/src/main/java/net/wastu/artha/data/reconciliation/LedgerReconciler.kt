@@ -161,7 +161,8 @@ object LedgerReconciler {
             .mapValues { (_, rows) -> rows.sortedBy { it.tx.occurredAt } }
         val choices = receipts.associate { receipt ->
             val candidates = within(index[Triple(receipt.tx.money.currencyCode, receipt.tx.money.amountMinor, receipt.tx.direction)].orEmpty(), receipt.tx.occurredAt, 86400)
-                .filter { wallet -> compatibleAccount(receipt.tx, wallet.tx) && (
+                .filter { wallet -> compatibleAccount(receipt.tx, wallet.tx) &&
+                    (receipt.tx.cardLast4 == null || wallet.tx.cardLast4 != null) && (
                     isMatchingProvider(wallet.tx, receipt.tx.provider) ||
                     listOf(wallet.tx.provider.displayName, if (wallet.tx.provider == Provider.GOJEK) "GoPay" else "OVO")
                         .any { receipt.payload.optString("sourcePaymentMethod").contains(it, true) } &&
