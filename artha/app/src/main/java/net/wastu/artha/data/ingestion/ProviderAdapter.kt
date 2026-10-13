@@ -66,15 +66,16 @@ class IngestionCoordinator(
         var warning = adapter.coverageHint
         val transactions = try { adapter.ingest() } catch (partial: PartialImportException) {
             if (partial.transactions.isEmpty()) throw partial
-            warning = partial.message; partial.transactions
+            warning = listOfNotNull(adapter.coverageHint, partial.message).distinct().joinToString(" · "); partial.transactions
         }
         require(transactions.all { it.provider == provider }) { "Adapter returned another Provider's transaction." }
-        return ledger().append(transactions) to warning
+        return ledger().appendProviderImport(transactions) to warning
     }
 
     private suspend fun importAndRecord(provider: Provider): String = try {
         val (result, warning) = readAndAppend(provider)
-        val summary = "${result.inserted} added, ${result.duplicates} already saved"
+        val summary = "${result.inserted} added, ${result.duplicates} already saved" +
+            if (result.evidenceUpdates > 0) ", ${result.evidenceUpdates} details updated" else ""
         preferences?.recordSyncSuccess(provider, summary, accountIdentifier = adaptersByProvider[provider]?.accountIdentifier, coverageHint = warning)
         if (warning == null) summary else "$summary · $warning"
     } catch (cancelled: CancellationException) { throw cancelled }

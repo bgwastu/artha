@@ -13,7 +13,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 data class SyncBundle(
-    val version: Int = 1,
+    val version: Int = 2,
     val exportedAtEpochMillis: Long = System.currentTimeMillis(),
     val analysis: AnalysisSnapshot,
     val transactions: List<UnifiedTransaction>,
@@ -85,7 +85,7 @@ object SyncBundleSerializer {
         }
 
         val version = root.getInt("version")
-        if (version != 1) throw UnsupportedSyncVersionException(version)
+        if (version !in 1..2) throw UnsupportedSyncVersionException(version)
         val exportedAt = root.optLong("exportedAtEpochMillis", 0L)
 
         val analysisObj = root.getJSONObject("analysis")
@@ -148,6 +148,8 @@ object SyncBundleSerializer {
             )
         }
 
+        if (version == 1) require(transactions.none(net.wastu.artha.data.ledger.ProviderObservations::isObservation)) { "Provider observations require backup version 2" }
+        net.wastu.artha.data.ledger.ProviderObservations.validate(transactions)
         return SyncBundle(
             version = version,
             exportedAtEpochMillis = exportedAt,

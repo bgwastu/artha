@@ -226,8 +226,8 @@ class DriveSyncManager(
                 // Retain all revisions: recovery history must never be silently pruned.
                 val now = System.currentTimeMillis()
                 val summary = when {
-                    restore -> "$restoredCount transactions restored; existing data kept"
-                    uploaded -> "${allTxs.size} transactions encrypted and backed up"
+                    restore -> "$restoredCount ledger records restored; existing data kept"
+                    uploaded -> "${allTxs.size} ledger records encrypted and backed up"
                     else -> "Backup already up to date"
                 }
                 prefs.edit {

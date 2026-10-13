@@ -21,4 +21,9 @@ class RoomLedgerRepository(
         val inserted = results.count { it != -1L }
         return AppendResult(inserted = inserted, duplicates = results.size - inserted)
     }
+
+    override suspend fun appendProviderImport(transactions: List<UnifiedTransaction>): AppendResult {
+        transactions.forEach { JSONObject(it.rawPayload) }
+        return dao.appendProviderImport(transactions.map { TransactionEntity.fromDomain(it, clock.instant()) })
+    }
 }

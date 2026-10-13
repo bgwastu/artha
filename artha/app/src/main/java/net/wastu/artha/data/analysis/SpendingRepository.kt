@@ -30,7 +30,7 @@ class SpendingProjector(private val reconcile: (List<UnifiedTransaction>) -> Lis
         if (facts == raw && snapshot == lastSnapshot) lastProjection?.let { return it }
         if (facts != raw) {
             rowCache.clear()
-            matched = reconcile(raw)
+            matched = reconcile(net.wastu.artha.data.ledger.ProviderObservations.resolve(raw))
             facts = raw
             aliases = matched.associate { tx ->
                 val sources = mutableListOf(tx.key, "${tx.provider.name}:${tx.providerTransactionId}")
@@ -42,7 +42,7 @@ class SpendingProjector(private val reconcile: (List<UnifiedTransaction>) -> Lis
                 tx.key to sources.distinct()
             }
         }
-        val metadata = TransactionMetadata.migrate(snapshot, raw)
+        val metadata = TransactionMetadata.migrate(snapshot, raw.filterNot(net.wastu.artha.data.ledger.ProviderObservations::isObservation))
         val rows = matched.map { tx ->
             val keys = aliases[tx.key].orEmpty()
             val noteKey = if ("note:${tx.key}" in metadata.updatedAt) tx.key else keys.firstOrNull { it in metadata.userNotes }
@@ -57,7 +57,7 @@ class SpendingProjector(private val reconcile: (List<UnifiedTransaction>) -> Lis
                 classificationIsManual = manual != null,
                 aiReasoning = edit.reason ?: rule.reason).also { rowCache[tx.key] = edit to it }
         }
-        return SpendingState.Ready(rows, raw.groupingBy { it.provider }.eachCount()).also {
+        return SpendingState.Ready(rows, raw.filterNot(net.wastu.artha.data.ledger.ProviderObservations::isObservation).groupingBy { it.provider }.eachCount()).also {
             lastSnapshot = snapshot; lastProjection = it
         }
     }
@@ -73,7 +73,7 @@ fun spendingFlow(ledger: LedgerRepository, analysis: StateFlow<AnalysisSnapshot>
     val projector = SpendingProjector()
     val metadata = analysis.map { MetadataInput(it.userNotes, it.categories, it.reasons, it.manualCategories,
         it.updatedAt.filterKeys { key -> key.startsWith("note:") }) }.distinctUntilChanged()
-    return combine(ledger.observeTransactions().distinctUntilChanged().onEach(migrate), metadata) { facts, annotations ->
+    return combine(ledger.observeTransactions().distinctUntilChanged().onEach { migrate(it.filterNot(net.wastu.artha.data.ledger.ProviderObservations::isObservation)) }, metadata) { facts, annotations ->
         projector.project(facts, annotations.snapshot()) as SpendingState
     }.flowOn(dispatcher).catch { emit(SpendingState.Failed) }
 }
