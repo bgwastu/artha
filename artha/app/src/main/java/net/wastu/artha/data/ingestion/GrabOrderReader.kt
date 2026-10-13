@@ -101,14 +101,7 @@ internal class GrabOrderReader(
         for (charge in wallet.distinctBy { it.key }) {
             val payload = JSONObject(charge.rawPayload)
             val ride = rideRows.singleOrNull { JSONObject(it.rawPayload).optString("orderNumber") == payload.optString("orderNumber") }
-            if (ride != null && !payload.optBoolean("isTip")) {
-                val detail = JSONObject(ride.rawPayload)
-                for (key in listOf("pickupLocation", "dropoffLocation", "paymentMethod", "serviceTier")) {
-                    detail.optString(key).takeIf(String::isNotBlank)?.let { payload.put(key, it) }
-                }
-                payload.put("bookingNumber", detail.optString("orderNumber")).put("orderMatchEvidence", "exact-booking-reference")
-                rows.transactions += charge.copy(description = ride.description, rawPayload = payload.toString())
-            } else rows.transactions += charge
+            rows.transactions += if (ride != null) GrabProviderParser.enrichCharge(charge, ride) else charge
         }
         rows.transactions += rideRows
         try {
@@ -117,7 +110,7 @@ internal class GrabOrderReader(
             if (orders.length() > 0 || next != null) rows.issue("GrabFood payment schema has no verified receipt sample; saved charges are retained")
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (error: Exception) { rows.issue(error) }
-        rows.issue("Card charge history and recent rides only; unknown charge types and other wallet/cash sources remain unverified")
+        rows.issue("GrabPay charge history and recent rides only; other payment and refund contracts remain unverified")
         rows.finish().sortedByDescending { it.occurredAt }
     }
 

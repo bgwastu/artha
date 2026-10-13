@@ -92,6 +92,26 @@ class ShopeeProviderContractTest {
         assertFalse(result.transaction.isReversal)
     }
 
+    @Test fun failedFirstAttemptCannotSupplyPaidMethodOrCardMetadata() {
+        val order = foodOrder()
+        val detail = foodDetail(order)
+        val paid = detail.getJSONArray("payment").getJSONObject(0).put("channel_option",
+            """{"channel_name":"Example paid channel","credit_card_data":{"card_number":"****1234"}}""")
+        val failed = JSONObject(paid.toString()).put("status", 3).put("payment_time", "0")
+            .put("total_amount", "9900000000").put("channel_option",
+                """{"channel_name":"Example failed channel","credit_card_data":{"card_number":"****9999"}}""")
+        detail.put("payment", JSONArray().put(failed).put(paid))
+        val transaction = ShopeeProviderParser.food(order, detail)!!.transaction
+        val raw = JSONObject(transaction.rawPayload)
+        assertEquals("Example paid channel", raw.getString("sourcePaymentMethod"))
+        assertEquals("1234", transaction.cardLast4)
+        assertEquals(2_350_000L, transaction.money.amountMinor)
+        assertEquals(Instant.ofEpochMilli(1_700_000_000_000L), transaction.occurredAt)
+        assertEquals("settled-order-payment", raw.getString("paymentEvidence"))
+        assertEquals(transaction.money.amountMinor, raw.getLong("paymentAmountMinor"))
+        assertTrue(transaction.isConfirmed)
+    }
+
     @Test fun afterSalesTriggersRefundInvestigationWithoutClaimingCompletedRefund() {
         val order = foodOrder().put("has_after_sales", 1)
         val result = ShopeeProviderParser.food(order, foodDetail(order))!!

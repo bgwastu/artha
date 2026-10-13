@@ -126,16 +126,61 @@ class TokopediaProviderContractTest {
         assertThrows(ProviderReadException::class.java) { TokopediaProviderParser.sessionId(null) }
     }
 
-    private fun cookie(name: String, value: String): String {
+    private fun cookie(
+        name: String, value: String, domain: String? = ".tiktokv.com", path: String? = "/",
+        ports: String? = null, maxAge: Long = -1, createdMillis: Long = 1_000,
+        referenceComment: Boolean = false
+    ): String {
         val bytes = ByteArrayOutputStream()
         DataOutputStream(bytes).use {
+            fun string(value: String?) {
+                if (value == null) it.writeByte(0x70) else { it.writeByte(0x74); it.writeUTF(value) }
+            }
             it.writeInt(0xaced0005.toInt()); it.writeByte(0x73); it.writeByte(0x72)
             it.writeUTF("X.Um1"); it.writeLong(6374381323722046732L)
             it.writeByte(3); it.writeShort(1); it.writeByte('J'.code); it.writeUTF("LLFFF")
             it.writeByte(0x78); it.writeByte(0x70)
-            it.writeByte(0x74); it.writeUTF(name); it.writeByte(0x74); it.writeUTF(value)
+            string(name); string(value)
+            if (referenceComment) { it.writeByte(0x71); it.writeInt(0x7e0002) } else string(null)
+            string(null); string(domain)
+            it.writeByte(0x77); it.writeByte(8); it.writeLong(maxAge)
+            string(path); string(ports)
+            it.writeByte(0x77); it.writeByte(15); it.writeInt(0)
+            it.writeBoolean(true); it.writeBoolean(false); it.writeBoolean(true); it.writeLong(createdMillis)
+            it.writeByte(0x78)
         }
         return bytes.toByteArray().joinToString("") { "%02X".format(it.toInt() and 255) }
+    }
+
+    private fun cookieXml(hex: String): ByteArray =
+        """<map><string name="http://tiktokv.com/|msToken">$hex</string></map>""".toByteArray()
+
+    @Test fun nativeCookieScopeAndExpiryFollowAuditedSourceFields() {
+        fun decode(domain: String? = ".tiktokv.com", path: String? = "/", ports: String? = null,
+                   maxAge: Long = -1, now: Long = 3_000): String = TokopediaProviderParser.nativeCookies(
+            cookieXml(cookie("msToken", "fictional-token", domain, path, ports, maxAge)), now)
+        assertEquals("msToken=fictional-token", decode(domain = "OEC-API.TIKTOKV.COM", path = "/api", ports = "443"))
+        for (domain in listOf(null, ".com", ".unrelated.invalid", "tiktokv.com.unrelated.invalid")) {
+            assertEquals("", decode(domain = domain))
+        }
+        assertEquals("", decode(path = "/api/v1/trade/bff/order_list/g"))
+        assertEquals("", decode(path = "/another"))
+        assertEquals("", decode(ports = "80"))
+        assertEquals("msToken=fictional-token", decode(maxAge = 1, now = 2_999))
+        assertEquals("", decode(maxAge = 1, now = 3_000))
+        assertEquals("msToken=fictional-token", decode(maxAge = -1, now = Long.MAX_VALUE))
+    }
+
+    @Test fun fullCookieLayoutIsRequiredAndStringReferencesRemainBounded() {
+        val valid = cookie("msToken", "fictional-token", referenceComment = true)
+        assertEquals("msToken=fictional-token", TokopediaProviderParser.nativeCookies(cookieXml(valid)))
+        for (hex in listOf(valid.dropLast(2), valid + "00", valid.replace("007E0002", "007E0000"))) {
+            val error = assertThrows(ProviderReadException::class.java) {
+                TokopediaProviderParser.nativeCookies(cookieXml(hex))
+            }
+            assertEquals(AccountStatus.ERROR, error.status)
+            assertFalse(error.message!!.contains("fictional-token"))
+        }
     }
 
     @Test fun nativeCookieCodecIsScopedToHistoryHostAndRejectsHeaderInjection() {

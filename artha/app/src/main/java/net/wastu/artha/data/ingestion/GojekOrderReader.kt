@@ -29,6 +29,7 @@ internal class GojekOrderReader(private val files: RootFileReader) {
             val selected = headers.mapNotNull { (path, bytes) ->
                 try { bytes?.let(GojekProviderParser::cacheEntry)?.let { path to it } }
                 catch (cancelled: CancellationException) { throw cancelled }
+                catch (e: ProviderReadException) { rows.issue(e); null }
                 catch (_: Exception) { rows.issue("One Gojek history cache header is unrecognized"); null }
             }.sortedByDescending { it.second.receivedMillis }
             val snapshot = files.stableBatch(selected.flatMap { (path, _) -> listOf(path, path.removeSuffix(".0") + ".1") })
@@ -48,7 +49,7 @@ internal class GojekOrderReader(private val files: RootFileReader) {
                             val id = detail.opt("order_id") as? String
                             if (!id.isNullOrBlank()) details.putIfAbsent(id, detail)
                         }
-                        GojekProviderParser.CacheKind.ORDERS -> orders += GojekProviderParser.orderCards(body)
+                        GojekProviderParser.CacheKind.ORDERS -> importOrders(body, orders, rows)
                     }
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (e: ProviderReadException) { rows.issue(e) }
@@ -82,8 +83,9 @@ internal class GojekOrderReader(private val files: RootFileReader) {
             }
             // Order cards enrich actual payments and never become inferred debits.
             if (!deadlineExceeded(started)) {
-                try { orders += GojekProviderParser.orderCards(request(GojekProviderParser.ORDERS_URL, headers)) }
+                try { importOrders(request(GojekProviderParser.ORDERS_URL, headers), orders, rows, preferLive = true) }
                 catch (cancelled: CancellationException) { throw cancelled }
+                catch (e: ProviderReadException) { rows.issue(e) }
                 catch (_: Exception) { rows.issue("Gojek native order enrichment is unavailable") }
             }
             var reads = 0
@@ -99,6 +101,7 @@ internal class GojekOrderReader(private val files: RootFileReader) {
                     val escaped = URLEncoder.encode(id, "UTF-8").replace("+", "%20")
                     details[id] = GojekProviderParser.detail(request("https://customer.gopayapi.com/v2/users/order-history/$escaped/details?country_code=ID", headers))
                 } catch (cancelled: CancellationException) { throw cancelled }
+                catch (e: ProviderReadException) { rows.issue(e) }
                 catch (_: Exception) { rows.issue("One GoPay payment detail is unavailable") }
             }
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -111,16 +114,23 @@ internal class GojekOrderReader(private val files: RootFileReader) {
             val detail = details[payment.providerTransactionId.removePrefix("gopay:")] ?: continue
             try { rows.transactions[index] = GojekProviderParser.enrich(payment, detail, orders) }
             catch (cancelled: CancellationException) { throw cancelled }
+            catch (e: ProviderReadException) { rows.issue(e) }
             catch (_: Exception) { rows.issue("One GoPay detail could not be matched to its settled payment") }
         }
         if (cachedPayments && !historyComplete) rows.issue("Cached GoPay history covers only pages previously opened in Gojek")
-        if (orders.isNotEmpty()) rows.issue("Gojek service orders without verified payments are excluded; order cards provide enrichment only")
         rows.finish().sortedByDescending { it.occurredAt }
+    }
+
+    private fun importOrders(body: JSONObject, orders: MutableList<GojekProviderParser.NativeOrder>, rows: ImportRows, preferLive: Boolean = false) {
+        val page = GojekProviderParser.orderPage(body)
+        if (page.malformedRows > 0) rows.issue(ProviderReadException(AccountStatus.ERROR, "Gojek history contains ${page.malformedRows} unrecognized order cards"))
+        // Exact booking matching uses the first observation; live evidence supersedes cached metadata.
+        if (preferLive) orders.addAll(0, page.orders) else orders.addAll(page.orders)
     }
 
     private fun importPage(body: JSONObject, rows: ImportRows, preferLive: Boolean = false): GojekProviderParser.PaymentPage {
         val page = GojekProviderParser.paymentPage(body)
-        if (page.malformedRows > 0) rows.issue("GoPay history contains ${page.malformedRows} unrecognized rows or pagination fields")
+        if (page.malformedRows > 0) rows.issue(ProviderReadException(AccountStatus.ERROR, "GoPay history contains ${page.malformedRows} unrecognized rows or pagination fields"))
         for (item in page.items) {
             try {
                 val payment = GojekProviderParser.payment(item) ?: continue

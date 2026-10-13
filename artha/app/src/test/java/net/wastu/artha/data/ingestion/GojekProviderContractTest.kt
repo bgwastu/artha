@@ -188,6 +188,38 @@ class GojekProviderContractTest {
         failure { GojekProviderParser.enrich(transaction, JSONObject(detail.toString()).put("payment_type", "CREDIT"), listOf(order)) }
     }
 
+    @Test fun nativeOrderPagePreservesValidCardsBesideMalformedActionsWithoutCoercingCodes() {
+        val cards = JSONArray().put(orderCard("fictional-booking-01"))
+            .put(JSONObject().put("payload", JSONObject().put("text", "Fictional display widget")))
+        for (code in listOf("5", BigDecimal("5.5"), Long.MAX_VALUE, JSONObject.NULL)) {
+            val card = orderCard("fictional-broken-booking")
+            card.getJSONObject("payload").getJSONObject("on_click").getJSONObject("action").getJSONObject("data").put("order_status", code)
+            cards.put(card)
+        }
+        cards.put("broken-card").put(orderCard("fictional-booking-02"))
+        val root = JSONObject().put("success", true).put("data", JSONObject().put("cards", cards))
+        val page = GojekProviderParser.orderPage(root)
+        assertEquals(listOf("fictional-booking-01", "fictional-booking-02"), page.orders.map { it.number })
+        assertEquals(5, page.malformedRows)
+        failure { GojekProviderParser.orderPage(JSONObject().put("success", true).put("data", JSONObject())) }
+    }
+
+    @Test fun preferredFreshOrderMetadataPreservesSettledPaymentIdentityAndProof() {
+        val transaction = requireNotNull(GojekProviderParser.payment(payment()))
+        val detail = payment().put("detail_view_items", JSONArray().put(JSONObject().put("value", "fictional-booking-01")))
+        val cached = GojekProviderParser.NativeOrder("fictional-booking-01", 5, 1, "Fictional cached description")
+        val fresh = cached.copy(statusCode = 6, description = "Fictional updated description")
+        val enriched = GojekProviderParser.enrich(transaction, detail, listOf(fresh, cached))
+        val payload = JSONObject(enriched.rawPayload)
+        assertEquals(6, payload.getInt("orderStatusCode"))
+        assertEquals(fresh.description, payload.getString("orderDisplayDescription"))
+        assertEquals(transaction.providerTransactionId, enriched.providerTransactionId)
+        assertEquals(transaction.money, enriched.money)
+        assertEquals(transaction.occurredAt, enriched.occurredAt)
+        assertEquals(JSONObject(transaction.rawPayload).getString("paymentTimestamp"), payload.getString("paymentTimestamp"))
+        assertTrue(enriched.isConfirmed)
+    }
+
     @Test fun readsAndroidPreferencesAndDecryptsOnlyTheNativeSessionStorageContract() {
         val prefs = GojekProviderParser.preferences("<map><string name=\"key_scp_login_access_token\">lnYDhnAXGNo3sbDErSSgmd+pogAdg+kilGAQ5VTN/6cIxC23mt/DLcxbL01pLZ5f</string></map>".toByteArray())
         assertEquals("fictional.header.body.signature.tail", GojekProviderParser.decryptAccessToken(prefs.getValue("key_scp_login_access_token")))
@@ -206,6 +238,9 @@ class GojekProviderContractTest {
     private fun page(item: JSONObject): JSONObject = JSONObject().put("success", true).put("data", JSONObject()
         .put("completed", JSONArray().put(JSONObject().put("group_key", "fictional-group").put("items", JSONArray().put(item))))
         .put("next", JSONObject.NULL))
+    private fun orderCard(number: String): JSONObject = JSONObject().put("payload", JSONObject()
+        .put("on_click", JSONObject().put("action", JSONObject().put("data", JSONObject()
+            .put("order_number", number).put("order_status", 5).put("service_type", 1)))))
     private fun failure(block: () -> Unit): ProviderReadException {
         try { block() } catch (e: ProviderReadException) { return e }
         throw AssertionError("Expected a typed provider failure")

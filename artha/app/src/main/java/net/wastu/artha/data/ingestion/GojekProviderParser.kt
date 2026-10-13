@@ -35,6 +35,7 @@ internal object GojekProviderParser {
     data class CacheEntry(val url: String, val kind: CacheKind, val status: Int, val encoding: String, val receivedMillis: Long)
     data class PaymentPage(val items: List<JSONObject>, val next: String?, val malformedRows: Int)
     data class NativeOrder(val number: String, val statusCode: Int, val serviceTypeCode: Int, val description: String?)
+    data class OrderPage(val orders: List<NativeOrder>, val malformedRows: Int)
 
     fun cacheEntry(bytes: ByteArray): CacheEntry? {
         val lines = bytes.toString(Charsets.UTF_8).lineSequence().toList()
@@ -158,18 +159,34 @@ internal object GojekProviderParser {
             item.optString("description").ifBlank { "GoPay Payment" }, payload.toString(), isQris = qris, isReversal = reversal)
     }
 
-    fun orderCards(root: JSONObject): List<NativeOrder> {
+    fun orderCards(root: JSONObject): List<NativeOrder> = orderPage(root).orders
+
+    /** Non-order display widgets are expected; invalid order actions cannot discard valid neighbors. */
+    fun orderPage(root: JSONObject): OrderPage {
         val cards = responseData(root).optJSONArray("cards")
         schema(cards != null, "Gojek order card schema changed")
-        return (0 until requireNotNull(cards).length()).mapNotNull { index ->
-            val payload = cards.optJSONObject(index)?.optJSONObject("payload") ?: return@mapNotNull null
-            val action = payload.optJSONObject("on_click")?.optJSONObject("action")?.optJSONObject("data") ?: return@mapNotNull null
-            val number = action.opt("order_number") as? String ?: return@mapNotNull null
-            if (number.isBlank()) return@mapNotNull null
-            schema(action.opt("order_status") is Number && action.opt("service_type") is Number, "Gojek order action schema changed")
-            NativeOrder(number, action.getInt("order_status"), action.getInt("service_type"),
+        val orders = mutableListOf<NativeOrder>()
+        var malformed = 0
+        for (index in 0 until requireNotNull(cards).length()) {
+            if (index >= 2000) { malformed++; break }
+            val card = cards.optJSONObject(index)
+            if (card == null) { malformed++; continue }
+            val payload = card.optJSONObject("payload") ?: continue
+            val action = payload.optJSONObject("on_click")?.optJSONObject("action")?.optJSONObject("data") ?: continue
+            if (!action.has("order_number")) continue
+            val number = action.opt("order_number") as? String
+            val status = integerCode(action, "order_status")
+            val service = integerCode(action, "service_type")
+            if (number.isNullOrBlank() || status == null || service == null) { malformed++; continue }
+            orders += NativeOrder(number, status, service,
                 payload.optJSONObject("estate")?.optJSONArray("middle_column")?.optJSONObject(0)?.optJSONObject("payload")?.optString("text")?.takeIf { it.isNotBlank() })
         }
+        return OrderPage(orders, malformed)
+    }
+
+    private fun integerCode(value: JSONObject, key: String): Int? {
+        val code = value.opt(key) as? Number ?: return null
+        return try { BigDecimal(code.toString()).intValueExact() } catch (_: Exception) { null }
     }
 
     fun detail(root: JSONObject): JSONObject = responseData(root)

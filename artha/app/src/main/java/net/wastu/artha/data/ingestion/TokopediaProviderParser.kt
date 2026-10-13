@@ -3,6 +3,7 @@ package net.wastu.artha.data.ingestion
 import java.io.ByteArrayInputStream
 import java.io.DataInputStream
 import java.util.Base64
+import java.util.Locale
 import javax.xml.parsers.DocumentBuilderFactory
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
@@ -59,7 +60,7 @@ internal object TokopediaProviderParser {
         "Tokopedia session format is unsupported. Saved history is kept.")
 
     /** ttnetCookieStore uses hex Java serialization; only decode the audited primitive/string layout. */
-    fun nativeCookies(snapshot: ByteArray?): String {
+    fun nativeCookies(snapshot: ByteArray?, nowMillis: Long = System.currentTimeMillis()): String {
         if (snapshot == null) return ""
         try {
             require(snapshot.size <= 512_000)
@@ -80,22 +81,9 @@ internal object TokopediaProviderParser {
                 val bytes = ByteArray(hex.length / 2) { offset ->
                     hex.substring(offset * 2, offset * 2 + 2).toInt(16).toByte()
                 }
-                // X.Um1/C3664Um1.writeObject writes cookie name, then value.
-                // No ObjectInputStream or provider classes are instantiated.
-                val value = DataInputStream(ByteArrayInputStream(bytes)).use { input ->
-                    require(input.readInt() == 0xaced0005.toInt())
-                    require(input.readUnsignedByte() == 0x73 && input.readUnsignedByte() == 0x72)
-                    require(input.readUTF() == "X.Um1")
-                    require(input.readLong() == 6374381323722046732L)
-                    require(input.readUnsignedByte() == 3 && input.readUnsignedShort() == 1)
-                    require(input.readUnsignedByte() == 'J'.code && input.readUTF() == "LLFFF")
-                    require(input.readUnsignedByte() == 0x78 && input.readUnsignedByte() == 0x70)
-                    require(input.readUnsignedByte() == 0x74 && input.readUTF() == name)
-                    require(input.readUnsignedByte() == 0x74)
-                    input.readUTF()
-                }
-                require(value.none { it == '\r' || it == '\n' || it == ';' })
-                if (value.isNotBlank()) cookies[name] = value
+                val cookie = nativeCookie(bytes, name)
+                require(cookie.value.all { it.code in 0x21..0x7e && it !in ";," })
+                if (cookie.value.isNotEmpty() && cookie.appliesToHistory(nowMillis)) cookies[name] = cookie.value
             }
             return cookies.entries.joinToString("; ") { (name, value) -> "$name=$value" }
                 .also { require(it.length <= 32_768) }
@@ -104,6 +92,66 @@ internal object TokopediaProviderParser {
                 "Tokopedia native cookie format is unsupported. Saved history is kept.")
         }
     }
+
+    private data class NativeCookie(
+        val value: String, val domain: String?, val path: String?, val ports: String?,
+        val maxAge: Long, val createdMillis: Long
+    ) {
+        fun appliesToHistory(nowMillis: Long): Boolean {
+            require(nowMillis >= 0 && createdMillis >= 0)
+            // X.Um1.hasExpired uses elapsed whole seconds and a strict > comparison.
+            if (maxAge != -1L && (nowMillis - createdMillis) / 1_000 > maxAge) return false
+            val scope = domain?.lowercase(Locale.US)?.removePrefix(".") ?: return false
+            val host = "oec-api.tiktokv.com"
+            if (scope != "tiktokv.com" && scope != host) return false
+            val cookiePath = path ?: "/"
+            val requestPath = "/api/v1/trade/bff/order_list/get"
+            if (!cookiePath.startsWith('/') || !(requestPath == cookiePath ||
+                    requestPath.startsWith(if (cookiePath.endsWith('/')) cookiePath else "$cookiePath/"))) return false
+            return ports == null || ports.split(',').any { it.trim() == "443" }
+        }
+    }
+
+    /** Exact X.Um1.writeObject layout; never instantiate serialized source classes. */
+    private fun nativeCookie(bytes: ByteArray, expectedName: String): NativeCookie =
+        DataInputStream(ByteArrayInputStream(bytes)).use { input ->
+            require(input.readInt() == 0xaced0005.toInt())
+            require(input.readUnsignedByte() == 0x73 && input.readUnsignedByte() == 0x72)
+            require(input.readUTF() == "X.Um1")
+            require(input.readLong() == 6374381323722046732L)
+            require(input.readUnsignedByte() == 3 && input.readUnsignedShort() == 1)
+            require(input.readUnsignedByte() == 'J'.code && input.readUTF() == "LLFFF")
+            require(input.readUnsignedByte() == 0x78 && input.readUnsignedByte() == 0x70)
+            // Class descriptor and object occupy handles 0x7e0000 and 0x7e0001.
+            val strings = mutableListOf<String>()
+            fun string(): String? = when (input.readUnsignedByte()) {
+                0x70 -> null
+                0x74 -> input.readUTF().also { strings.add(it) }
+                0x71 -> strings.getOrNull(input.readInt() - 0x7e0002).also { require(it != null) }
+                else -> throw IllegalArgumentException()
+            }
+            fun block(size: Int): DataInputStream {
+                // The audited serializer emits separate 8-byte and 15-byte primitive blocks.
+                require(input.readUnsignedByte() == 0x77 && input.readUnsignedByte() == size)
+                return DataInputStream(ByteArrayInputStream(ByteArray(size).also { input.readFully(it) }))
+            }
+            require(string() == expectedName)
+            val value = string() ?: throw IllegalArgumentException()
+            string() // comment
+            string() // comment URL
+            val domain = string()
+            val maxAge = block(8).use { it.readLong() }
+            val path = string()
+            val ports = string()
+            val createdMillis = block(15).use { tail ->
+                require(tail.readInt() in 0..1) // cookie version
+                repeat(3) { require(tail.readUnsignedByte() in 0..1) } // secure, discard, HttpOnly
+                // The destination is always HTTPS, so both secure and ordinary cookies apply.
+                tail.readLong()
+            }
+            require(input.readUnsignedByte() == 0x78 && input.read() == -1)
+            NativeCookie(value, domain, path, ports, maxAge, createdMillis)
+        }
 
     fun request(cursor: Any? = null): JSONObject = JSONObject()
         .put("fe_version", "2").put("page_size", 10).put("filter_info", JSONObject())

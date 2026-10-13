@@ -101,6 +101,7 @@ internal object ShopeeProviderParser {
         val orderTime = integer(source, "payment_time")
         val payments = detail?.optJSONArray("payment")
         var cardLast4: String? = null
+        var paidPayment: JSONObject? = null
         val paid: Long
         val paymentTime: Long
         if (detail != null) {
@@ -111,6 +112,7 @@ internal object ShopeeProviderParser {
             if (successful.isEmpty() && orderTime == 0L) return null
             if (successful.size != 1) schema("food successful payment count")
             val payment = successful.single()
+            paidPayment = payment
             if (string(payment, "order_id") != id || string(payment, "currency") != "IDR") schema("food payment identity/currency")
             paid = integer(payment, "total_amount")
             paymentTime = integer(payment, "payment_time")
@@ -149,7 +151,7 @@ internal object ShopeeProviderParser {
             raw.put("paymentEvidence", "settled-order-payment").put("paymentStatus", "COMPLETED")
                 .put("paymentDirection", "DEBIT").put("paymentAmountMinor", money(paid).amountMinor)
                 .put("paymentCurrency", "IDR").put("paymentTimestamp", milliseconds(paymentTime).toString())
-            payments?.optJSONObject(0)?.let { payment ->
+            paidPayment?.let { payment ->
                 runCatching { JSONObject(string(payment, "channel_option")) }.getOrNull()?.let { option ->
                     string(option, "channel_name").takeIf(String::isNotBlank)?.let { raw.put("sourcePaymentMethod", it) }
                 }
