@@ -70,6 +70,8 @@ data class MonthSpendingAnalysis(
     val totalDeltaPercent: Float?,
     val categories: List<CategorySpending>,
     val monthlyAiSummary: String?,
+    val unconfirmedSpendingMinor: Long = 0,
+    val unsupportedCurrencyCount: Int = 0,
 )
 
 class ArthaViewModel(
@@ -271,6 +273,7 @@ class ArthaViewModel(
                         tx.copy(
                             userNote = note,
                             category = cat,
+                            classificationIsManual = id in currentAnalysis.manualCategories,
                             aiReasoning = reason,
                             isReversal = tx.rawPayload.contains("\"isReversal\":true") || tx.description.contains("(Reversed)"),
                         )

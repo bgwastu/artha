@@ -58,13 +58,16 @@ object BudgetAnalyzer {
             totalDeltaPercent = totalDelta,
             categories = categoriesWithShare,
             monthlyAiSummary = aiSummary,
+            unconfirmedSpendingMinor = currentMonthTxs.filter { !it.isConfirmed && it.direction == Direction.DEBIT && it.money.currencyCode == "IDR" }.sumOf { it.money.amountMinor },
+            unsupportedCurrencyCount = currentMonthTxs.count { it.money.currencyCode != "IDR" },
         )
     }
 
     fun isSpending(tx: UnifiedTransaction): Boolean {
-        if (tx.direction != Direction.DEBIT) return false
+        if (tx.direction != Direction.DEBIT || !tx.isConfirmed || tx.money.currencyCode != "IDR") return false
         if (tx.isReversal || tx.description.contains("(Reversed)", ignoreCase = true)) return false
         val p = runCatching { JSONObject(tx.rawPayload) }.getOrNull()
+        if (p?.optBoolean("isWalletFunding") == true) return false
         if (p?.optBoolean("isPocketTransfer") == true || tx.description.startsWith("Pocket Transfer:", ignoreCase = true)) return false
         val code = p?.optString("code").orEmpty()
         if (code in setOf("TDD02", "TDC02", "TDC03", "TDC08", "TDC12", "SAD01", "SAD02", "SAC01", "SAC02")) return false

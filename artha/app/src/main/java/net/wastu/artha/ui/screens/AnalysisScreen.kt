@@ -334,7 +334,7 @@ private fun MonthSummaryCard(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
 
-                val delta = analysis.totalDeltaPercent
+            val delta = analysis.totalDeltaPercent
                 val prevTotal = analysis.previousMonthTotalMinor
                 if (delta != null && prevTotal > 0L) {
                     val symbol = if (delta < 0) "▼" else "▲"
@@ -351,6 +351,13 @@ private fun MonthSummaryCard(
                         )
                     }
                 }
+            }
+
+            if (analysis.unconfirmedSpendingMinor > 0) {
+                Text("Unconfirmed orders: ${formatAmountMinor(analysis.unconfirmedSpendingMinor)} · excluded from total", style = MaterialTheme.typography.bodySmall)
+            }
+            if (analysis.unsupportedCurrencyCount > 0) {
+                Text("${analysis.unsupportedCurrencyCount} non-IDR transactions excluded", style = MaterialTheme.typography.bodySmall)
             }
 
             // Monthly User Note banner

@@ -46,8 +46,11 @@ data class UnifiedTransaction(
     val category: String? = null,
     val aiReasoning: String? = null,
     val isReversal: Boolean = false,
+    val isConfirmed: Boolean = true,
+    val canonicalKey: String? = null,
+    val classificationIsManual: Boolean = false,
 ) {
-    val key: String get() = "${provider.name}:$providerTransactionId"
+    val key: String get() = canonicalKey ?: "${provider.name}:$providerTransactionId"
 
     init {
         require(providerTransactionId.isNotBlank())

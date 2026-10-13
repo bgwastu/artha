@@ -38,7 +38,7 @@ object TransactionMetadata {
     fun enrich(transaction: UnifiedTransaction, snapshot: AnalysisSnapshot): UnifiedTransaction {
         val note = snapshot.userNotes[transaction.key] ?: transaction.userNote
         val classification = CategoryClassifier.classify(transaction, note)
-        return transaction.copy(userNote = note,
+        return transaction.copy(userNote = note, classificationIsManual = transaction.key in snapshot.manualCategories,
             category = snapshot.categories[transaction.key] ?: classification.category,
             aiReasoning = snapshot.reasons[transaction.key] ?: classification.reason)
     }
