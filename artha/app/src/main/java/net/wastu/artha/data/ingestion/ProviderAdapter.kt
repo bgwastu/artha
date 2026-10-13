@@ -66,7 +66,7 @@ class IngestionCoordinator(
         var warning = adapter.coverageHint
         val transactions = try { adapter.ingest() } catch (partial: PartialImportException) {
             if (partial.transactions.isEmpty()) throw partial
-            warning = listOfNotNull(adapter.coverageHint, partial.message).distinct().joinToString(" · "); partial.transactions
+            warning = listOfNotNull(adapter.coverageHint, partial.message).distinct().joinToString(". "); partial.transactions
         }
         require(transactions.all { it.provider == provider }) { "Adapter returned another Provider's transaction." }
         return ledger().appendProviderImport(transactions) to warning
@@ -77,7 +77,7 @@ class IngestionCoordinator(
         val summary = "${result.inserted} added, ${result.duplicates} already saved" +
             if (result.evidenceUpdates > 0) ", ${result.evidenceUpdates} details updated" else ""
         preferences?.recordSyncSuccess(provider, summary, accountIdentifier = adaptersByProvider[provider]?.accountIdentifier, coverageHint = warning)
-        if (warning == null) summary else "$summary · $warning"
+        if (warning == null) summary else "$summary. $warning"
     } catch (cancelled: CancellationException) { throw cancelled }
     catch (e: Exception) {
         val message = e.message?.takeIf { it.isNotBlank() } ?: "Unable to read ${provider.displayName} data"

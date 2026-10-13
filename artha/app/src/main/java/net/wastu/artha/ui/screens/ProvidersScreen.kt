@@ -478,7 +478,7 @@ private fun GoogleDriveSyncCard(
                     )
                     if (state.lastSyncSummary != null) {
                         Text(
-                            text = state.lastSyncSummary,
+                            text = state.lastSyncSummary.replace(" · ", ". "),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                         )
@@ -824,7 +824,7 @@ private fun ProviderCard(
                     )
                     if (lastSyncSummary != null) {
                         Text(
-                            text = lastSyncSummary,
+                            text = lastSyncSummary.replace(" · ", ". "),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                         )

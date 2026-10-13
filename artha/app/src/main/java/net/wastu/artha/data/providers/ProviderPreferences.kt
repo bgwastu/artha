@@ -84,7 +84,7 @@ class ProviderPreferences(context: Context) {
         val updated = ProviderDiagnostic(
             lastSyncEpochMillis = now,
             lastAttemptEpochMillis = now,
-            lastSyncSummary = listOfNotNull(summary, coverageHint).joinToString(" · "),
+            lastSyncSummary = listOfNotNull(summary, coverageHint).joinToString(". "),
             lastError = coverageHint,
             accountStatus = if (coverageHint == null) AccountStatus.CONNECTED else AccountStatus.PARTIAL,
             accountIdentifier = finalIdent,

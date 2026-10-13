@@ -27,7 +27,7 @@ internal class ImportRows {
     fun finish(): List<UnifiedTransaction> {
         if (transactions.isEmpty()) providerFailure?.let { throw it }
         if (issues.isNotEmpty()) {
-            val summary = (listOfNotNull(providerFailure?.message) + issues).distinct().take(3).joinToString(" · ")
+            val summary = (listOfNotNull(providerFailure?.message) + issues).distinct().take(3).joinToString(". ")
             throw PartialImportException(transactions.distinctBy { it.key }, "Incomplete import: ${issues.size} issues. $summary")
         }
         return transactions.distinctBy { it.key }

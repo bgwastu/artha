@@ -130,7 +130,7 @@ fun LedgerScreen(
                         if (s != null && e != null) "$s to $e" else s ?: e ?: "Date range"
                     }
                     listOfNotNull(
-                        categoryFilter?.let { "$it · all sources" },
+                        categoryFilter?.let { "$it  all sources" },
                         selectedProvider?.displayName,
                         selectedDirection?.let { if (it == Direction.CREDIT) "Incoming" else "Outgoing" },
                         dateLabel
@@ -622,7 +622,7 @@ fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlig
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val timeStr = formatTime(transaction.occurredAt)
                         val catStr = transaction.category
-                        val label = listOfNotNull(timeStr, catStr?.takeIf { !credit && it.isNotBlank() }, if (!transaction.isConfirmed) "Unconfirmed activity" else null).joinToString(" · ")
+                        val label = listOfNotNull(timeStr, catStr?.takeIf { !credit && it.isNotBlank() }, if (!transaction.isConfirmed) "Unconfirmed activity" else null).joinToString("  ")
                         Text(
                             label,
                             style = MaterialTheme.typography.bodySmall,

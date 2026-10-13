@@ -131,13 +131,6 @@ fun HomeScreen(
                             IconButton(onClick = { showSearch = true }) {
                                 Icon(Icons.Default.Search, contentDescription = "Search")
                             }
-                        } else if (destination == Destination.ANALYSIS) {
-                            IconButton(onClick = { showCategoriesSheet = true }) {
-                                Icon(Icons.Default.Category, contentDescription = "Manage Categories")
-                            }
-                            IconButton(onClick = { showKnowledgeEditor = true }) {
-                                Icon(Icons.Default.AutoStories, contentDescription = "Knowledge Base")
-                            }
                         }
                     },
                 )
@@ -173,7 +166,7 @@ fun HomeScreen(
                 Column(Modifier.weight(1f)) {
                     if (rootGate == net.wastu.artha.core.root.RootGateState.DENIED) {
                         androidx.compose.material3.TextButton(onClick = onRefresh, modifier = Modifier.padding(horizontal = 16.dp)) {
-                            Text("Root unavailable · viewing saved history · tap to retry imports")
+                            Text("Root unavailable. Retry imports.")
                         }
                     }
                     saveableStateHolder.SaveableStateProvider(destination.name) {
@@ -191,6 +184,7 @@ fun HomeScreen(
                                 if (viewModel != null) {
                                     AnalysisScreen(
                                         viewModel = viewModel,
+                                        onOpenTransaction = { selectedTransaction = it },
                                         showCategoriesSheet = showCategoriesSheet,
                                         onOpenCategoriesSheet = { showCategoriesSheet = true },
                                         onDismissCategoriesSheet = { showCategoriesSheet = false },
