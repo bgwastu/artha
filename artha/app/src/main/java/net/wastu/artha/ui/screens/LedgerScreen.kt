@@ -352,13 +352,26 @@ private fun TransactionList(
     onClearFilter: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
-    LaunchedEffect(resetKey) { listState.scrollToItem(0) }
+    var previousResetKey by rememberSaveable { mutableStateOf(resetKey?.toString()) }
+    LaunchedEffect(resetKey) {
+        val next = resetKey?.toString()
+        if (previousResetKey != next) {
+            previousResetKey = next
+            listState.scrollToItem(0)
+        }
+    }
 
     val groupedByDay by produceState<Map<LocalDate, List<UnifiedTransaction>>>(emptyMap(), transactions) {
         value = withContext(Dispatchers.Default) {
             val zone = net.wastu.artha.core.model.AccountingTime.zone
             transactions.groupBy { LocalDate.ofInstant(it.occurredAt, zone) }
         }
+    }
+
+    // Avoid measuring an empty list while groups load, which loses restored scroll position.
+    if (transactions.isNotEmpty() && groupedByDay.isEmpty()) {
+        LedgerFeedback(loading = true)
+        return
     }
 
     LazyColumn(
@@ -394,7 +407,7 @@ private fun TransactionList(
             }
             items(
                 dailyTransactions,
-                key = { "${it.provider.name}:${it.providerTransactionId}" },
+                key = { it.key },
                 contentType = { "transaction" },
             ) { transaction ->
                 TransactionRow(

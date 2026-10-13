@@ -148,5 +148,26 @@ class ArthaViewModelTest {
         model.lock()
     }
 
+    @Test fun categoryDrillingContainsExactlyTheConfirmedMonthlyPayments() = runTest(dispatcher) {
+        val instant = java.time.Instant.parse("2026-10-12T00:00:00Z")
+        val payment = UnifiedTransaction(net.wastu.artha.core.model.Provider.JAGO, "payment", net.wastu.artha.core.model.Direction.DEBIT,
+            net.wastu.artha.core.model.Money(123400), instant, "Kopi Kenangan", "{}")
+        transactions.value = listOf(payment, payment.copy(providerTransactionId = "previous", occurredAt = instant.minusSeconds(40 * 86400L)),
+            payment.copy(provider = net.wastu.artha.core.model.Provider.SHOPEE, providerTransactionId = "unconfirmed-order"),
+            payment.copy(providerTransactionId = "credit", direction = net.wastu.artha.core.model.Direction.CREDIT))
+        val model = ArthaViewModel(RootAccess { false }, { ledger }, clock = java.time.Clock.fixed(instant, net.wastu.artha.core.model.AccountingTime.zone), computationDispatcher = dispatcher)
+        model.enterForeground(); advanceUntilIdle()
+        assertEquals(123400L, model.monthAnalysis.value.totalPersonalSpendingMinor)
+        assertEquals(123400L, model.monthAnalysis.value.unconfirmedSpendingMinor)
+        model.openCategoryTransactions("Dining Out"); advanceUntilIdle()
+        val visible = (model.ledgerState.value as LedgerState.Ready).transactions
+        assertEquals(listOf(payment.key), visible.map { it.key })
+        assertEquals(model.monthAnalysis.value.totalPersonalSpendingMinor, visible.sumOf { it.money.amountMinor })
+        assertEquals("TRANSACTIONS", model.targetDestination.value)
+        model.clearCategoryFilter(); model.clearDateRangeFilter(); advanceUntilIdle()
+        assertEquals(4, (model.ledgerState.value as LedgerState.Ready).transactions.size)
+        model.lock()
+    }
+
     private fun model(rootAccess: RootAccess) = ArthaViewModel(rootAccess, { opens++; ledger }, computationDispatcher = dispatcher)
 }
