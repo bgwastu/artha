@@ -22,4 +22,13 @@ class RootFileReader(internal val context: Context) {
             Base64.decode(result.out.joinToString(""), Base64.DEFAULT)
         }
     }
+
+    suspend fun list(dir: String): List<String> = withContext(Dispatchers.IO) {
+        require(dir.matches(Regex("/data/(data|system_ce|user)/[a-zA-Z0-9_./-]+")))
+        Shell.Builder.create().setContext(context).setTimeout(15).build("su", "-M", "-c", "/system/bin/sh").use { shell ->
+            check(shell.isRoot) { "Root access unavailable" }
+            val result = shell.newJob().to(mutableListOf<String>(), mutableListOf<String>()).add("ls '$dir'").exec()
+            if (result.isSuccess) result.out else emptyList()
+        }
+    }
 }

@@ -8,6 +8,7 @@ import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import java.text.SimpleDateFormat
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.Locale
 import java.util.TimeZone
 import kotlinx.coroutines.CancellationException
@@ -18,7 +19,21 @@ import org.json.JSONObject
 
 internal class GojekOrderReader(private val files: RootFileReader) {
     suspend fun transactions(): List<UnifiedTransaction> = withContext(Dispatchers.IO) {
-        try {
+        val rideOrders = runCatching { readRideOrders() }.getOrDefault(emptyList())
+        val gopayTxs = runCatching { readGoPayTransactions() }.getOrDefault(emptyList())
+
+        val map = mutableMapOf<String, UnifiedTransaction>()
+        for (tx in rideOrders) {
+            map[tx.providerTransactionId] = tx
+        }
+        for (tx in gopayTxs) {
+            map.putIfAbsent(tx.providerTransactionId, tx)
+        }
+        map.values.sortedByDescending { it.occurredAt }
+    }
+
+    private suspend fun readRideOrders(): List<UnifiedTransaction> {
+        return try {
             val bytes = files.read("/data/data/com.gojek.app/files/gojek_orders_2026.json")
             val array = JSONArray(String(bytes, Charsets.UTF_8))
             val formatter = SimpleDateFormat("dd/MM/yyyy hh:mm:ss a", Locale.US).apply {
@@ -79,5 +94,85 @@ internal class GojekOrderReader(private val files: RootFileReader) {
         } catch (_: Exception) {
             emptyList()
         }
+    }
+
+    private suspend fun readGoPayTransactions(): List<UnifiedTransaction> {
+        val cacheFiles = runCatching {
+            files.list("/data/data/com.gojek.app/cache/okhttp_cache")
+        }.getOrNull() ?: return emptyList()
+
+        val results = mutableListOf<UnifiedTransaction>()
+        for (fName in cacheFiles) {
+            if (!fName.endsWith(".0")) continue
+            val baseName = fName.removeSuffix(".0")
+            val f0Path = "/data/data/com.gojek.app/cache/okhttp_cache/$fName"
+            val f1Path = "/data/data/com.gojek.app/cache/okhttp_cache/$baseName.1"
+
+            val isOrderHistory = runCatching {
+                val headerBytes = files.read(f0Path)
+                val firstLine = String(headerBytes, Charsets.UTF_8).lines().firstOrNull().orEmpty()
+                firstLine.contains("customer.gopayapi.com/v2/users/order-history") && !firstLine.contains("/details")
+            }.getOrDefault(false)
+
+            if (!isOrderHistory) continue
+
+            val bodyBytes = runCatching { files.read(f1Path) }.getOrNull() ?: continue
+            val bodyText = String(bodyBytes, Charsets.UTF_8)
+            val json = runCatching { JSONObject(bodyText) }.getOrNull() ?: continue
+            val completed = json.optJSONObject("data")?.optJSONArray("completed") ?: continue
+
+            for (i in 0 until completed.length()) {
+                val group = completed.optJSONObject(i) ?: continue
+                val items = group.optJSONArray("items") ?: continue
+                for (j in 0 until items.length()) {
+                    val item = items.optJSONObject(j) ?: continue
+                    val orderId = item.optString("order_id").ifBlank { continue }
+                    val desc = item.optString("description").ifBlank { "GoPay Payment" }
+                    val amountObj = item.optJSONObject("amount")
+                    val amountRupiah = amountObj?.optLong("value", 0L) ?: 0L
+                    val amountMinor = amountRupiah * 100L
+                    val paymentType = item.optString("payment_type", "DEBIT")
+                    val direction = if (paymentType.equals("CREDIT", ignoreCase = true)) Direction.CREDIT else Direction.DEBIT
+                    val timestampStr = item.optString("order_timestamp")
+                    val occurredAt = runCatching {
+                        OffsetDateTime.parse(timestampStr).toInstant()
+                    }.getOrElse {
+                        runCatching {
+                            java.time.LocalDateTime.parse(timestampStr)
+                                .atZone(java.time.ZoneId.of("Asia/Jakarta"))
+                                .toInstant()
+                        }.getOrElse {
+                            runCatching { Instant.parse(timestampStr) }.getOrDefault(Instant.now())
+                        }
+                    }
+
+                    val serviceType = item.optString("service_type")
+                    val methods = item.optJSONArray("payment_method_breakup")
+                    val methodName = methods?.optJSONObject(0)?.optString("payment_method_name") ?: "GoPay"
+
+                    val rawPayload = JSONObject()
+                        .put("origin", "gopay-order-history")
+                        .put("provider", Provider.GOJEK.name)
+                        .put("orderNumber", orderId)
+                        .put("serviceTier", serviceType)
+                        .put("paymentMethod", methodName)
+                        .put("item", item)
+                        .toString()
+
+                    results.add(
+                        UnifiedTransaction(
+                            provider = Provider.GOJEK,
+                            providerTransactionId = "gopay:$orderId",
+                            direction = direction,
+                            money = Money(amountMinor, "IDR"),
+                            occurredAt = occurredAt,
+                            description = desc,
+                            rawPayload = rawPayload,
+                        )
+                    )
+                }
+            }
+        }
+        return results
     }
 }
