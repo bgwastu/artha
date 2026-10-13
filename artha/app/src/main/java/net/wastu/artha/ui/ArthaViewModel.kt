@@ -47,6 +47,8 @@ class ArthaViewModel(
     val dateRangeFilter = _dateRangeFilter.asStateFlow()
     private val _categoryFilter = MutableStateFlow<String?>(null)
     val categoryFilter = _categoryFilter.asStateFlow()
+    private var categoryReturnDates: Pair<Long?, Long?>? = null
+    private var categoryDrillActive = false
     private val _targetDestination = MutableStateFlow<String?>(null)
     val targetDestination = _targetDestination.asStateFlow()
     private val _reconciledCache = MutableStateFlow<List<UnifiedTransaction>>(emptyList())
@@ -169,12 +171,20 @@ class ArthaViewModel(
         _dateRangeFilter.value = if (startMillis == null && endMillis == null) null else startMillis to endMillis
     }
     fun clearDateRangeFilter() { _dateRangeFilter.value = null }
-    fun clearCategoryFilter() { _categoryFilter.value = null }
+    fun clearCategoryFilter() { _categoryFilter.value = null; categoryDrillActive = false; categoryReturnDates = null }
     fun openCategoryTransactions(category: String) {
+        if (!categoryDrillActive) categoryReturnDates = _dateRangeFilter.value
+        categoryDrillActive = true
         val month = selectedMonth.value
         setDateRangeFilter(month.atDay(1).atStartOfDay(AccountingTime.zone).toInstant().toEpochMilli(),
             month.atEndOfMonth().atStartOfDay(AccountingTime.zone).toInstant().toEpochMilli())
         _categoryFilter.value = category; setTargetDestination("TRANSACTIONS")
+    }
+    fun closeCategoryTransactions() {
+        if (!categoryDrillActive) return
+        _dateRangeFilter.value = categoryReturnDates
+        clearCategoryFilter()
+        setTargetDestination("ANALYSIS")
     }
     fun setUserNote(transaction: UnifiedTransaction, note: String) {
         viewModelScope.launch(Dispatchers.IO) { analysisStore?.setUserNote(transaction.key, note) }

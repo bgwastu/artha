@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Search
@@ -76,6 +77,7 @@ fun HomeScreen(
     var showKnowledgeEditor by rememberSaveable { mutableStateOf(false) }
     var selectedTransaction by remember { mutableStateOf<UnifiedTransaction?>(null) }
     val rootGate by viewModel?.rootGate?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(net.wastu.artha.core.root.RootGateState.LOCKED) }
+    val categoryFilter by viewModel?.categoryFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<String?>(null) }
     val targetDest by viewModel?.targetDestination?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     androidx.compose.runtime.LaunchedEffect(targetDest) {
         targetDest?.let {
@@ -92,12 +94,23 @@ fun HomeScreen(
         destination = Destination.TRANSACTIONS
     }
 
+    BackHandler(enabled = destination == Destination.TRANSACTIONS && categoryFilter != null && selectedTransaction == null && !showSearch && !showFilter) {
+        viewModel?.closeCategoryTransactions()
+    }
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val showRail = maxWidth >= 600.dp
         Scaffold(
             modifier = if (showSearch) Modifier.clearAndSetSemantics {} else Modifier,
             topBar = {
                 TopAppBar(
+                    navigationIcon = {
+                        if (destination == Destination.TRANSACTIONS && categoryFilter != null) {
+                            IconButton(onClick = { viewModel?.closeCategoryTransactions() }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Analysis")
+                            }
+                        }
+                    },
                     title = { Text(destination.label) },
                     actions = {
                         if (destination == Destination.TRANSACTIONS) {

@@ -169,5 +169,19 @@ class ArthaViewModelTest {
         model.lock()
     }
 
+    @Test fun categoryBackRestoresPreviousDateFilterAndReturnsToAnalysis() = runTest(dispatcher) {
+        val model = model(RootAccess { false })
+        model.setDateRangeFilter(123L, 456L)
+        model.openCategoryTransactions("Dining Out")
+        model.openCategoryTransactions("Groceries") // Opening another category must retain the original return context.
+        model.closeCategoryTransactions()
+        assertEquals(123L to 456L, model.dateRangeFilter.value)
+        assertEquals(null, model.categoryFilter.value)
+        assertEquals("ANALYSIS", model.targetDestination.value)
+        model.setTargetDestination(null)
+        model.closeCategoryTransactions()
+        assertEquals(null, model.targetDestination.value)
+    }
+
     private fun model(rootAccess: RootAccess) = ArthaViewModel(rootAccess, { opens++; ledger }, computationDispatcher = dispatcher)
 }
