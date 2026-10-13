@@ -63,10 +63,10 @@ class IngestionCoordinator(
 
     private suspend fun readAndAppend(provider: Provider): Pair<AppendResult, String?> {
         val adapter = requireNotNull(adaptersByProvider[provider]) { "Provider ingestion is not implemented yet." }
-        var warning = adapter.coverageHint
+        var warning: String? = null
         val transactions = try { adapter.ingest() } catch (partial: PartialImportException) {
             if (partial.transactions.isEmpty()) throw partial
-            warning = listOfNotNull(adapter.coverageHint, partial.message).distinct().joinToString(". "); partial.transactions
+            warning = partial.message?.takeIf { it.isNotBlank() } ?: "Some history could not be imported"; partial.transactions
         }
         require(transactions.all { it.provider == provider }) { "Adapter returned another Provider's transaction." }
         return ledger().appendProviderImport(transactions) to warning
@@ -76,7 +76,9 @@ class IngestionCoordinator(
         val (result, warning) = readAndAppend(provider)
         val summary = "${result.inserted} added, ${result.duplicates} already saved" +
             if (result.evidenceUpdates > 0) ", ${result.evidenceUpdates} details updated" else ""
-        preferences?.recordSyncSuccess(provider, summary, accountIdentifier = adaptersByProvider[provider]?.accountIdentifier, coverageHint = warning)
+        preferences?.recordSyncSuccess(provider, summary,
+            accountIdentifier = adaptersByProvider[provider]?.accountIdentifier,
+            coverageHint = adaptersByProvider[provider]?.coverageHint, partialReason = warning)
         if (warning == null) summary else "$summary. $warning"
     } catch (cancelled: CancellationException) { throw cancelled }
     catch (e: Exception) {
@@ -87,7 +89,8 @@ class IngestionCoordinator(
             "not installed" in lower -> AccountStatus.APP_NOT_INSTALLED
             else -> AccountStatus.ERROR
         }
-        preferences?.recordSyncError(provider, message, status)
+        preferences?.recordSyncError(provider, message, status,
+            coverageHint = adaptersByProvider[provider]?.coverageHint)
         "Unavailable: $message"
     }
 }

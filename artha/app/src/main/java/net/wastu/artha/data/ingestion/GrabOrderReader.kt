@@ -92,8 +92,8 @@ internal class GrabOrderReader(
             for (result in results) result.fold(onSuccess = { (ride, warning) ->
                 ride?.let(rideRows::add); warning?.let(rows::issue)
             }, onFailure = { rows.issue(it as Exception) })
-            // No cursor is exposed by this version's ride-list response; avoid invented pagination.
-            rows.issue("Completed ride listing is the provider's available recent window")
+            // Recent ride enrichment has no cursor. Its scope belongs in coverage,
+            // rather than making every otherwise successful payment import an error.
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (error: Exception) { rows.issue(error) }
 
@@ -110,7 +110,6 @@ internal class GrabOrderReader(
             if (orders.length() > 0 || next != null) rows.issue("GrabFood payment schema has no verified receipt sample; saved charges are retained")
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (error: Exception) { rows.issue(error) }
-        rows.issue("GrabPay charge history and recent rides only; other payment and refund contracts remain unverified")
         rows.finish().sortedByDescending { it.occurredAt }
     }
 

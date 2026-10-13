@@ -22,6 +22,7 @@ data class ProviderDiagnostic(
     val lastError: String? = null,
     val accountStatus: AccountStatus = AccountStatus.UNKNOWN,
     val accountIdentifier: String? = null,
+    val coverageHint: String? = null,
 )
 
 class ProviderPreferences(context: Context) {
@@ -48,13 +49,21 @@ class ProviderPreferences(context: Context) {
             val statusStr = preferences.getString("${p.name}_status", AccountStatus.UNKNOWN.name) ?: AccountStatus.UNKNOWN.name
             val status = runCatching { AccountStatus.valueOf(statusStr) }.getOrDefault(AccountStatus.UNKNOWN)
             val ident = preferences.getString("${p.name}_identifier", null)
+            val legacyHint = p.legacyCoverageHint
+            // Old releases stored capabilities as errors. Only migrate a known successful
+            // import's exact prefix; retain every actual partial/failure reason.
+            val legacy = syncTime != null && status == AccountStatus.PARTIAL &&
+                (err == legacyHint || err?.startsWith("$legacyHint. ") == true)
+            val importError = if (legacy) err?.removePrefix(legacyHint)?.removePrefix(". ")?.takeIf { it.isNotBlank() } else err
             ProviderDiagnostic(
                 lastSyncEpochMillis = syncTime,
                 lastAttemptEpochMillis = preferences.getLong("${p.name}_last_attempt_ms", 0).takeIf { it > 0 },
-                lastSyncSummary = summary,
-                lastError = err,
-                accountStatus = status,
+                lastSyncSummary = summary?.replace(". $legacyHint", ""),
+                lastError = importError,
+                accountStatus = if (legacy && importError == null) AccountStatus.CONNECTED else status,
                 accountIdentifier = ident,
+                coverageHint = preferences.getString("${p.name}_coverage_hint", null)
+                    ?: if (legacy) p.historyCoverageHint else null,
             )
         }
 
@@ -76,6 +85,7 @@ class ProviderPreferences(context: Context) {
         summary: String,
         accountIdentifier: String? = null,
         coverageHint: String? = null,
+        partialReason: String? = null,
     ) {
         val now = System.currentTimeMillis()
         val current = _diagnostics.value.toMutableMap()
@@ -84,17 +94,19 @@ class ProviderPreferences(context: Context) {
         val updated = ProviderDiagnostic(
             lastSyncEpochMillis = now,
             lastAttemptEpochMillis = now,
-            lastSyncSummary = listOfNotNull(summary, coverageHint).joinToString(". "),
-            lastError = coverageHint,
-            accountStatus = if (coverageHint == null) AccountStatus.CONNECTED else AccountStatus.PARTIAL,
+            lastSyncSummary = listOfNotNull(summary, partialReason).joinToString(". "),
+            lastError = partialReason,
+            accountStatus = if (partialReason == null) AccountStatus.CONNECTED else AccountStatus.PARTIAL,
             accountIdentifier = finalIdent,
+            coverageHint = coverageHint,
         )
         current[provider] = updated
         preferences.edit {
             putLong("${provider.name}_last_sync_ms", now)
             putLong("${provider.name}_last_attempt_ms", now)
             putString("${provider.name}_last_summary", updated.lastSyncSummary)
-            if (coverageHint == null) remove("${provider.name}_last_error") else putString("${provider.name}_last_error", coverageHint)
+            if (partialReason == null) remove("${provider.name}_last_error") else putString("${provider.name}_last_error", partialReason)
+            if (coverageHint == null) remove("${provider.name}_coverage_hint") else putString("${provider.name}_coverage_hint", coverageHint)
             putString("${provider.name}_status", updated.accountStatus.name)
             if (finalIdent != null) putString("${provider.name}_identifier", finalIdent)
         }
@@ -106,6 +118,7 @@ class ProviderPreferences(context: Context) {
         provider: Provider,
         error: String,
         status: AccountStatus = AccountStatus.ERROR,
+        coverageHint: String? = null,
     ) {
         val current = _diagnostics.value.toMutableMap()
         val prev = current[provider] ?: ProviderDiagnostic()
@@ -114,12 +127,14 @@ class ProviderPreferences(context: Context) {
             lastAttemptEpochMillis = attemptedAt,
             lastError = error,
             accountStatus = status,
+            coverageHint = coverageHint ?: prev.coverageHint,
         )
         current[provider] = updated
         preferences.edit {
             putLong("${provider.name}_last_attempt_ms", attemptedAt)
             putString("${provider.name}_last_error", error)
             putString("${provider.name}_status", status.name)
+            coverageHint?.let { putString("${provider.name}_coverage_hint", it) }
         }
         _diagnostics.value = current
     }

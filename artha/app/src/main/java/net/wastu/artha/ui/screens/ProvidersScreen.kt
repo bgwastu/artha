@@ -329,7 +329,7 @@ private fun providerSummary(diagnostic: ProviderDiagnostic?, count: Int, importE
     importing -> "Importing"
     !importEnabled -> "Import paused"
     else -> when (diagnostic?.accountStatus ?: AccountStatus.UNKNOWN) {
-        AccountStatus.PARTIAL -> "Limited history"
+        AccountStatus.PARTIAL -> "Partial import"
         AccountStatus.CONNECTED -> if (count > 0) "$count saved transactions" else "No saved history"
         AccountStatus.NEEDS_LOGIN -> "Sign in required"
         AccountStatus.APP_NOT_INSTALLED -> "App not installed"
@@ -361,13 +361,17 @@ private fun ProviderSettings(
         if (importing) CircularProgressIndicator(Modifier.size(18.dp).padding(end = 4.dp), strokeWidth = 2.dp)
         Text(if (importing) "Importing" else "Import history")
     }
-    if (!diagnostic?.lastSyncSummary.isNullOrBlank()) {
+    if (!diagnostic?.lastSyncSummary.isNullOrBlank() || !diagnostic?.coverageHint.isNullOrBlank()) {
         var showDiagnostics by remember { mutableStateOf(false) }
         TextButton(onClick = { showDiagnostics = !showDiagnostics }, modifier = Modifier.padding(horizontal = 8.dp)) {
             Text(if (showDiagnostics) "Hide details" else "Import details")
         }
-        if (showDiagnostics) Text(diagnostic!!.lastSyncSummary!!.replace(" \u00b7 ", ". "),
-            modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+        if (showDiagnostics) {
+            diagnostic?.coverageHint?.let { Text(it,
+                modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall) }
+            diagnostic?.lastSyncSummary?.let { Text(it.replace(" \u00b7 ", ". "),
+                modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall) }
+        }
     }
 }
 

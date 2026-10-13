@@ -8,6 +8,7 @@ import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.Pocket
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
+import net.wastu.artha.data.providers.historyCoverageHint
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.Instant
@@ -115,13 +116,13 @@ class JagoTransactionReader(private val files: RootFileReader) {
 }
 
 class JagoProviderAdapter(private val reader: JagoTransactionReader) : ProviderAdapter {
-    override val coverageHint = "Cached bank history only"
+    override val coverageHint = Provider.JAGO.historyCoverageHint
     override val provider = Provider.JAGO
     override suspend fun ingest(): List<UnifiedTransaction> = reader.transactions()
 }
 
 class ShopeeProviderAdapter(private val files: RootFileReader) : ProviderAdapter {
-    override val coverageHint = "Verified marketplace/food payments; bounded history; digital purchases excluded"
+    override val coverageHint = Provider.SHOPEE.historyCoverageHint
     override val provider = Provider.SHOPEE
     private val reader = ShopeeOrderReader(files)
     override val accountIdentifier get() = reader.accountUsername
@@ -129,19 +130,19 @@ class ShopeeProviderAdapter(private val files: RootFileReader) : ProviderAdapter
 }
 
 class TokopediaProviderAdapter(private val files: RootFileReader) : ProviderAdapter {
-    override val coverageHint = "Verification may block history; payment schema remains unverified"
+    override val coverageHint = Provider.TOKOPEDIA.historyCoverageHint
     override val provider = Provider.TOKOPEDIA
     override suspend fun ingest(): List<UnifiedTransaction> = TokopediaOrderReader(files).transactions()
 }
 
 class GojekProviderAdapter(private val files: RootFileReader) : ProviderAdapter {
-    override val coverageHint = "Verified native GoPay cache and exact booking enrichment; live/cash history may be unavailable"
+    override val coverageHint = Provider.GOJEK.historyCoverageHint
     override val provider = Provider.GOJEK
     override suspend fun ingest(): List<UnifiedTransaction> = GojekOrderReader(files).transactions()
 }
 
 class GrabProviderAdapter(private val files: RootFileReader) : ProviderAdapter {
-    override val coverageHint = "Settled card charges and recent rides; other wallet/cash and food receipts remain unverified"
+    override val coverageHint = Provider.GRAB.historyCoverageHint
     override val provider = Provider.GRAB
     override suspend fun ingest(): List<UnifiedTransaction> = GrabOrderReader(files).transactions()
 }
