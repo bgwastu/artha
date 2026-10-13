@@ -41,7 +41,7 @@ class SpendingRepositoryTest {
         assertEquals("New context", changed.transactions.first { it.key == payment.key }.userNote)
         assertSame(original.transactions.first { it.key == other.key }, changed.transactions.first { it.key == other.key })
         val newFacts = projector.project(listOf(payment, other.copy(description = "Netflix")), AnalysisSnapshot())
-        assertEquals("Tech & Subscriptions", newFacts.transactions.first { it.key == other.key }.category)
+        assertEquals("Uncategorized", newFacts.transactions.first { it.key == other.key }.category)
     }
 
     @Test fun customPickerDaysHaveTheSameLocalBoundariesAsPresets() {

@@ -13,6 +13,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import net.wastu.artha.core.model.*
@@ -210,13 +214,77 @@ class TransactionEditFeedbackTest {
         assertEquals(original.aiConfig, AnalysisStore(prefs.context).snapshot.value.aiConfig)
     }
 
+    @Test fun aiCategoryCommitIsAtomicCachedAndCannotOverwriteAManualEdit() {
+        val prefs = FixturePreferences()
+        val store = AnalysisStore(prefs.context)
+        val tx = payment()
+        val input = store.snapshot.value
+        val candidates = AiCategorization.nextBatch(listOf(tx), input)
+        val suggestions = mapOf(tx.key to CategorySuggestion("Uncategorized", "AI suggestion: Fixture"))
+        prefs.updateMemoryOnFailure = true; prefs.commitSucceeds = false
+        assertTrue(runCatching { store.commitCategorySuggestions(candidates, suggestions, input) }.isFailure)
+        assertEquals(input, store.snapshot.value)
+        assertEquals(input.categories, AnalysisStore(prefs.context).snapshot.value.categories)
+        prefs.commitSucceeds = true
+        assertEquals(1, store.commitCategorySuggestions(candidates, suggestions, input))
+        assertTrue(AiCategorization.nextBatch(listOf(tx), store.snapshot.value).isEmpty())
+        store.setClassification(tx.key, "Chosen category", "", true)
+        assertEquals(0, store.commitCategorySuggestions(candidates, suggestions, input))
+        assertEquals("Chosen category", store.snapshot.value.categories[tx.key])
+    }
+
+    @Test fun changedContextAndDuplicateCategoryCreationAreRecoverable() {
+        val prefs = FixturePreferences()
+        val store = AnalysisStore(prefs.context)
+        val input = store.snapshot.value
+        val candidates = AiCategorization.nextBatch(listOf(payment()), input)
+        store.setUserNote(payment().key, "New manual context")
+        assertEquals(0, store.commitCategorySuggestions(candidates, mapOf(payment().key to CategorySuggestion("Uncategorized", "AI suggestion: Fixture")), input))
+        prefs.commitSucceeds = false
+        assertTrue(runCatching { store.addCustomCategory("New category") }.isFailure)
+        assertFalse("New category" in store.snapshot.value.customCategories)
+        prefs.commitSucceeds = true
+        store.addCustomCategory("New category")
+        assertTrue(runCatching { store.addCustomCategory(" new CATEGORY ") }.isFailure)
+        assertEquals(1, store.snapshot.value.customCategories.count { it == "New category" })
+    }
+
+    @Test fun automaticAiRunsOnceThenRecategorizesNewContextWithoutOverwritingManualChoice() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        var vm: ArthaViewModel? = null
+        try {
+            val prefs = FixturePreferences(mapOf("ai_base_url" to "https://fictional.example/v1", "ai_api_key" to "fictional-test-key", "ai_model" to "fictional-model"))
+            val store = AnalysisStore(prefs.context)
+            val state = MutableStateFlow<SpendingState>(SpendingState.Ready(listOf(payment()), emptyMap()))
+            val called = CompletableDeferred<Unit>()
+            var calls = 0
+            vm = ArthaViewModel(RootAccess { false }, { error("Uses fixture state") }, analysisStore = store,
+                computationDispatcher = dispatcher, spendingState = state, categorize = { _, _, batch ->
+                    calls++; called.complete(Unit)
+                    batch.associate { it.transaction.key to CategorySuggestion("Uncategorized", "AI suggestion: Fixture") }
+                })
+            vm.enterForeground(); called.await()
+            // IO commit can complete after the test dispatcher reaches idle.
+            while (store.snapshot.value.aiCategoryFingerprints.isEmpty()) { kotlinx.coroutines.yield() }
+            advanceUntilIdle()
+            assertEquals(1, calls)
+            assertEquals(CategoryAutomationState.READY, vm.categoryAutomation.value)
+            store.setClassification(payment().key, "Manual", "", true)
+            store.setUserNote(payment().key, "New context")
+            advanceUntilIdle()
+            assertEquals(1, calls)
+            assertEquals("Manual", store.snapshot.value.categories[payment().key])
+        } finally { vm?.lock(); Dispatchers.resetMain() }
+    }
+
     private fun payment() = UnifiedTransaction(
         Provider.JAGO, "fictional-payment", Direction.DEBIT, Money(10000), Instant.EPOCH, "Fictional payment", "{}",
     )
 
     /** Only editor writes are exercised; no Android storage, credentials or source data. */
-    private class FixturePreferences {
-        private val values = mutableMapOf<String, String>("custom_categories" to "[\"Uncategorized\"]")
+    private class FixturePreferences(initial: Map<String, String> = emptyMap()) {
+        private val values = mutableMapOf<String, String>("custom_categories" to "[\"Uncategorized\"]").apply { putAll(initial) }
         @Volatile var commitSucceeds = true
         var updateMemoryOnFailure = false
         var beforeCommit: (() -> Unit)? = null

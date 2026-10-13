@@ -95,6 +95,12 @@ fun HomeScreen(
     var selectedKey by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedFallback by remember { mutableStateOf<UnifiedTransaction?>(null) }
     var openBackup by rememberSaveable { mutableStateOf(false) }
+    val snackbarHost = remember { androidx.compose.material3.SnackbarHostState() }
+    val importFeedback by viewModel?.importFeedback?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val automaticImport by viewModel?.automaticImportActive?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(importFeedback?.sequence) {
+        importFeedback?.let { snackbarHost.showSnackbar(it.message) }
+    }
     val ledgerLoadFailed by viewModel?.ledgerLoadFailed?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
     val rootGate by viewModel?.rootGate?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(net.wastu.artha.core.root.RootGateState.LOCKED) }
     val categoryFilter by viewModel?.categoryFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<String?>(null) }
@@ -129,6 +135,7 @@ fun HomeScreen(
         val showDetailsPane = maxWidth >= 1080.dp && maxHeight >= 480.dp && destination == Destination.TRANSACTIONS && !showSearch && selected != null
         val showRail = maxWidth >= 600.dp && maxHeight >= 480.dp
         Scaffold(
+            snackbarHost = { androidx.compose.material3.SnackbarHost(snackbarHost) },
             modifier = if (showSearch) Modifier.clearAndSetSemantics {} else Modifier,
             topBar = {
                 TopAppBar(
@@ -142,7 +149,7 @@ fun HomeScreen(
                     title = { Text(destination.label, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     actions = {
                         if (destination == Destination.TRANSACTIONS) {
-                            IconButton(onClick = onRefresh, enabled = !refreshing) {
+                            IconButton(onClick = onRefresh, enabled = !refreshing || automaticImport) {
                                 val angle = if (refreshing) {
                                     val transition = rememberInfiniteTransition(label = "Sync")
                                     val rotation by transition.animateFloat(

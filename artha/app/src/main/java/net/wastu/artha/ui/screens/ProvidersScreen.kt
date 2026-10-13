@@ -110,6 +110,13 @@ fun ProvidersScreen(
     val importEnabled by viewModel?.importEnabled?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(Provider.entries.toSet()) }
     val diagnostics by viewModel?.providerDiagnostics?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap()) }
     val importing by viewModel?.syncingProvider?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(syncingProvider) }
+    val categoryAutomation by viewModel?.categoryAutomation?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<net.wastu.artha.data.analysis.CategoryAutomationState?>(null) }
+    val importBusy by viewModel?.refreshing?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
+    val automaticImport by viewModel?.automaticImportActive?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
+    val requestedProvider by viewModel?.requestedImportProvider?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<Provider?>(null) }
+    val importFeedback by viewModel?.importFeedback?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    fun isImporting(provider: Provider) = importBusy && (importing == provider || requestedProvider == provider)
+    fun feedback(provider: Provider) = importFeedback?.takeIf { it.provider == null || it.provider == provider }?.message
     val backup by viewModel?.driveSyncState?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(DriveSyncState()) }
 
     val accountPicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -177,7 +184,7 @@ fun ProvidersScreen(
                 val filled = config != null && config.baseUrl.isNotBlank() && config.apiKey.isNotBlank() && config.model.isNotBlank()
                 val validUrl = config != null && runCatching { AiAnalysisService.endpoint(config.baseUrl) }.isSuccess
                 val summary = if (!filled) "Not set up" else if (!validUrl) "Check URL" else "Configured"
-                SettingsLink("AI commentary", summary, Icons.Default.SettingsSuggest) {
+                SettingsLink("AI", summary, Icons.Default.SettingsSuggest) {
                     aiError = null
                     showAiConfig = true
                 }
@@ -197,8 +204,8 @@ fun ProvidersScreen(
                 val provider = selectedProvider ?: Provider.entries.first()
                 Text(provider.displayName, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
                 ProviderSettings(provider.displayName, provider in enabled, provider in importEnabled,
-                    providerCounts[provider] ?: 0, diagnostics[provider], importing == provider,
-                    { onEnabled(provider, it) }, { viewModel?.setImportEnabled(provider, it) }, { viewModel?.syncProvider(provider) })
+                    providerCounts[provider] ?: 0, diagnostics[provider], isImporting(provider),
+                    { onEnabled(provider, it) }, { viewModel?.setImportEnabled(provider, it) }, { viewModel?.syncProvider(provider) }, busy = importBusy && !automaticImport, feedback = feedback(provider))
             }
         }
     }
@@ -209,7 +216,8 @@ fun ProvidersScreen(
             ProviderSettings(
                 sourceName = provider.displayName, enabled = provider in enabled, importEnabled = provider in importEnabled,
                 count = providerCounts[provider] ?: 0, diagnostic = diagnostics[provider],
-                importing = importing == provider,
+                importing = isImporting(provider),
+                busy = importBusy && !automaticImport, feedback = feedback(provider),
                 onEnabled = { onEnabled(provider, it) },
                 onImportEnabled = { viewModel?.setImportEnabled(provider, it) },
                 onImport = { viewModel?.syncProvider(provider) },
@@ -250,7 +258,8 @@ fun ProvidersScreen(
     if (showCategories && snapshot != null && viewModel != null) {
         ManageCategoriesSheet(snapshot!!.customCategories, snapshot!!.categoryIcons,
             { showCategories = false }, viewModel::addCustomCategory, viewModel::removeCustomCategory,
-            viewModel::setCategoryIcon, viewModel::resetCategoriesToDefault)
+            viewModel::setCategoryIcon, viewModel::resetCategoriesToDefault,
+            automationState = categoryAutomation, onRetryAi = viewModel::retryAutomaticCategories)
     }
     if (showContext && snapshot != null && viewModel != null) {
         KnowledgeEditorDialog(snapshot!!.knowledge, { showContext = false }) {
@@ -342,6 +351,7 @@ private fun providerSummary(diagnostic: ProviderDiagnostic?, count: Int, importE
 private fun ProviderSettings(
     sourceName: String, enabled: Boolean, importEnabled: Boolean, count: Int, diagnostic: ProviderDiagnostic?, importing: Boolean,
     onEnabled: (Boolean) -> Unit, onImportEnabled: (Boolean) -> Unit, onImport: () -> Unit,
+    busy: Boolean = false, feedback: String? = null,
 ) {
     SettingsSwitch("Import new history", importEnabled, onImportEnabled, sourceName = sourceName)
     SettingsSwitch("Show in Transactions", enabled, onEnabled, sourceName = sourceName)
@@ -356,11 +366,12 @@ private fun ProviderSettings(
         Text(diagnostic.lastError, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.padding(horizontal = 16.dp), color = if (diagnostic.accountStatus == AccountStatus.ERROR) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium)
     }
-    FilledTonalButton(onClick = onImport, enabled = importEnabled && !importing,
+    FilledTonalButton(onClick = onImport, enabled = importEnabled && !importing && !busy,
         modifier = Modifier.fillMaxWidth().padding(16.dp)) {
         if (importing) CircularProgressIndicator(Modifier.size(18.dp).padding(end = 4.dp), strokeWidth = 2.dp)
-        Text(if (importing) "Importing" else "Import history")
+        Text(if (importing) "Importing" else if (busy) "Import in progress" else "Import history")
     }
+    feedback?.let { Text(it, modifier = Modifier.padding(horizontal = 16.dp).semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium) }
     if (!diagnostic?.lastSyncSummary.isNullOrBlank() || !diagnostic?.coverageHint.isNullOrBlank()) {
         var showDiagnostics by remember { mutableStateOf(false) }
         TextButton(onClick = { showDiagnostics = !showDiagnostics }, modifier = Modifier.padding(horizontal = 8.dp)) {
@@ -557,10 +568,10 @@ fun AiConfigDialog(currentConfig: AiConfig, onDismiss: () -> Unit, onSave: (AiCo
     var model by remember { mutableStateOf(currentConfig.model) }
     var validationError by remember { mutableStateOf<String?>(null) }
     AlertDialog(onDismissRequest = { if (!saving) onDismiss() },
-        title = { Text("AI commentary") },
+        title = { Text("AI") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Sends spending details and personal context to this provider", style = MaterialTheme.typography.bodyMedium)
+                Text("Automatically categorizes payments and writes summaries. Sends payment details and personal context to this provider", style = MaterialTheme.typography.bodyMedium)
                 OutlinedTextField(baseUrl, { baseUrl = it; validationError = null }, label = { Text("Endpoint URL") },
                     singleLine = true, enabled = !saving, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(apiKey, { apiKey = it; validationError = null }, label = { Text("API key") },

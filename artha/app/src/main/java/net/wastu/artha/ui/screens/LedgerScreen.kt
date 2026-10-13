@@ -30,6 +30,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import net.wastu.artha.ui.theme.incomeColor
+import net.wastu.artha.ui.theme.expenseColor
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -594,12 +596,14 @@ fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlig
                             HighlightedText(transaction.description, highlightQuery, MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Medium, maxLines = 2)
                             HighlightedText(amount, highlightQuery, MaterialTheme.typography.titleSmall,
+                                color = if (credit) incomeColor() else expenseColor(),
                                 fontWeight = FontWeight.SemiBold, maxLines = Int.MAX_VALUE)
                         }
                     } else Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         HighlightedText(transaction.description, highlightQuery, MaterialTheme.typography.bodyLarge,
                             modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium, maxLines = 2)
-                        HighlightedText(amount, highlightQuery, MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        HighlightedText(amount, highlightQuery, MaterialTheme.typography.titleSmall,
+                                color = if (credit) incomeColor() else expenseColor(), fontWeight = FontWeight.SemiBold)
                     }
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {

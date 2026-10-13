@@ -19,6 +19,8 @@ sealed interface LedgerState {
     data object Failed : LedgerState
 }
 
+data class ImportFeedback(val sequence: Long, val provider: Provider?, val message: String, val failed: Boolean = false)
+
 @OptIn(kotlinx.coroutines.FlowPreview::class)
 class ArthaViewModel(
     private val rootAccess: RootAccess,
@@ -34,6 +36,7 @@ class ArthaViewModel(
     private val computationDispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val spendingState: StateFlow<SpendingState>? = null,
     private val retrySpending: (() -> Unit)? = null,
+    private val categorize: suspend (AiConfig, AnalysisSnapshot, List<CategoryCandidate>) -> Map<String, CategorySuggestion> = AiCategorization::classify,
 ) : ViewModel() {
     private val _rootGate = MutableStateFlow(RootGateState.LOCKED)
     val rootGate = _rootGate.asStateFlow()
@@ -69,6 +72,16 @@ class ArthaViewModel(
     private val failedFingerprints = mutableMapOf<YearMonth, String>()
     private val _refreshing = MutableStateFlow(false)
     val refreshing = _refreshing.asStateFlow()
+    private val _automaticImportActive = MutableStateFlow(false)
+    val automaticImportActive = _automaticImportActive.asStateFlow()
+    private val _requestedImportProvider = MutableStateFlow<Provider?>(null)
+    val requestedImportProvider = _requestedImportProvider.asStateFlow()
+    private val _importFeedback = MutableStateFlow<ImportFeedback?>(null)
+    val importFeedback = _importFeedback.asStateFlow()
+    private var importSequence = 0L
+    private val _categoryAutomation = MutableStateFlow(CategoryAutomationState.NOT_CONFIGURED)
+    val categoryAutomation = _categoryAutomation.asStateFlow()
+    private val categoryRetry = MutableStateFlow(0)
     private val _ingestionStatus = MutableStateFlow<Map<Provider, String>>(emptyMap())
     val ingestionStatus = _ingestionStatus.asStateFlow()
     val enabledProviders = preferences?.enabled ?: MutableStateFlow(Provider.entries.toSet()).asStateFlow()
@@ -77,6 +90,7 @@ class ArthaViewModel(
     val driveSyncState = driveSyncManager?.syncState ?: MutableStateFlow(net.wastu.artha.data.sync.DriveSyncState()).asStateFlow()
     private var observerJob: Job? = null
     private var ingestionJob: Job? = null
+    private var categorizationJob: Job? = null
     private var lastAutomaticRefresh = Long.MIN_VALUE
 
     fun setTargetDestination(dest: String?) { _targetDestination.value = dest }
@@ -95,6 +109,7 @@ class ArthaViewModel(
     }
 
     private fun observeSavedLedger() {
+        observeAutomaticCategories()
         if (observerJob?.isActive != true) {
             observerJob = viewModelScope.launch {
                 val state = spendingState ?: flow {
@@ -126,8 +141,8 @@ class ArthaViewModel(
                     }.collect { if (it.month == _selectedMonth.value) _monthAnalysis.value = it }
                 }
                 launch {
-                    combine(_reconciledCache, _selectedMonth, analysisSnapshot, _refreshing) { rows, month, snapshot, importing ->
-                        if (importing) null else month to fingerprint(month, rows, snapshot)
+                    combine(_reconciledCache, _selectedMonth, analysisSnapshot, _refreshing, _categoryAutomation) { rows, month, snapshot, importing, categoryState ->
+                        if (importing || categoryState == CategoryAutomationState.WORKING) null else month to fingerprint(month, rows, snapshot)
                     }.flowOn(computationDispatcher).distinctUntilChanged().debounce(2000).collect { input ->
                         input?.let { (month, _) -> analyzeMonth(month, debounceMs = 0) }
                     }
@@ -135,6 +150,52 @@ class ArthaViewModel(
             }
         }
     }
+
+    private fun observeAutomaticCategories() {
+        val store = analysisStore ?: return
+        if (categorizationJob?.isActive == true) return
+        categorizationJob = viewModelScope.launch {
+            var failedBatch: String? = null
+            var previousConfig: AiConfig? = null
+            var previousRetry = 0
+            combine(_reconciledCache, analysisSnapshot, _refreshing, categoryRetry) { rows, snapshot, importing, retry ->
+                CategoryInput(rows, snapshot, importing, retry)
+            }.debounce(1000).collectLatest { input ->
+                val config = input.snapshot.aiConfig
+                if (config != previousConfig || input.retry != previousRetry) failedBatch = null
+                previousConfig = config; previousRetry = input.retry
+                if (config.baseUrl.isBlank() || config.apiKey.isBlank() || config.model.isBlank()) {
+                    _categoryAutomation.value = CategoryAutomationState.NOT_CONFIGURED
+                    return@collectLatest
+                }
+                if (input.importing) return@collectLatest
+                val batch = withContext(computationDispatcher) { AiCategorization.nextBatch(input.rows, input.snapshot) }
+                if (batch.isEmpty()) {
+                    _categoryAutomation.value = CategoryAutomationState.READY
+                    return@collectLatest
+                }
+                val batchId = batch.joinToString(":") { it.fingerprint }
+                if (failedBatch == batchId) return@collectLatest
+                _categoryAutomation.value = CategoryAutomationState.WORKING
+                try {
+                    val suggestions = categorize(config, input.snapshot, batch)
+                    ensureActive()
+                    val currentRows = _reconciledCache.value.associateBy { it.key }
+                    val unchanged = batch.filter { candidate ->
+                        currentRows[candidate.transaction.key]?.let { current ->
+                            !current.classificationIsManual && AiCategorization.fingerprint(current, analysisSnapshot.value) == candidate.fingerprint
+                        } == true
+                    }
+                    withContext(Dispatchers.IO) { store.commitCategorySuggestions(unchanged, suggestions, input.snapshot) }
+                    _categoryAutomation.value = CategoryAutomationState.READY
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { failedBatch = batchId; _categoryAutomation.value = CategoryAutomationState.ERROR }
+            }
+        }
+    }
+
+    private data class CategoryInput(val rows: List<UnifiedTransaction>, val snapshot: AnalysisSnapshot, val importing: Boolean, val retry: Int)
+    fun retryAutomaticCategories() { categoryRetry.update { it + 1 }; observeAutomaticCategories() }
 
     private fun visibleLedger(rows: List<UnifiedTransaction>, enabled: Set<Provider>, dates: Pair<Long?, Long?>?, category: String?): LedgerState.Ready {
         val (start, end) = dates ?: (null to null)
@@ -164,22 +225,54 @@ class ArthaViewModel(
     fun syncProvider(provider: Provider) { importHistory(provider) }
     private fun importHistory(provider: Provider?, automatic: Boolean = false) {
         if (automatic && preferences != null && importEnabled.value.none { preferences.isStale(it, clock.millis()) }) return
-        if (ingestionJob?.isActive == true) return
+        val previous = ingestionJob?.takeIf { it.isActive }
+        if (previous != null && (automatic || !_automaticImportActive.value)) {
+            if (!automatic) _importFeedback.value = ImportFeedback(++importSequence, provider, "An import is already running")
+            return
+        }
+        previous?.cancel()
+        if (!automatic) _importFeedback.value = null
+        _requestedImportProvider.value = provider
         _refreshing.value = true
-        ingestionJob = viewModelScope.launch {
+        _automaticImportActive.value = automatic
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
+                previous?.join()
                 _rootGate.value = RootGateState.CHECKING
                 val granted = try { rootAccess.verify() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { false }
                 _rootGate.value = if (granted) RootGateState.GRANTED else RootGateState.DENIED
-                if (!granted) return@launch
+                if (!granted) {
+                    if (!automatic) _importFeedback.value = ImportFeedback(++importSequence, provider, "Root access unavailable. Allow root, then try again", true)
+                    return@launch
+                }
                 val result = if (provider != null && syncSingle != null) mapOf(provider to syncSingle.invoke(provider))
                     else if (automatic && ingestStale != null) ingestStale.invoke() else ingest?.invoke().orEmpty()
                 _ingestionStatus.value = _ingestionStatus.value + result
+                if (!automatic) {
+                    val failed = result.values.count { it.startsWith("Unavailable:") }
+                    val message = when {
+                        result.isEmpty() -> "No sources enabled for import"
+                        failed == result.size -> "Import failed. Open source details"
+                        failed > 0 -> "Import finished. Some sources are unavailable"
+                        preferences?.diagnostics?.value?.filterKeys { it in result }?.values?.any { it.accountStatus == net.wastu.artha.data.providers.AccountStatus.PARTIAL } == true -> "Imported available history"
+                        else -> "Import complete"
+                    }
+                    _importFeedback.value = ImportFeedback(++importSequence, provider, message, result.isEmpty() || failed == result.size)
+                }
                 if (result.isNotEmpty() && driveSyncState.value.isEnabled) driveSyncManager?.syncNow()
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (e: Exception) { _ingestionStatus.value = _ingestionStatus.value + ((provider ?: Provider.JAGO) to (e.message ?: "Import unavailable")) }
-            finally { _refreshing.value = false }
+            catch (e: Exception) {
+                _ingestionStatus.value = _ingestionStatus.value + ((provider ?: Provider.JAGO) to (e.message ?: "Import unavailable"))
+                if (!automatic) _importFeedback.value = ImportFeedback(++importSequence, provider, "Import failed. Try again", true)
+            }
+            finally {
+                if (ingestionJob === coroutineContext[Job]) {
+                    _refreshing.value = false; _requestedImportProvider.value = null; _automaticImportActive.value = false
+                }
+            }
         }
+        ingestionJob = job
+        job.start()
     }
 
     fun stopForegroundImports() {
@@ -188,7 +281,7 @@ class ArthaViewModel(
         }
     }
     fun lock() {
-        stopForegroundImports(); observerJob?.cancel(); monthJobs.values.forEach(Job::cancel); monthJobs.clear()
+        stopForegroundImports(); observerJob?.cancel(); categorizationJob?.cancel(); monthJobs.values.forEach(Job::cancel); monthJobs.clear()
         lastAutomaticRefresh = Long.MIN_VALUE
         _rootGate.value = RootGateState.LOCKED; _ledgerState.value = LedgerState.Loading
     }
@@ -261,7 +354,16 @@ class ArthaViewModel(
             onComplete(error)
         }
     }
-    fun addCustomCategory(category: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.addCustomCategory(category) } }
+    fun addCustomCategory(category: String, onComplete: (Result<Unit>) -> Unit = {}) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                try { checkNotNull(analysisStore) { "Categories unavailable" }.addCustomCategory(category); Result.success(Unit) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) { Result.failure<Unit>(error) }
+            }
+            onComplete(result)
+        }
+    }
     fun removeCustomCategory(category: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.removeCustomCategory(category) } }
     fun resetCategoriesToDefault() { viewModelScope.launch(Dispatchers.IO) { analysisStore?.resetCategoriesToDefault() } }
     fun setCategoryIcon(category: String, iconKey: String?) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setCategoryIcon(category, iconKey) } }
@@ -278,7 +380,7 @@ class ArthaViewModel(
             snapshot.knowledge + "\n${snapshot.aiConfig.baseUrl}\n${snapshot.aiConfig.model}\n${snapshot.aiConfig.apiKey}\n${if (month == YearMonth.now(clock.withZone(AccountingTime.zone))) java.time.LocalDate.now(clock.withZone(AccountingTime.zone)) else month}", snapshot.customCategories)
 
     fun analyzeMonth(month: YearMonth, forceReanalyze: Boolean = false, debounceMs: Long = 600) {
-        if (_refreshing.value && !forceReanalyze) return
+        if ((_refreshing.value || _categoryAutomation.value == CategoryAutomationState.WORKING) && !forceReanalyze) return
         val config = analysisSnapshot.value.aiConfig
         if (analysisStore == null || config.baseUrl.isBlank() || config.model.isBlank() || config.apiKey.isBlank()) return
         monthJobs[month]?.cancel()

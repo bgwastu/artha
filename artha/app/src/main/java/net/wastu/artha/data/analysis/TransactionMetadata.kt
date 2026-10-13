@@ -38,11 +38,16 @@ object TransactionMetadata {
             reasons = migrateMap(snapshot.reasons), updatedAt = times, manualCategories = manual)
     }
 
+    /** Old rule output stays stored for recovery, but is no longer presented as a category. */
+    fun category(snapshot: AnalysisSnapshot, key: String): String? = snapshot.categories[key]?.takeUnless {
+        key !in snapshot.manualCategories && snapshot.reasons[key]?.startsWith("Local provider and merchant rule") == true
+    }
+
     fun enrich(transaction: UnifiedTransaction, snapshot: AnalysisSnapshot): UnifiedTransaction {
         val note = snapshot.userNotes[transaction.key] ?: transaction.userNote
-        val classification = CategoryClassifier.classify(transaction, note)
+
         return transaction.copy(userNote = note, classificationIsManual = transaction.key in snapshot.manualCategories,
-            category = snapshot.categories[transaction.key] ?: classification.category,
-            aiReasoning = snapshot.reasons[transaction.key] ?: classification.reason)
+            category = category(snapshot, transaction.key) ?: CategoryConstants.UNCATEGORIZED,
+            aiReasoning = if (category(snapshot, transaction.key) != null) snapshot.reasons[transaction.key].orEmpty() else "")
     }
 }

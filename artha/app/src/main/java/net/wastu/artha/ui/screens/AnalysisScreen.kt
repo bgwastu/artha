@@ -29,6 +29,14 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -91,6 +99,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.ui.AVAILABLE_CATEGORY_ICONS
 import net.wastu.artha.ui.ArthaViewModel
+import net.wastu.artha.data.analysis.CategoryAutomationState
 import net.wastu.artha.data.analysis.CategorySpending
 import net.wastu.artha.ui.MarkdownText
 import net.wastu.artha.data.analysis.MonthSpendingAnalysis
@@ -116,6 +125,7 @@ fun AnalysisScreen(
     val ledgerState by viewModel.ledgerState.collectAsStateWithLifecycle()
     val savedTransactions by viewModel.allTransactions.collectAsStateWithLifecycle()
     val snapshot by viewModel.analysisSnapshot.collectAsStateWithLifecycle()
+    val categoryAutomation by viewModel.categoryAutomation.collectAsStateWithLifecycle()
     val analyzingMonths by viewModel.analyzingMonths.collectAsStateWithLifecycle()
     val selectedMonth by viewModel.selectedMonth.collectAsStateWithLifecycle()
     val analysisErrors by viewModel.analysisErrors.collectAsStateWithLifecycle()
@@ -229,10 +239,12 @@ fun AnalysisScreen(
             categories = snapshot.customCategories,
             categoryIcons = snapshot.categoryIcons,
             onDismiss = onDismissCategoriesSheet,
-            onAdd = { viewModel.addCustomCategory(it) },
+            onAdd = { name, complete -> viewModel.addCustomCategory(name, complete) },
             onRemove = { viewModel.removeCustomCategory(it) },
             onSetIcon = { cat, iconKey -> viewModel.setCategoryIcon(cat, iconKey) },
             onReset = { viewModel.resetCategoriesToDefault() },
+            automationState = categoryAutomation,
+            onRetryAi = viewModel::retryAutomaticCategories,
         )
     }
 }
@@ -437,70 +449,166 @@ fun KnowledgeEditorDialog(
 @Composable
 fun ManageCategoriesSheet(
     categories: List<String>, categoryIcons: Map<String, String>, onDismiss: () -> Unit,
-    onAdd: (String) -> Unit, onRemove: (String) -> Unit,
+    onAdd: (String, (Result<Unit>) -> Unit) -> Unit, onRemove: (String) -> Unit,
     onSetIcon: (String, String?) -> Unit, onReset: () -> Unit,
+    automationState: CategoryAutomationState? = null, onRetryAi: () -> Unit = {},
 ) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var adding by rememberSaveable { mutableStateOf(false) }
     var name by rememberSaveable { mutableStateOf("") }
-    var newIcon by rememberSaveable { mutableStateOf("default") }
+    var addError by rememberSaveable { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    var headerMenu by remember { mutableStateOf(false) }
+    var rowMenu by rememberSaveable { mutableStateOf<String?>(null) }
     var editingIcon by rememberSaveable { mutableStateOf<String?>(null) }
     var removing by rememberSaveable { mutableStateOf<String?>(null) }
     var reset by rememberSaveable { mutableStateOf(false) }
-    val duplicate = categories.any { it.equals(name.trim(), ignoreCase = true) }
-    fun add() {
-        val value = name.trim()
-        if (value.isNotEmpty() && !duplicate) {
-            onAdd(value)
-            if (newIcon != "default") onSetIcon(value, newIcon)
-            name = ""
-            newIcon = "default"
+    var revealCategory by rememberSaveable { mutableStateOf<String?>(null) }
+    val focus = LocalFocusManager.current
+    val listState = rememberLazyListState()
+    val visibleCategories = remember(categories, query) {
+        categories.filter { it.contains(query.trim(), ignoreCase = true) }
+    }
+    var previousQuery by rememberSaveable { mutableStateOf(query) }
+    LaunchedEffect(query) {
+        if (previousQuery != query) {
+            previousQuery = query
+            listState.scrollToItem(0)
         }
     }
-    ModalBottomSheet(onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        LazyColumn(Modifier.fillMaxWidth().imePadding(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            item {
-                Text("Categories", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { reset = true }) { Text("Reset picker") }
-                    TextButton(onClick = onDismiss) { Text("Done") }
+    val duplicate = categories.any { it.equals(name.trim(), ignoreCase = true) }
+    fun submit() {
+        if (saving) return
+        val value = name.trim()
+        if (value.isEmpty()) { addError = "Enter a category name"; return }
+        if (duplicate) { addError = "Already in picker"; return }
+        saving = true
+        addError = null
+        onAdd(value) { result ->
+            saving = false
+            if (result.isSuccess) {
+                focus.clearFocus()
+                query = ""
+                revealCategory = value
+                name = ""
+                adding = false
+            } else addError = "Couldn't add category. Try again."
+        }
+    }
+    LaunchedEffect(revealCategory, visibleCategories, adding) {
+        val index = revealCategory?.let(visibleCategories::indexOf) ?: -1
+        if (!adding && index >= 0) {
+            listState.scrollToItem(index)
+            revealCategory = null
+        }
+    }
+    ModalBottomSheet(
+        onDismissRequest = { if (!saving) { focus.clearFocus(); onDismiss() } },
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true,
+            confirmValueChange = { !saving || it != androidx.compose.material3.SheetValue.Hidden }),
+    ) {
+        BackHandler(enabled = adding) {
+            if (!saving) { focus.clearFocus(); adding = false }
+        }
+        Column(Modifier.fillMaxWidth().imePadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                if (adding) IconButton(onClick = { focus.clearFocus(); adding = false }, enabled = !saving) {
+                    Icon(Icons.Default.ChevronLeft, "Back to categories")
+                }
+                Text(if (adding) "Add category" else "Categories", style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f).semantics { heading() })
+                if (!adding) {
+                    Box {
+                        IconButton(onClick = { headerMenu = true }) { Icon(Icons.Default.MoreVert, "Category options") }
+                        DropdownMenu(headerMenu, onDismissRequest = { headerMenu = false }) {
+                            DropdownMenuItem(text = { Text("Reset picker") }, onClick = { headerMenu = false; reset = true })
+                        }
+                    }
+                    IconButton(onClick = { focus.clearFocus(); onDismiss() }) { Icon(Icons.Default.Close, "Close categories") }
                 }
             }
-            item {
-                OutlinedTextField(name, { name = it }, label = { Text("Category name") },
-                    isError = duplicate, supportingText = if (duplicate) ({ Text("Already in picker") }) else null,
-                    singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { add() }))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { editingIcon = "__NEW__" }) {
-                        Icon(categoryIconFor("", mapOf("" to newIcon)), null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Choose icon")
-                    }
-                    FilledTonalButton(onClick = { add() }, enabled = name.isNotBlank() && !duplicate) { Text("Add") }
+            if (adding) {
+                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(vertical = 12.dp)) {
+                    OutlinedTextField(name, { name = it; addError = null }, label = { Text("Category name") },
+                        enabled = !saving, isError = duplicate || addError != null,
+                        supportingText = (if (duplicate) "Already in picker" else addError)?.let { message -> {
+                            Text(message, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                        } },
+                        singleLine = true, modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { submit() }))
                 }
-            }
-            items(categories, key = { it }) { category ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { editingIcon = category }, modifier = Modifier.size(48.dp)) {
-                        Icon(categoryIconFor(category, categoryIcons), "Choose icon for $category")
+                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { focus.clearFocus(); adding = false }, enabled = !saving,
+                        modifier = Modifier.heightIn(min = 48.dp)) { Text("Cancel") }
+                    FilledTonalButton(onClick = { submit() }, enabled = !saving && name.isNotBlank() && !duplicate,
+                        modifier = Modifier.heightIn(min = 48.dp)) { Text(if (saving) "Adding" else "Add") }
+                }
+            } else {
+                automationState?.let { state ->
+                    Row(Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text(when (state) {
+                            CategoryAutomationState.NOT_CONFIGURED -> "AI not configured"
+                            CategoryAutomationState.WORKING -> "AI categorizing"
+                            CategoryAutomationState.READY -> "AI automatic"
+                            CategoryAutomationState.ERROR -> "AI unavailable"
+                        }, modifier = Modifier.weight(1f).padding(vertical = 8.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (state == CategoryAutomationState.ERROR) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (state == CategoryAutomationState.ERROR) {
+                            TextButton(onClick = { focus.clearFocus(); onRetryAi() }, modifier = Modifier.heightIn(min = 48.dp)) {
+                                Text("Retry")
+                            }
+                        }
                     }
-                    Text(category, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
-                    IconButton(onClick = { removing = category }, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Default.DeleteOutline, "Remove $category from picker", tint = MaterialTheme.colorScheme.error)
+                }
+                OutlinedTextField(query, { query = it }, label = { Text("Search categories") }, singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                    trailingIcon = if (query.isNotEmpty()) ({
+                        IconButton(onClick = { query = "" }) { Icon(Icons.Default.Clear, "Clear category search") }
+                    }) else null,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                TextButton(onClick = { focus.clearFocus(); adding = true }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Icon(Icons.Default.Add, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Add category")
+                }
+                LazyColumn(Modifier.fillMaxWidth().weight(1f), state = listState,
+                    contentPadding = PaddingValues(bottom = 16.dp)) {
+                    if (visibleCategories.isEmpty()) item {
+                        Text(if (query.isBlank()) "No categories" else "No matching categories",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 16.dp))
+                    }
+                    items(visibleCategories, key = { it }) { category ->
+                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Icon(categoryIconFor(category, categoryIcons), null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
+                            Text(category, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                            Box {
+                                IconButton(onClick = { focus.clearFocus(); rowMenu = category }, modifier = Modifier.size(48.dp)) {
+                                    Icon(Icons.Default.MoreVert, "Options for $category")
+                                }
+                                DropdownMenu(rowMenu == category, onDismissRequest = { rowMenu = null }) {
+                                    DropdownMenuItem(text = { Text("Change icon") }, onClick = { rowMenu = null; editingIcon = category })
+                                    DropdownMenuItem(text = { Text("Remove from picker") }, onClick = { rowMenu = null; removing = category })
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
     editingIcon?.let { category ->
-        IconPickerDialog(if (category == "__NEW__") newIcon else categoryIcons[category],
-            onDismiss = { editingIcon = null }, onSelect = {
-                if (category == "__NEW__") newIcon = it else onSetIcon(category, it)
-                editingIcon = null
-            })
+        IconPickerDialog(categoryIcons[category], onDismiss = { editingIcon = null }, onSelect = {
+            onSetIcon(category, it)
+            editingIcon = null
+        })
     }
     removing?.let { category ->
         AlertDialog(onDismissRequest = { removing = null }, title = { Text("Remove from picker?") },
@@ -515,63 +623,28 @@ fun ManageCategoriesSheet(
 }
 
 @Composable
-fun IconPickerDialog(
-    currentKey: String?,
-    onDismiss: () -> Unit,
-    onSelect: (String) -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Choose Category Icon", fontWeight = FontWeight.Bold) },
+fun IconPickerDialog(currentKey: String?, onDismiss: () -> Unit, onSelect: (String) -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Category icon") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "Select a custom icon or keep the default icon.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Card(
-                    modifier = Modifier.fillMaxWidth().height(260.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                ) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(56.dp),
-                        modifier = Modifier.fillMaxSize().padding(8.dp).selectableGroup(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        items(AVAILABLE_CATEGORY_ICONS, key = { it.first }) { (key, vector) ->
-                            val isSelected = (currentKey ?: "default") == key
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-                                modifier = Modifier.heightIn(min = 48.dp).selectable(isSelected, role = Role.RadioButton, onClick = { onSelect(key) }),
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        vector,
-                                        contentDescription = categoryIconLabel(key),
-                                        tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.size(22.dp),
-                                    )
-                                }
-                            }
+            LazyVerticalGrid(columns = GridCells.Adaptive(56.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 280.dp).selectableGroup(),
+                contentPadding = PaddingValues(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(AVAILABLE_CATEGORY_ICONS, key = { it.first }) { (key, vector) ->
+                    val selected = (currentKey ?: "default") == key
+                    Surface(color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                        shape = MaterialTheme.shapes.small,
+                        modifier = Modifier.heightIn(min = 48.dp).selectable(selected, role = Role.RadioButton, onClick = { onSelect(key) })) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Icon(vector, categoryIconLabel(key), modifier = Modifier.size(24.dp),
+                                tint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface)
                         }
                     }
                 }
             }
         },
-        confirmButton = {
-            TextButton(onClick = { onSelect("default") }) {
-                Text("Use Default")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        },
-    )
+        confirmButton = { TextButton(onClick = { onSelect("default") }) { Text("Use default") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 private fun formatAmountMinor(amountMinor: Long): String =

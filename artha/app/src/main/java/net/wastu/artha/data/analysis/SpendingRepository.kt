@@ -47,15 +47,14 @@ class SpendingProjector(private val reconcile: (List<UnifiedTransaction>) -> Lis
             val keys = aliases[tx.key].orEmpty()
             val noteKey = if ("note:${tx.key}" in metadata.updatedAt) tx.key else keys.firstOrNull { it in metadata.userNotes }
             val manual = keys.firstOrNull { it in metadata.manualCategories }
-            val categoryKey = manual ?: keys.firstOrNull { it in metadata.categories }
+            val categoryKey = manual ?: keys.firstOrNull { TransactionMetadata.category(metadata, it) != null }
             val note = noteKey?.let { metadata.userNotes[it] }
             val edit = EditInput(note, categoryKey?.let { metadata.categories[it] }, manual != null, categoryKey?.let { metadata.reasons[it] })
             rowCache[tx.key]?.takeIf { it.first == edit }?.let { return@map it.second }
-            val rule = CategoryClassifier.classify(tx, note)
             tx.copy(userNote = note,
-                category = if (tx.direction == Direction.CREDIT) null else categoryKey?.let { metadata.categories[it] } ?: rule.category,
+                category = if (tx.direction == Direction.CREDIT) null else categoryKey?.let { metadata.categories[it] } ?: CategoryConstants.UNCATEGORIZED,
                 classificationIsManual = manual != null,
-                aiReasoning = edit.reason ?: rule.reason).also { rowCache[tx.key] = edit to it }
+                aiReasoning = edit.reason ?: "").also { rowCache[tx.key] = edit to it }
         }
         return SpendingState.Ready(rows, raw.filterNot(net.wastu.artha.data.ledger.ProviderObservations::isObservation).groupingBy { it.provider }.eachCount()).also {
             lastSnapshot = snapshot; lastProjection = it

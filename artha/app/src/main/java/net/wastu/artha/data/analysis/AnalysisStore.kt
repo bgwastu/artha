@@ -29,6 +29,7 @@ data class AnalysisSnapshot(
     val deletedCategories: Map<String, Long> = emptyMap(),
     val analysisFingerprints: Map<String, String> = emptyMap(),
     val manualCategories: Set<String> = emptySet(),
+    val aiCategoryFingerprints: Map<String, String> = emptyMap(),
 )
 
 val INITIAL_DEFAULT_CATEGORIES = listOf(
@@ -94,6 +95,7 @@ class AnalysisStore(context: Context) {
             deletedCategories = parseLongMap(deletedCatsJson),
             analysisFingerprints = parseMap(fingerprintsJson),
             manualCategories = parseList(prefs.getString("manual_categories", "[]") ?: "[]").toSet(),
+            aiCategoryFingerprints = parseMap(prefs.getString("ai_category_fingerprints", "{}") ?: "{}"),
         )
     }
 
@@ -141,6 +143,36 @@ class AnalysisStore(context: Context) {
             updatedAt = currentUpdated,
         )
         runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
+    }
+
+    @Synchronized
+    fun commitCategorySuggestions(candidates: List<CategoryCandidate>, suggestions: Map<String, CategorySuggestion>, input: AnalysisSnapshot): Int {
+        val current = _snapshot.value
+        if (current.aiConfig != input.aiConfig || current.knowledge != input.knowledge || current.customCategories != input.customCategories ||
+            current.manualCategories != input.manualCategories || current.userNotes != input.userNotes) return 0
+        val valid = candidates.filter { candidate ->
+            val key = candidate.transaction.key
+            BudgetAnalyzer.isSpending(candidate.transaction) &&
+                AiCategorization.fingerprint(candidate.transaction, current) == candidate.fingerprint &&
+                !candidate.transaction.classificationIsManual && key !in current.manualCategories &&
+                current.updatedAt["cat:$key"] == input.updatedAt["cat:$key"] &&
+                suggestions[key]?.category in AiCategorization.categories(current)
+        }
+        if (valid.isEmpty()) return 0
+        val now = System.currentTimeMillis()
+        val categories = current.categories + valid.associate { it.transaction.key to suggestions.getValue(it.transaction.key).category }
+        val reasons = current.reasons + valid.associate { it.transaction.key to suggestions.getValue(it.transaction.key).reason }
+        val times = current.updatedAt + valid.associate { "cat:${it.transaction.key}" to now }
+        val fingerprints = current.aiCategoryFingerprints + valid.associate { it.transaction.key to it.fingerprint }
+        checkedPreferenceEdit(prefs, listOf("categories", "reasons", "updated_at_map", "ai_category_fingerprints"), "AI categories could not be saved") {
+            putString("categories", JSONObject(categories as Map<*, *>).toString())
+            putString("reasons", JSONObject(reasons as Map<*, *>).toString())
+            putString("updated_at_map", JSONObject(times as Map<*, *>).toString())
+            putString("ai_category_fingerprints", JSONObject(fingerprints as Map<*, *>).toString())
+        }
+        _snapshot.value = current.copy(categories = categories, reasons = reasons, updatedAt = times, aiCategoryFingerprints = fingerprints)
+        runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
+        return valid.size
     }
 
     @Synchronized
@@ -205,14 +237,16 @@ class AnalysisStore(context: Context) {
     @Synchronized
     fun addCustomCategory(category: String) {
         val trimmed = category.trim()
-        if (trimmed.isNotBlank() && trimmed !in _snapshot.value.customCategories) {
+        require(trimmed.isNotBlank()) { "Enter a category name" }
+        require(_snapshot.value.customCategories.none { it.equals(trimmed, ignoreCase = true) }) { "Category already exists" }
+        run {
             val now = System.currentTimeMillis()
             val currentUpdated = _snapshot.value.updatedAt.toMutableMap()
             val currentDeleted = _snapshot.value.deletedCategories.toMutableMap()
             currentUpdated["customCat:$trimmed"] = now
             currentDeleted.remove(trimmed)
             val newCats = _snapshot.value.customCategories + trimmed
-            prefs.edit {
+            checkedPreferenceEdit(prefs, listOf("custom_categories", "updated_at_map", "deleted_categories_map"), "Category could not be added") {
                 putString("custom_categories", JSONArray(newCats).toString())
                 putString("updated_at_map", JSONObject(currentUpdated as Map<*, *>).toString())
                 putString("deleted_categories_map", JSONObject(currentDeleted as Map<*, *>).toString())
@@ -291,7 +325,8 @@ class AnalysisStore(context: Context) {
 
     @Synchronized
     fun applyMergedSnapshot(merged: AnalysisSnapshot) {
-        val merged = merged.copy(aiConfig = _snapshot.value.aiConfig)
+        // Classification request fingerprints are a local cache, not backup content.
+        val merged = merged.copy(aiConfig = _snapshot.value.aiConfig, aiCategoryFingerprints = _snapshot.value.aiCategoryFingerprints)
         prefs.edit {
             putString("user_notes", JSONObject(merged.userNotes as Map<*, *>).toString())
             putString("categories", JSONObject(merged.categories as Map<*, *>).toString())

@@ -2,6 +2,7 @@ package net.wastu.artha.ui.theme
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -9,6 +10,9 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 
 internal val LightColors = lightColorScheme(
@@ -69,8 +73,46 @@ fun ArthaTheme(
     MaterialTheme(colorScheme = colors, content = content)
 }
 
-@Composable
-fun incomeColor(): Color = MaterialTheme.colorScheme.primary
+internal data class PaymentAmountColors(val income: Color, val expense: Color)
+
+internal fun paymentAmountSurfaces(colors: ColorScheme): List<Color> = listOf(
+    colors.surface, colors.surfaceContainer, colors.surfaceContainerLow,
+    colors.surfaceContainerHigh, colors.surfaceContainerHighest, colors.surfaceContainerLowest,
+    colors.surfaceVariant, colors.surfaceDim, colors.surfaceBright,
+)
+
+/** Quiet financial text hues. Direction also remains explicit in signs and accessible labels. */
+internal fun paymentAmountColors(colors: ColorScheme): PaymentAmountColors {
+    val backgrounds = paymentAmountSurfaces(colors)
+    fun minimumContrast(foreground: Color): Float = backgrounds.minOf { background ->
+        val first = foreground.luminance()
+        val second = background.luminance()
+        (maxOf(first, second) + .05f) / (minOf(first, second) + .05f)
+    }
+    val base = colors.onSurface.takeIf { minimumContrast(it) >= 4.6f }
+        ?: listOf(Color.Black, Color.White).maxBy { minimumContrast(it) }
+    val dark = colors.surface.luminance() < .5f
+    fun readableTint(reference: Color): Color {
+        for (step in 7 downTo 1) {
+            val tinted = lerp(base, reference, step * .05f)
+            if (minimumContrast(tinted) >= 4.6f) return tinted
+        }
+        return base
+    }
+    return PaymentAmountColors(
+        income = readableTint(if (dark) Color(0xFF98C9AC) else Color(0xFF2F6A4F)),
+        expense = readableTint(if (dark) Color(0xFFD2B6AF) else Color(0xFF805D57)),
+    )
+}
 
 @Composable
-fun expenseColor(): Color = MaterialTheme.colorScheme.onSurface
+fun incomeColor(): Color {
+    val colors = MaterialTheme.colorScheme
+    return remember(colors) { paymentAmountColors(colors).income }
+}
+
+@Composable
+fun expenseColor(): Color {
+    val colors = MaterialTheme.colorScheme
+    return remember(colors) { paymentAmountColors(colors).expense }
+}

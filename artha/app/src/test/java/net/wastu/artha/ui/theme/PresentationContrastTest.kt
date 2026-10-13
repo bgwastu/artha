@@ -6,6 +6,7 @@ import androidx.compose.ui.graphics.toArgb
 import java.io.File
 import net.wastu.artha.ui.widget.WidgetPalette
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 import kotlin.math.pow
 
@@ -15,6 +16,39 @@ class PresentationContrastTest {
             presentationPairs(colors).forEach { (label, foreground, background) ->
                 val ratio = contrastRatio(foreground.toArgb(), background.toArgb())
                 assertTrue("$label contrast $ratio", ratio >= 4.5)
+            }
+        }
+    }
+
+    @Test fun paymentRolesAreDistinctOpaqueAndReadableAcrossFallbackSurfaces() {
+        listOf(LightColors, DarkColors).forEach { colors ->
+            val amounts = paymentAmountColors(colors)
+            assertNotEquals("Income and expense must have distinct hues", amounts.income.toArgb(), amounts.expense.toArgb())
+            listOf(amounts.income, amounts.expense).forEach { foreground ->
+                assertTrue("Financial text is opaque", foreground.alpha == 1f)
+                paymentAmountSurfaces(colors).forEach { background ->
+                    val contrast = contrastRatio(foreground.toArgb(), background.toArgb())
+                    assertTrue("Payment text contrast $contrast", contrast >= 4.5)
+                }
+            }
+        }
+    }
+
+    @Test fun paymentTintsAdaptToChangedSurfaceAndForegroundRoles() {
+        // Dynamic themes change these roles. Exercise the same resolver with contrasting inputs.
+        val backgrounds = listOf(Color(0xFFF5EDEA), Color(0xFF282530), Color(0xFF888888))
+        backgrounds.forEach { surface ->
+            val changed = LightColors.copy(surface = surface, surfaceContainer = surface,
+                surfaceContainerLow = surface, surfaceContainerHigh = surface,
+                surfaceContainerHighest = surface, surfaceContainerLowest = surface,
+                surfaceVariant = surface, surfaceDim = surface, surfaceBright = surface,
+                onSurface = Color(0xFF666666))
+            val amounts = paymentAmountColors(changed)
+            assertNotEquals(amounts.income.toArgb(), amounts.expense.toArgb())
+            listOf(amounts.income, amounts.expense).forEach { foreground ->
+                paymentAmountSurfaces(changed).forEach { background ->
+                    assertTrue(contrastRatio(foreground.toArgb(), background.toArgb()) >= 4.5)
+                }
             }
         }
     }

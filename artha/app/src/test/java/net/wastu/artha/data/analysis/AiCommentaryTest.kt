@@ -74,13 +74,13 @@ class AiCommentaryTest {
         } finally { server.close() }
     }
 
-    @Test fun usefulLocalInsightsAndCategoriesNeedNoAiProvider() {
+    @Test fun localTotalsRemainAvailableWithoutInventingCategories() {
         val row = UnifiedTransaction(Provider.JAGO, "jago:1", Direction.DEBIT, Money(123400), Instant.parse("2026-10-02T00:00:00Z"), "Kopi Kenangan", "{}")
-        val category = CategoryClassifier.classify(row).category
-        assertEquals("Dining Out", category)
+        val category = TransactionMetadata.enrich(row, AnalysisSnapshot()).category
+        assertEquals("Uncategorized", category)
         val analysis = BudgetAnalyzer.analyzeMonth(YearMonth.of(2026, 10), listOf(row.copy(category = category)))
         assertTrue(analysis.localSummary.contains("Spending:"))
-        assertTrue(analysis.localSummary.contains("Dining Out"))
+        assertTrue(analysis.localSummary.contains("Uncategorized"))
         assertTrue(formatMoney(Money(1234)).contains("12,34"))
     }
 

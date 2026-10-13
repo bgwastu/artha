@@ -72,7 +72,7 @@ object AiAnalysisService {
         return parseCommentary(call(config, prompt))
     }
 
-    private suspend fun call(config: AiConfig, prompt: String): String = suspendCancellableCoroutine { continuation ->
+    internal suspend fun call(config: AiConfig, prompt: String): String = suspendCancellableCoroutine { continuation ->
         val connection = URL(endpoint(config.baseUrl)).openConnection() as HttpURLConnection
         continuation.invokeOnCancellation { disconnectScope.launch { connection.disconnect() } }
         // HttpURLConnection may block inside disconnect on some runtimes. Keep transport
@@ -88,7 +88,17 @@ object AiAnalysisService {
                 val body = JSONObject().put("model", config.model).put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
                 connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
                 check(connection.responseCode in 200..299) { "AI service returned HTTP ${connection.responseCode}. Local insights remain available." }
-                val json = connection.inputStream.bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
+                val json = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                    val response = StringBuilder()
+                    val buffer = CharArray(8192)
+                    while (true) {
+                        val count = reader.read(buffer)
+                        if (count < 0) break
+                        require(response.length + count <= 512_000) { "AI response is too large" }
+                        response.append(buffer, 0, count)
+                    }
+                    JSONObject(response.toString())
+                }
                 val content = json.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
                 if (continuation.isActive) continuation.resume(content)
             } catch (e: Exception) { if (continuation.isActive) continuation.resumeWithException(e) }

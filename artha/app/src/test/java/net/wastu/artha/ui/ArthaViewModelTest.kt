@@ -94,7 +94,7 @@ class ArthaViewModelTest {
     }
 
     @Test
-    fun launchIngestsAndConcurrentRefreshIsIgnored() = runTest(dispatcher) {
+    fun explicitImportPreemptsAutomaticThenRejectsConcurrentManualImport() = runTest(dispatcher) {
         var ingestions = 0
         val finish = CompletableDeferred<Unit>()
         val model = ArthaViewModel(
@@ -113,13 +113,16 @@ class ArthaViewModelTest {
         assertEquals(true, model.refreshing.value)
         model.refresh()
         advanceUntilIdle()
-        assertEquals(1, ingestions)
+        assertEquals(2, ingestions)
+        model.refresh(); advanceUntilIdle()
+        assertEquals(2, ingestions)
+        assertEquals("An import is already running", model.importFeedback.value?.message)
         finish.complete(Unit)
         advanceUntilIdle()
         assertEquals(false, model.refreshing.value)
         model.refresh()
         advanceUntilIdle()
-        assertEquals(2, ingestions)
+        assertEquals(3, ingestions)
         model.lock()
     }
 
@@ -158,7 +161,7 @@ class ArthaViewModelTest {
         val model = ArthaViewModel(RootAccess { false }, { ledger }, clock = java.time.Clock.fixed(instant, net.wastu.artha.core.model.AccountingTime.zone), computationDispatcher = dispatcher)
         model.enterForeground(); advanceUntilIdle()
         assertEquals(123400L, model.monthAnalysis.value.totalPersonalSpendingMinor)
-        model.openCategoryTransactions("Dining Out"); advanceUntilIdle()
+        model.openCategoryTransactions("Uncategorized"); advanceUntilIdle()
         val visible = (model.ledgerState.value as LedgerState.Ready).transactions
         assertEquals(listOf(payment.key), visible.map { it.key })
         assertEquals(model.monthAnalysis.value.totalPersonalSpendingMinor, visible.sumOf { it.money.amountMinor })
