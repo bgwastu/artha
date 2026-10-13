@@ -1,5 +1,6 @@
 package net.wastu.artha.data.analysis
 
+import net.wastu.artha.core.model.toLowerHex
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.UnifiedTransaction
 import java.time.YearMonth
@@ -97,6 +98,6 @@ object BudgetAnalyzer {
         for (tx in monthTransactions.sortedBy { it.key }) {
             md.update("${tx.key}:${tx.money.amountMinor}:${tx.money.currencyCode}:${tx.occurredAt}:${tx.description}:${tx.direction}:${tx.isConfirmed}:${tx.isReversal}:${tx.userNote.orEmpty()}:${tx.category.orEmpty()}\n".toByteArray(Charsets.UTF_8))
         }
-        return md.digest().joinToString("") { "%02x".format(it) }
+        return md.digest().toLowerHex()
     }
 }

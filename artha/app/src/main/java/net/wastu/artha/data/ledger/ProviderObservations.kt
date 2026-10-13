@@ -42,7 +42,7 @@ object ProviderObservations {
     private fun fingerprint(tx: UnifiedTransaction): String {
         val obj = encode(tx).put("rawPayload", JSONObject(tx.rawPayload))
         return MessageDigest.getInstance("SHA-256").digest(canonical(obj).toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
+            .toLowerHex()
     }
 
     private fun eligible(tx: UnifiedTransaction): Boolean {
