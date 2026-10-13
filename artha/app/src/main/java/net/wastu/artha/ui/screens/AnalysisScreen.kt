@@ -180,7 +180,7 @@ fun AnalysisScreen(
     }
     if (showScopeDialog) AlertDialog(
         onDismissRequest = { showScopeDialog = false }, title = { Text("Spending total") },
-        text = { Text("Confirmed IDR payments from all saved sources. Unmatched orders, transfers, wallet funding and reversed charges are excluded. Provider history may be incomplete. Display filters do not change this total.") },
+        text = { Text("Paid expenses in rupiah, counted once across saved sources. Transfers, wallet top-ups and refunded charges are excluded. History may be incomplete.") },
         confirmButton = { TextButton(onClick = { showScopeDialog = false }) { Text("Close") } },
     )
 
@@ -258,7 +258,7 @@ private fun MonthSummaryCard(
             shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Spending total. What counts in spending" }) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(if (canGoNext) "Confirmed spending" else "Confirmed spending to date", style = MaterialTheme.typography.labelMedium)
+                    Text(if (canGoNext) "Spending" else "Spending to date", style = MaterialTheme.typography.labelMedium)
                     Icon(Icons.Default.Info, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Text(formatAmountMinor(analysis.totalPersonalSpendingMinor), style = MaterialTheme.typography.headlineMedium,
@@ -270,9 +270,6 @@ private fun MonthSummaryCard(
                     Text("${kotlin.math.abs(delta).toInt()}% ${if (delta < 0) "less" else "more"} than previous month",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (analysis.unconfirmedSpendingMinor > 0) Text(
-                    "Unconfirmed ${formatAmountMinor(analysis.unconfirmedSpendingMinor)} excluded",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (analysis.unsupportedCurrencyCount > 0) Text("${analysis.unsupportedCurrencyCount} non-IDR records excluded",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (!monthlyNote.isNullOrBlank()) Text(monthlyNote, maxLines = 2, overflow = TextOverflow.Ellipsis,

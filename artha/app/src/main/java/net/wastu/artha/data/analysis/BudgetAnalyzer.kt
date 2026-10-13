@@ -55,16 +55,15 @@ object BudgetAnalyzer {
             totalDeltaPercent = totalDelta,
             categories = categoriesWithShare,
             monthlyAiSummary = aiSummary,
-            unconfirmedSpendingMinor = currentMonthTxs.filter { !it.isConfirmed && it.direction == Direction.DEBIT && it.money.currencyCode == "IDR" }.sumOf { it.money.amountMinor },
             unsupportedCurrencyCount = currentMonthTxs.count { it.money.currencyCode != "IDR" },
         ).let { it.copy(localSummary = localSummary(it)) }
     }
 
     fun localSummary(analysis: MonthSpendingAnalysis): String {
         fun rupiah(amount: Long) = net.wastu.artha.core.model.formatMinorAmount(java.math.BigInteger.valueOf(amount))
-        if (analysis.totalPersonalSpendingMinor == 0L) return "- No confirmed personal spending recorded for this month."
+        if (analysis.totalPersonalSpendingMinor == 0L) return "- No spending recorded for this month."
         return buildString {
-            append("- Confirmed spending: ${rupiah(analysis.totalPersonalSpendingMinor)}.\n")
+            append("- Spending: ${rupiah(analysis.totalPersonalSpendingMinor)}.\n")
             analysis.categories.firstOrNull()?.let { append("- Largest category: ${it.category}, ${rupiah(it.amountMinor)} (${it.sharePercent.toInt()}%).\n") }
             if (analysis.previousMonthTotalMinor > 0) append("- Previous recorded month: ${rupiah(analysis.previousMonthTotalMinor)}.\n")
             val largest = analysis.categories.flatMap { it.transactions }.maxByOrNull { it.money.amountMinor }
@@ -91,7 +90,7 @@ object BudgetAnalyzer {
         customCategories: List<String>,
     ): String {
         val md = java.security.MessageDigest.getInstance("SHA-256")
-        md.update("commentary-v3\n".toByteArray(Charsets.UTF_8))
+        md.update("commentary-v4\n".toByteArray(Charsets.UTF_8))
         md.update("note:${monthlyNote.trim()}\n".toByteArray(Charsets.UTF_8))
         md.update("knowledge:${knowledge.trim()}\n".toByteArray(Charsets.UTF_8))
         md.update("cats:${customCategories.sorted().joinToString(",")}\n".toByteArray(Charsets.UTF_8))

@@ -49,7 +49,8 @@ object ProviderObservations {
         if (tx.provider == Provider.JAGO || isObservation(tx)) return false
         val raw = JSONObject(tx.rawPayload)
         return when (tx.provider) {
-            Provider.SHOPEE -> raw.optString("origin") in setOf("shopee-order-api", "shopeefood-order-api") && raw.optBoolean("paymentDetailVerified")
+            Provider.SHOPEE -> (raw.optString("origin") in setOf("shopee-order-api", "shopeefood-order-api") && raw.optBoolean("paymentDetailVerified")) ||
+                raw.optString("origin") == "shopee-refund-api" && raw.optBoolean("verifiedRefund") && raw.optLong("sourceRefundStatus") == 5L
             Provider.GOJEK -> raw.optString("origin") == "gopay-order-history" && raw.optString("paymentEvidence") == "settled-wallet-history"
             Provider.GRAB -> raw.optString("origin") in setOf("grab-wallet-api", "grab-rides-api") &&
                 (raw.optString("paymentEvidence") == "settled-charge-history" || raw.optBoolean("paymentDetailVerified"))

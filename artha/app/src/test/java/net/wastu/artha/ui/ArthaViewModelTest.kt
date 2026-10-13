@@ -158,7 +158,6 @@ class ArthaViewModelTest {
         val model = ArthaViewModel(RootAccess { false }, { ledger }, clock = java.time.Clock.fixed(instant, net.wastu.artha.core.model.AccountingTime.zone), computationDispatcher = dispatcher)
         model.enterForeground(); advanceUntilIdle()
         assertEquals(123400L, model.monthAnalysis.value.totalPersonalSpendingMinor)
-        assertEquals(123400L, model.monthAnalysis.value.unconfirmedSpendingMinor)
         model.openCategoryTransactions("Dining Out"); advanceUntilIdle()
         val visible = (model.ledgerState.value as LedgerState.Ready).transactions
         assertEquals(listOf(payment.key), visible.map { it.key })

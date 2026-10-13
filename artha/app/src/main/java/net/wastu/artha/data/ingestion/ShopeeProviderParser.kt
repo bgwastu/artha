@@ -74,6 +74,9 @@ internal object ShopeeProviderParser {
             .put("sourceAmountPaid", paid)
             .put("grossPaidAmountMinor", money(paid).amountMinor)
             .put("paymentDetailVerified", true)
+            .put("paymentEvidence", "settled-order-payment").put("paymentStatus", "COMPLETED")
+            .put("paymentDirection", "DEBIT").put("paymentAmountMinor", money(paid).amountMinor)
+            .put("paymentCurrency", "IDR").put("paymentTimestamp", seconds(paymentTime).toString())
             .put("cancelled", cancelled)
             .put("refundState", if (cancelled || returned) "unresolved" else "not_observed")
         detail.optJSONObject("status")?.optJSONObject("status_label")?.let {
@@ -86,8 +89,8 @@ internal object ShopeeProviderParser {
             provider = Provider.SHOPEE, providerTransactionId = "shopee:$orderId",
             direction = Direction.DEBIT, money = money(paid), occurredAt = seconds(paymentTime),
             description = summary(shop, items, "Shopee Order"), rawPayload = raw.toString(),
-            // A merchant order does not establish which bank/wallet movement funded it.
-            isConfirmed = false,
+            // Actual paid amount and payment event are financial evidence; grouping is internal.
+            isConfirmed = true,
         ), cancelled || returned)
     }
 
@@ -142,6 +145,16 @@ internal object ShopeeProviderParser {
             .put("sourceReturned", returned).put("sourceAfterSales", afterSales)
             .put("sourceRefundAmount", refundAmount)
             .put("refundState", if (refundExpected) "unresolved" else "not_observed")
+        if (detail != null) {
+            raw.put("paymentEvidence", "settled-order-payment").put("paymentStatus", "COMPLETED")
+                .put("paymentDirection", "DEBIT").put("paymentAmountMinor", money(paid).amountMinor)
+                .put("paymentCurrency", "IDR").put("paymentTimestamp", milliseconds(paymentTime).toString())
+            payments?.optJSONObject(0)?.let { payment ->
+                runCatching { JSONObject(string(payment, "channel_option")) }.getOrNull()?.let { option ->
+                    string(option, "channel_name").takeIf(String::isNotBlank)?.let { raw.put("sourcePaymentMethod", it) }
+                }
+            }
+        }
         store?.optJSONObject("location")?.let { string(it, "address") }?.takeIf(String::isNotBlank)?.let { raw.put("pickupLocation", it) }
         order.optJSONObject("delivery_address")?.optJSONObject("location")?.let { string(it, "address") }
             ?.takeIf(String::isNotBlank)?.let { raw.put("dropoffLocation", it) }
@@ -149,7 +162,7 @@ internal object ShopeeProviderParser {
             provider = Provider.SHOPEE, providerTransactionId = "shopee:$id", direction = Direction.DEBIT,
             money = money(paid), occurredAt = milliseconds(paymentTime),
             description = summary(shop, items, "ShopeeFood Order"), rawPayload = raw.toString(),
-            cardLast4 = cardLast4, isConfirmed = false,
+            cardLast4 = cardLast4, isConfirmed = detail != null,
         ), refundExpected)
     }
 
@@ -172,11 +185,14 @@ internal object ShopeeProviderParser {
             .put("sourceRefundAmount", amount).put("sourceRefundTime", time)
             .put("sourceCurrency", "IDR").put("timestampKind", "refund")
             .put("grossPaidAmountMinor", charge.money.amountMinor)
+            .put("paymentEvidence", "settled-provider-refund").put("paymentStatus", "COMPLETED")
+            .put("paymentDirection", "CREDIT").put("paymentAmountMinor", money(amount).amountMinor)
+            .put("paymentCurrency", "IDR").put("paymentTimestamp", milliseconds(time).toString())
         return UnifiedTransaction(
             provider = Provider.SHOPEE, providerTransactionId = "shopee:refund:$refundId",
             direction = Direction.CREDIT, money = money(amount), occurredAt = milliseconds(time),
             description = "ShopeeFood Refund", rawPayload = raw.toString(),
-            isReversal = true, isConfirmed = false,
+            isReversal = true, isConfirmed = true,
         )
     }
 

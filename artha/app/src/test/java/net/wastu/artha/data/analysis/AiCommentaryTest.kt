@@ -79,7 +79,7 @@ class AiCommentaryTest {
         val category = CategoryClassifier.classify(row).category
         assertEquals("Dining Out", category)
         val analysis = BudgetAnalyzer.analyzeMonth(YearMonth.of(2026, 10), listOf(row.copy(category = category)))
-        assertTrue(analysis.localSummary.contains("Confirmed spending"))
+        assertTrue(analysis.localSummary.contains("Spending:"))
         assertTrue(analysis.localSummary.contains("Dining Out"))
         assertTrue(formatMoney(Money(1234)).contains("12,34"))
     }

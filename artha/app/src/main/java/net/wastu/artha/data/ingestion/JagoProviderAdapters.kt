@@ -121,7 +121,7 @@ class JagoProviderAdapter(private val reader: JagoTransactionReader) : ProviderA
 }
 
 class ShopeeProviderAdapter(private val files: RootFileReader) : ProviderAdapter {
-    override val coverageHint = "Unconfirmed paid marketplace/food orders; bounded history; digital purchases excluded"
+    override val coverageHint = "Verified marketplace/food payments; bounded history; digital purchases excluded"
     override val provider = Provider.SHOPEE
     private val reader = ShopeeOrderReader(files)
     override val accountIdentifier get() = reader.accountUsername

@@ -74,7 +74,7 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
         WidgetRefresh.schedule("transactions", pendingResult) {
                 val app = context.applicationContext as net.wastu.artha.ArthaApplication
                 val enabled = app.providerPreferences.enabled.value
-                val reconciled = widgetSpending(context).transactions.filter { it.provider in enabled }.take(40)
+                val reconciled = widgetSpending(context).transactions.filter { it.isConfirmed && it.provider in enabled }.take(40)
 
                 val dateFormatter = DateTimeFormatter.ofPattern("d MMM", Locale.US)
 
@@ -150,7 +150,6 @@ internal fun buildTransactionItemView(
     if (!isCredit && !tx.category.isNullOrBlank()) {
         subtitleParts += tx.category
     }
-    if (!tx.isConfirmed) subtitleParts += "Unconfirmed order"
     if (!tx.userNote.isNullOrBlank()) {
         subtitleParts += "#${tx.userNote}"
     }
@@ -198,7 +197,7 @@ private class TransactionsRemoteViewsFactory(
             try {
                 val app = context.applicationContext as net.wastu.artha.ArthaApplication
                 val enabled = app.providerPreferences.enabled.value
-                transactions = widgetSpending(context).transactions.filter { it.provider in enabled }.take(40)
+                transactions = widgetSpending(context).transactions.filter { it.isConfirmed && it.provider in enabled }.take(40)
             } catch (_: Exception) { /* Keep the last valid collection. */ }
         }
     }

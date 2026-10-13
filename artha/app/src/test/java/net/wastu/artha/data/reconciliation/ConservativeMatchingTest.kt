@@ -23,7 +23,7 @@ class ConservativeMatchingTest {
         val rows = LedgerReconciler.reconcileLedger(listOf(order, payment))
         val result = BudgetAnalyzer.analyzeMonth(YearMonth.of(2026, 10), rows)
         assertEquals(8_500_000, result.totalPersonalSpendingMinor)
-        assertEquals(7_500_000, result.unconfirmedSpendingMinor)
+        assertFalse(rows.first { it.key == order.key }.isConfirmed)
     }
 
     @Test fun paymentDateIdentityAndManualMetadataSurviveOrderEnrichment() {
