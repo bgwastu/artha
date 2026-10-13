@@ -19,6 +19,7 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 import javax.xml.parsers.DocumentBuilderFactory
+import kotlinx.coroutines.async
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -38,34 +39,103 @@ internal class GrabOrderReader(
     suspend fun transactions(): List<UnifiedTransaction> = withContext(Dispatchers.IO) {
         val token = readSessionToken()
         val rows = ImportRows()
-        for (read in listOf<() -> List<UnifiedTransaction>>({ fetchRides(token) }, { fetchGrabPayTransactions(token) }, { fetchFoodOrders(token) })) {
-            kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            try { rows.transactions += read() }
+        val started = System.nanoTime()
+        val wallet = mutableListOf<UnifiedTransaction>()
+        var cursor = 0L
+        val seen = mutableSetOf<Long>()
+        for (page in 0 until 30) {
+            coroutineContext.ensureActive()
+            if (java.util.concurrent.TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - started) >= 45) {
+                rows.issue("Grab history time limit reached; older charges may be missing"); break
+            }
+            val history = try { GrabProviderParser.walletPage(request(token,
+                "/api/passenger/v2/grabpay/history/credit/?currency=IDR&pageSize=50&lastElementID=$cursor")) }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-            catch (partial: PartialImportException) { rows.transactions += partial.transactions; rows.issue(partial.message.orEmpty()) }
-            catch (e: Exception) { rows.issue(e) }
+            catch (error: Exception) { rows.issue(error); break }
+            if (history.partial) rows.issue("Grab reports partially unavailable charge history")
+            for (index in 0 until history.items.length()) {
+                try { GrabProviderParser.wallet(history.items.getJSONObject(index))?.let(wallet::add) }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (error: Exception) { rows.issue(error) }
+            }
+            val next = history.cursor ?: break
+            if (next == cursor || !seen.add(next)) { rows.issue("Grab charge cursor repeated; history incomplete"); break }
+            cursor = next
+            if (page == 29) rows.issue("Grab charge page limit reached; older history may be missing")
         }
+        val rideRows = mutableListOf<UnifiedTransaction>()
+        try {
+            val history = request(token, "/api/passenger/v3/rides/bookings/list?bookingTypes=PAST")
+            val rides = history.optJSONArray("rides") ?: throw ProviderReadException(net.wastu.artha.data.providers.AccountStatus.ERROR, "Grab ride list schema changed")
+            val semaphore = kotlinx.coroutines.sync.Semaphore(3)
+            val results = kotlinx.coroutines.coroutineScope {
+                (0 until rides.length()).map { index -> async {
+                    semaphore.acquire()
+                    try {
+                        val ride = rides.getJSONObject(index)
+                        var receipt: JSONObject? = null
+                        var warning: Exception? = null
+                        if (index < 20 && ride.optString("state") == "COMPLETED") {
+                            try {
+                                val id = ride.getString("bookingCode")
+                                require(id.matches(Regex("[A-Za-z0-9_-]+")))
+                                receipt = request(token, "/api/passenger/v3/rides/history/$id")
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                            catch (error: Exception) { warning = error }
+                        }
+                        Result.success(GrabProviderParser.ride(ride, receipt) to warning)
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (error: Exception) { Result.failure<Pair<UnifiedTransaction?, Exception?>>(error) }
+                    finally { semaphore.release() }
+                } }.map { it.await() }
+            }
+            for (result in results) result.fold(onSuccess = { (ride, warning) ->
+                ride?.let(rideRows::add); warning?.let(rows::issue)
+            }, onFailure = { rows.issue(it as Exception) })
+            // No cursor is exposed by this version's ride-list response; avoid invented pagination.
+            rows.issue("Completed ride listing is the provider's available recent window")
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (error: Exception) { rows.issue(error) }
+
+        // Exact booking identity enriches an authoritative charge; it never replaces charge amount/date.
+        for (charge in wallet.distinctBy { it.key }) {
+            val payload = JSONObject(charge.rawPayload)
+            val ride = rideRows.singleOrNull { JSONObject(it.rawPayload).optString("orderNumber") == payload.optString("orderNumber") }
+            if (ride != null && !payload.optBoolean("isTip")) {
+                val detail = JSONObject(ride.rawPayload)
+                for (key in listOf("pickupLocation", "dropoffLocation", "paymentMethod", "serviceTier")) {
+                    detail.optString(key).takeIf(String::isNotBlank)?.let { payload.put(key, it) }
+                }
+                payload.put("bookingNumber", detail.optString("orderNumber")).put("orderMatchEvidence", "exact-booking-reference")
+                rows.transactions += charge.copy(description = ride.description, rawPayload = payload.toString())
+            } else rows.transactions += charge
+        }
+        rows.transactions += rideRows
+        try {
+            val (orders, next) = GrabProviderParser.foodPage(request(token,
+                "/api/passenger/v3/grabfood/orders/history?limit=20&offSet=0&sortBy=CreatedAt&excludeOngoing=1&disablePagination=false"))
+            if (orders.length() > 0 || next != null) rows.issue("GrabFood payment schema has no verified receipt sample; saved charges are retained")
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (error: Exception) { rows.issue(error) }
+        rows.issue("Card charge history and recent rides only; unknown charge types and other wallet/cash sources remain unverified")
         rows.finish().sortedByDescending { it.occurredAt }
     }
 
     internal suspend fun readSessionToken(): String {
-        val prefs = parsePreferencesXml(files.read("/data/data/com.grabtaxi.passenger/shared_prefs/com.grabtaxi.passenger_preferences.xml").inputStream())
-        val sessionId = prefs["sessionId"] ?: error("Grab session missing. Please log in again.")
-        val salt = prefs["salt"] ?: error("Grab session salt missing. Please log in again.")
+        val path = "/data/data/com.grabtaxi.passenger/shared_prefs/com.grabtaxi.passenger_preferences.xml"
+        val prefs = parsePreferencesXml(requireNotNull(files.stableBatch(listOf(path))[path]).inputStream())
+        val sessionId = prefs["sessionId"] ?: error("Grab session missing. Open Grab and log in again.")
+        val salt = prefs["salt"] ?: error("Grab session salt missing. Open Grab and log in again.")
         val installTime = installTimeOverride ?: files.packageFirstInstallTime("com.grabtaxi.passenger").takeIf { it > 0 }
-            ?: readInstallTimeFromRestrictions() ?: error("Cannot resolve Grab install time")
+            ?: error("Cannot verify Grab install time for the primary Android profile")
         return decryptSession(sessionId, salt, installTime, prefs["KEY_GENERATION_ID"], prefs["appsFlyerAppId"])
     }
 
-    private suspend fun readInstallTimeFromRestrictions(): Long? {
-        val text = files.read("/data/system/users/0/package-restrictions.xml").toString(Charsets.UTF_8)
-        val match = Regex("""<package\s+name="com\.grabtaxi\.passenger"[^>]*first-install-time="([0-9a-fA-F]+)"""").find(text)
-        return match?.groupValues?.get(1)?.toLongOrNull(16)
-    }
-
-    private fun request(token: String, url: String): JSONObject {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"; connectTimeout = 10_000; readTimeout = 15_000
+    private suspend fun request(token: String, path: String): JSONObject {
+        kotlin.coroutines.coroutineContext.ensureActive()
+        require(path.startsWith("/api/passenger/") && !path.contains(".."))
+        val connection = (URL("https://p.grabtaxi.com$path").openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"; connectTimeout = 8_000; readTimeout = 10_000
             instanceFollowRedirects = false
             setRequestProperty("Authorization", token); setRequestProperty("x-mts-ssid", token)
             setRequestProperty("User-Agent", "Grab/5.430.0 (Android)")
@@ -73,79 +143,18 @@ internal class GrabOrderReader(
         }
         try {
             requireHttpSuccess(connection.responseCode, "Grab")
-            return connection.inputStream.bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
-        } finally { connection.disconnect() }
-    }
-
-    private fun fetchRides(token: String): List<UnifiedTransaction> {
-        val rides = request(token, "https://p.grabtaxi.com/api/passenger/v3/rides/bookings/list?bookingTypes=PAST").getJSONArray("rides")
-        val rows = ImportRows()
-        for (i in 0 until rides.length()) rows.readRow {
-            val ride = rides.getJSONObject(i)
-            val id = ride.getString("bookingCode")
-            val service = ride.optJSONObject("serviceInfo")?.optString("name").orEmpty().ifBlank { "GrabRide" }
-            val amount = ride.getJSONObject("quote").getJSONObject("fare").getLong("lowerBound")
-            val timeline = ride.getJSONObject("timeline")
-            val time = timeline.optLong("completeTime").takeIf { it > 0 } ?: timeline.getLong("pickupTime").also { require(it > 0) }
-            val route = ride.optJSONArray("itinerary")
-            fun location(index: Int) = route?.optJSONObject(index)?.let { it.optString("keyword").ifBlank { it.optString("address") } }.orEmpty()
-            val pickup = location(0); val dropoff = location((route?.length() ?: 1) - 1)
-            val payload = JSONObject().put("origin", "grab-rides-api").put("orderNumber", id).put("serviceTier", service)
-                .put("pickupLocation", pickup).put("dropoffLocation", dropoff).put("paymentMethod", "GrabPay")
-            UnifiedTransaction(Provider.GRAB, "grab:$id", Direction.DEBIT, Money(amount), Instant.ofEpochMilli(time),
-                if (pickup.isNotBlank() && dropoff.isNotBlank()) "$service: $pickup to $dropoff" else service, payload.toString())
-        }
-        return rows.finish()
-    }
-
-    private fun fetchGrabPayTransactions(token: String): List<UnifiedTransaction> {
-        val items = request(token, "https://p.grabtaxi.com/api/passenger/v2/grabpay/history/credit/?currency=IDR&pageSize=50&lastElementID=0").getJSONArray("transactions")
-        val rows = ImportRows()
-        for (i in 0 until items.length()) rows.readRow {
-            val item = items.getJSONObject(i)
-            val id = item.getString("txID")
-            val group = item.optString("partnerGroupTxID")
-            val title = item.optString("title").ifBlank { "GrabPay Payment" }
-            val partner = item.optString("partnerID")
-            val type = item.optString("direction").ifBlank { item.optString("paymentType") }
-            val direction = Direction.valueOf(type.uppercase(java.util.Locale.ROOT))
-            val rupiah = item.getLong("amount").also { require(it != Long.MIN_VALUE) }
-            val amount = Math.multiplyExact(kotlin.math.abs(rupiah), 100)
-            val time = item.getLong("timestamp").also { require(it > 0) }
-            val tip = partner.equals("Tipping", true) || title.contains("Tip", true)
-            val order = if (!tip && group.isNotBlank()) group else id
-            val payload = JSONObject().put("origin", "grab-wallet-api").put("orderNumber", order).put("item", item)
-                .put("paymentMethod", item.optString("payMethod")).put("serviceTier", partner)
-            // Optional route enrichment never changes the wallet payment's amount or timestamp.
-            if (partner.equals("Transport", true) && group.isNotBlank() && i < 3) {
-                try {
-                    val receipt = request(token, "https://p.grabtaxi.com/api/passenger/v3/rides/history/$group").getJSONObject("response")
-                    val route = receipt.optJSONArray("itinerary")
-                    fun location(index: Int) = route?.optJSONObject(index)?.optJSONObject("details")?.let { it.optString("keywords").ifBlank { it.optString("address") } }.orEmpty()
-                    payload.put("pickupLocation", location(0)).put("dropoffLocation", location((route?.length() ?: 1) - 1))
-                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                catch (_: Exception) { rows.issue("Optional ride receipt unavailable; wallet payment retained") }
+            val bytes = connection.inputStream.use { input ->
+                val output = java.io.ByteArrayOutputStream(); val buffer = ByteArray(8192)
+                while (true) {
+                    kotlin.coroutines.coroutineContext.ensureActive()
+                    val count = input.read(buffer); if (count < 0) break
+                    require(output.size() + count <= 4 * 1024 * 1024) { "Grab history response exceeds the safe import limit" }
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray()
             }
-            UnifiedTransaction(Provider.GRAB, if (tip) "grab:tip:$id" else "grab:$id", direction,
-                Money(amount), Instant.ofEpochSecond(time), "GrabPay: $title", payload.toString())
-        }
-        return rows.finish()
-    }
-
-    private fun fetchFoodOrders(token: String): List<UnifiedTransaction> {
-        val orders = request(token, "https://p.grabtaxi.com/api/passenger/v3/grabfood/orders/history?limit=20&offSet=0&latlng=-6.2088,106.8456&sortBy=CreatedAt&excludeOngoing=1&disablePagination=false").getJSONArray("orders")
-        val rows = ImportRows()
-        for (i in 0 until orders.length()) rows.readRow {
-            val order = orders.getJSONObject(i)
-            val id = order.getString("orderID")
-            val amount = order.getLong("totalMinor")
-            val time = order.getLong("orderTime").also { require(it > 0) }
-            val merchant = order.optString("merchantName").ifBlank { "GrabFood" }
-            val payload = JSONObject().put("origin", "grab-food-api").put("orderNumber", id)
-                .put("restaurantName", merchant).put("paymentMethod", "GrabPay")
-            UnifiedTransaction(Provider.GRAB, "grab:$id", Direction.DEBIT, Money(amount), Instant.ofEpochMilli(time), "GrabFood: $merchant", payload.toString())
-        }
-        return rows.finish()
+            return JSONObject(bytes.toString(Charsets.UTF_8))
+        } finally { connection.disconnect() }
     }
 
     companion object {
@@ -201,7 +210,10 @@ internal class GrabOrderReader(
             val map = mutableMapOf<String, String>()
             val factory = DocumentBuilderFactory.newInstance()
             val builder = factory.newDocumentBuilder()
-            val doc = builder.parse(input)
+            val bytes = input.readBytes()
+            require(!bytes.toString(Charsets.UTF_8).contains("<!DOCTYPE", ignoreCase = true)) { "Unsupported Grab preferences XML" }
+            builder.setEntityResolver { _, _ -> org.xml.sax.InputSource(java.io.StringReader("")) }
+            val doc = builder.parse(bytes.inputStream())
             val nodes = doc.getElementsByTagName("string")
             for (i in 0 until nodes.length) {
                 val node = nodes.item(i)
