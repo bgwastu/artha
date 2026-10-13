@@ -6,13 +6,10 @@ import androidx.compose.runtime.getValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import net.wastu.artha.core.root.RootGateState
 import net.wastu.artha.ui.screens.HomeScreen
-import net.wastu.artha.ui.screens.RootGateScreen
 
 @Composable
 fun ArthaApp(model: ArthaViewModel) {
-    val rootGate by model.rootGate.collectAsStateWithLifecycle()
     val ledger by model.ledgerState.collectAsStateWithLifecycle()
     val enabled by model.enabledProviders.collectAsStateWithLifecycle()
     val refreshing by model.refreshing.collectAsStateWithLifecycle()
@@ -23,20 +20,16 @@ fun ArthaApp(model: ArthaViewModel) {
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { model.stopForegroundImports() }
 
     Surface {
-        if (rootGate == RootGateState.DENIED && ledger is net.wastu.artha.ui.LedgerState.Ready && providerCounts.values.sum() == 0) {
-            RootGateScreen(state = rootGate, onRetry = model::refresh)
-        } else {
-            HomeScreen(
-                ledgerState = ledger,
-                enabledProviders = enabled,
-                refreshing = refreshing,
-                syncingProvider = syncingProvider,
-                providerCounts = providerCounts,
-                onRefresh = model::refresh,
-                onProviderEnabled = model::setProviderEnabled,
-                onRetryLedger = model::enterForeground,
-                viewModel = model,
-            )
-        }
+        HomeScreen(
+            ledgerState = ledger,
+            enabledProviders = enabled,
+            refreshing = refreshing,
+            syncingProvider = syncingProvider,
+            providerCounts = providerCounts,
+            onRefresh = model::refresh,
+            onProviderEnabled = model::setProviderEnabled,
+            onRetryLedger = model::retryLedger,
+            viewModel = model,
+        )
     }
 }

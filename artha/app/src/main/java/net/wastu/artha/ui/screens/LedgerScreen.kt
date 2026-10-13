@@ -82,6 +82,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
@@ -146,6 +150,8 @@ fun LedgerScreen(
     enabledProviders: Set<Provider> = Provider.entries.toSet(),
     onTransaction: (UnifiedTransaction) -> Unit,
     onRetry: () -> Unit,
+    onImportHistory: (() -> Unit)? = null,
+    onRestoreBackup: (() -> Unit)? = null,
     showFilter: Boolean = false,
     onDismissFilter: () -> Unit = {},
     viewModel: ArthaViewModel? = null,
@@ -180,7 +186,9 @@ fun LedgerScreen(
             transactions = remember(state.transactions, effectiveFilters) { state.transactions.filter(effectiveFilters::matches) },
             onTransaction = onTransaction, resetKey = listOf(effectiveFilters, dateRange, category),
             activeFilters = active, onClearFilters = ::clearAll,
-            emptyTitle = if (active.isNotEmpty()) "No matching transactions" else "No transactions",
+            emptyTitle = if (active.isNotEmpty()) "No matching transactions" else "No saved payments",
+            onImportHistory = if (active.isEmpty()) onImportHistory else null,
+            onRestoreBackup = if (active.isEmpty()) onRestoreBackup else null,
         )
     }
     if (showFilter) {
@@ -396,6 +404,8 @@ private fun TransactionList(
     onClearFilters: () -> Unit = {},
     emptyTitle: String? = null,
     resultCount: Int? = null,
+    onImportHistory: (() -> Unit)? = null,
+    onRestoreBackup: (() -> Unit)? = null,
 ) {
     val listState = rememberLazyListState()
     var previousResetKey by rememberSaveable { mutableStateOf(resetKey?.toString()) }
@@ -422,7 +432,7 @@ private fun TransactionList(
 
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.widthIn(max = 720.dp).fillMaxSize(),
         contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
     ) {
         if (activeFilters.isNotEmpty()) {
@@ -449,6 +459,10 @@ private fun TransactionList(
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.Center) {
+                    onImportHistory?.let { action -> TextButton(onClick = action) { Text("Import history") } }
+                    onRestoreBackup?.let { action -> TextButton(onClick = action) { Text("Restore backup") } }
+                }
             }
         }
         groupedByDay.forEach { (date, dailyTransactions) ->
@@ -495,6 +509,7 @@ private fun DateGroupHeader(date: LocalDate) {
         ) {
             Text(
                 text = dayLabel,
+                modifier = Modifier.semantics { heading() },
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
@@ -567,7 +582,7 @@ fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlig
             .firstOrNull { it.contains(highlightQuery, true) && !transaction.description.contains(it, true) }
     }
     val fontScale = LocalDensity.current.fontScale
-    Surface(onClick = onClick, color = MaterialTheme.colorScheme.surface) {
+    Surface(onClick = onClick, color = MaterialTheme.colorScheme.surface, modifier = Modifier.semantics { stateDescription = status ?: if (credit) "Incoming payment" else "Outgoing payment" }) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Image(painterResource(transaction.provider.iconRes), transaction.provider.displayName,
                 Modifier.size(36.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)

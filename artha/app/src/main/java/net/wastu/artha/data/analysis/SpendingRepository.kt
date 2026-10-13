@@ -73,12 +73,19 @@ fun spendingFlow(ledger: LedgerRepository, analysis: StateFlow<AnalysisSnapshot>
     val projector = SpendingProjector()
     val metadata = analysis.map { MetadataInput(it.userNotes, it.categories, it.reasons, it.manualCategories,
         it.updatedAt.filterKeys { key -> key.startsWith("note:") }) }.distinctUntilChanged()
-    return combine(ledger.observeTransactions().distinctUntilChanged().onEach { migrate(it.filterNot(net.wastu.artha.data.ledger.ProviderObservations::isObservation)) }, metadata) { facts, annotations ->
+    return combine(flow { emitAll(ledger.observeTransactions()) }.distinctUntilChanged().onEach { migrate(it.filterNot(net.wastu.artha.data.ledger.ProviderObservations::isObservation)) }, metadata) { facts, annotations ->
         projector.project(facts, annotations.snapshot()) as SpendingState
     }.flowOn(dispatcher).catch { emit(SpendingState.Failed) }
 }
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class SpendingRepository(ledger: LedgerRepository, store: AnalysisStore, scope: CoroutineScope) {
-    val state = spendingFlow(ledger, store.snapshot, migrate = store::migrateMetadata)
+    private val retryGeneration = MutableStateFlow(0L)
+    private val _lastReady = MutableStateFlow<SpendingState.Ready?>(null)
+    val lastReady: StateFlow<SpendingState.Ready?> = _lastReady.asStateFlow()
+    fun retry() { retryGeneration.update { it + 1L } }
+    val state = retryGeneration.flatMapLatest {
+        spendingFlow(ledger, store.snapshot, migrate = store::migrateMetadata).onStart { emit(SpendingState.Loading) }
+    }.onEach { if (it is SpendingState.Ready) _lastReady.value = it }
         .stateIn(scope, SharingStarted.Eagerly, SpendingState.Loading)
 }

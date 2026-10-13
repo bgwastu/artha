@@ -4,6 +4,16 @@ import android.accounts.AccountManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -20,6 +30,7 @@ import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.SettingsSuggest
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -73,6 +84,8 @@ import androidx.compose.ui.semantics.Role
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProvidersScreen(
+    openBackup: Boolean = false,
+    onBackupOpened: () -> Unit = {},
     enabled: Set<Provider> = Provider.entries.toSet(),
     syncingProvider: Provider? = null,
     providerCounts: Map<Provider, Int> = emptyMap(),
@@ -81,9 +94,11 @@ fun ProvidersScreen(
 ) {
     var selectedProvider by rememberSaveable { mutableStateOf<Provider?>(null) }
     var showBackup by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(openBackup) { if (openBackup) { showBackup = true; onBackupOpened() } }
     var showAiConfig by rememberSaveable { mutableStateOf(false) }
     var showCategories by rememberSaveable { mutableStateOf(false) }
     var showContext by rememberSaveable { mutableStateOf(false) }
+    var showWidgetHelp by rememberSaveable { mutableStateOf(false) }
     var showRestoreConfirmation by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showAccountDialog by remember { mutableStateOf(false) }
@@ -110,10 +125,33 @@ fun ProvidersScreen(
         showBackup = true
     }
 
-    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
+    val backupContent: @Composable () -> Unit = {
+        if (viewModel != null) BackupSettings(
+                backup, restoringBackup,
+                onEnabled = viewModel::setDriveSyncEnabled,
+                onAccount = {
+                    showBackup = false
+                    val intent = AccountManager.newChooseAccountIntent(null, null, arrayOf("com.google"), null, null, null, null)
+                    runCatching { accountPicker.launch(intent) }.onFailure { showAccountDialog = true }
+                },
+                onPassword = { showBackup = false; showPasswordDialog = true },
+                onBackup = {
+                    restoringBackup = false
+                    if (backup.status == CloudSyncStatus.AUTH_REQUIRED && backup.consentIntent != null) {
+                        showBackup = false
+                        consent.launch(backup.consentIntent!!)
+                    } else viewModel.syncDriveNow()
+                },
+                onRestore = { showBackup = false; showRestoreConfirmation = true },
+            )
+    }
+    BoxWithConstraints(Modifier.widthIn(max = 1320.dp).fillMaxSize()) {
+    val expanded = maxWidth >= 840.dp && maxHeight >= 480.dp
+    Row(Modifier.fillMaxSize()) {
+    LazyColumn(modifier = Modifier.weight(1f).widthIn(max = 600.dp).fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
         item { SettingsHeading("Sources") }
         items(Provider.entries, key = { it.name }) { provider ->
-            Surface(onClick = { selectedProvider = provider }) {
+            Surface(onClick = { selectedProvider = provider; showBackup = false }) {
                 ListItem(
                     headlineContent = { Text(provider.displayName) },
                     supportingContent = {
@@ -147,12 +185,29 @@ fun ProvidersScreen(
             item { SettingsLink("Categories", null, Icons.Default.Category) { showCategories = true } }
             item { SettingsLink("Personal context", null, Icons.Default.EditNote) { showContext = true } }
         }
+        item { SettingsLink("Widgets", null, Icons.Default.Widgets) { showWidgetHelp = true } }
     }
 
-    selectedProvider?.let { provider ->
+    if (expanded) {
+        Column(Modifier.weight(1f).imePadding().verticalScroll(rememberScrollState()).padding(16.dp)) {
+            if (showBackup && viewModel != null) {
+                Text("Google Drive", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+                backupContent()
+            } else {
+                val provider = selectedProvider ?: Provider.entries.first()
+                Text(provider.displayName, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+                ProviderSettings(provider.displayName, provider in enabled, provider in importEnabled,
+                    providerCounts[provider] ?: 0, diagnostics[provider], importing == provider,
+                    { onEnabled(provider, it) }, { viewModel?.setImportEnabled(provider, it) }, { viewModel?.syncProvider(provider) })
+            }
+        }
+    }
+    }
+
+    selectedProvider?.takeIf { !expanded }?.let { provider ->
         SettingsDetailSheet(provider.displayName, { selectedProvider = null }) {
             ProviderSettings(
-                enabled = provider in enabled, importEnabled = provider in importEnabled,
+                sourceName = provider.displayName, enabled = provider in enabled, importEnabled = provider in importEnabled,
                 count = providerCounts[provider] ?: 0, diagnostic = diagnostics[provider],
                 importing = importing == provider,
                 onEnabled = { onEnabled(provider, it) },
@@ -161,27 +216,22 @@ fun ProvidersScreen(
             )
         }
     }
-    if (showBackup && viewModel != null) {
+    if (showBackup && viewModel != null && !expanded) {
         SettingsDetailSheet("Google Drive", { showBackup = false }) {
-            BackupSettings(
-                backup, restoringBackup,
-                onEnabled = viewModel::setDriveSyncEnabled,
-                onAccount = {
-                    showBackup = false
-                    val intent = AccountManager.newChooseAccountIntent(null, null, arrayOf("com.google"), null, null, null, null)
-                    runCatching { accountPicker.launch(intent) }.onFailure { showAccountDialog = true }
-                },
-                onPassword = { showBackup = false; showPasswordDialog = true },
-                onBackup = {
-                    restoringBackup = false
-                    if (backup.status == CloudSyncStatus.AUTH_REQUIRED && backup.consentIntent != null) {
-                        showBackup = false
-                        consent.launch(backup.consentIntent!!)
-                    } else viewModel.syncDriveNow()
-                },
-                onRestore = { showBackup = false; showRestoreConfirmation = true },
-            )
+            backupContent()
         }
+    }
+    if (showWidgetHelp) {
+        AlertDialog(onDismissRequest = { showWidgetHelp = false }, title = { Text("Widgets") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Touch and hold your home screen, choose Widgets, then Artha.")
+                    Text("Analysis opens the month overview. Recent payments opens Transactions.")
+                    Text("Touch and hold a widget to resize it. Use more space for larger text and complete amounts.")
+                    Text("Widgets use saved payments. Check the update time when history is unavailable.")
+                }
+            },
+            confirmButton = { TextButton(onClick = { showWidgetHelp = false }) { Text("Close") } })
     }
     if (showAiConfig && snapshot != null && viewModel != null) {
         AiConfigDialog(snapshot!!.aiConfig,
@@ -236,12 +286,13 @@ fun ProvidersScreen(
             },
             dismissButton = { TextButton(onClick = { showRestoreConfirmation = false; showBackup = true }) { Text("Cancel") } })
     }
+    }
 }
 
 @Composable
 private fun SettingsHeading(title: String) {
     Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp))
+        modifier = Modifier.semantics { heading() }.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp))
 }
 
 @Composable
@@ -257,7 +308,7 @@ private fun SettingsLink(title: String, summary: String?, icon: androidx.compose
 @Composable
 private fun SettingsDetailSheet(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Close settings") }
@@ -268,8 +319,8 @@ private fun SettingsDetailSheet(title: String, onDismiss: () -> Unit, content: @
 }
 
 @Composable
-private fun SettingsSwitch(title: String, checked: Boolean, onChange: (Boolean) -> Unit, summary: String? = null) {
-    ListItem(modifier = Modifier.toggleable(checked, role = Role.Switch, onValueChange = onChange),
+private fun SettingsSwitch(title: String, checked: Boolean, onChange: (Boolean) -> Unit, summary: String? = null, sourceName: String? = null) {
+    ListItem(modifier = Modifier.toggleable(checked, role = Role.Switch, onValueChange = onChange).semantics { if (sourceName != null) contentDescription = "$sourceName, $title" },
         headlineContent = { Text(title) }, supportingContent = summary?.let { { Text(it) } },
         trailingContent = { Switch(checked, onCheckedChange = null) })
 }
@@ -289,11 +340,11 @@ private fun providerSummary(diagnostic: ProviderDiagnostic?, count: Int, importE
 
 @Composable
 private fun ProviderSettings(
-    enabled: Boolean, importEnabled: Boolean, count: Int, diagnostic: ProviderDiagnostic?, importing: Boolean,
+    sourceName: String, enabled: Boolean, importEnabled: Boolean, count: Int, diagnostic: ProviderDiagnostic?, importing: Boolean,
     onEnabled: (Boolean) -> Unit, onImportEnabled: (Boolean) -> Unit, onImport: () -> Unit,
 ) {
-    SettingsSwitch("Import new history", importEnabled, onImportEnabled)
-    SettingsSwitch("Show in Transactions", enabled, onEnabled)
+    SettingsSwitch("Import new history", importEnabled, onImportEnabled, sourceName = sourceName)
+    SettingsSwitch("Show in Transactions", enabled, onEnabled, sourceName = sourceName)
     ListItem(headlineContent = { Text("Saved transactions") }, trailingContent = { Text(count.toString()) })
     diagnostic?.accountIdentifier?.let { ListItem(headlineContent = { Text("Account") }, supportingContent = { Text(it) }) }
     val status = providerSummary(diagnostic, count, importEnabled, importing)
@@ -302,8 +353,8 @@ private fun ProviderSettings(
         Text("Sign in in the source app, then import again", modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodyMedium)
     }
     if (diagnostic?.lastError != null) {
-        Text(diagnostic.lastError, color = if (diagnostic.accountStatus == AccountStatus.ERROR) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodyMedium)
+        Text(diagnostic.lastError, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.padding(horizontal = 16.dp), color = if (diagnostic.accountStatus == AccountStatus.ERROR) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyMedium)
     }
     FilledTonalButton(onClick = onImport, enabled = importEnabled && !importing,
         modifier = Modifier.fillMaxWidth().padding(16.dp)) {
@@ -512,7 +563,7 @@ fun AiConfigDialog(currentConfig: AiConfig, onDismiss: () -> Unit, onSave: (AiCo
                     visualTransformation = PasswordVisualTransformation(), singleLine = true, enabled = !saving, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(model, { model = it; validationError = null }, label = { Text("Model") },
                     singleLine = true, enabled = !saving, modifier = Modifier.fillMaxWidth())
-                (validationError ?: error)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                (validationError ?: error)?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
             }
         },
         confirmButton = {

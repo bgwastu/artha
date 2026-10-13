@@ -6,6 +6,7 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Bundle
 import android.view.View
 import android.widget.RemoteViews
 import net.wastu.artha.MainActivity
@@ -39,6 +40,14 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
         }
     }
 
+    override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, options: Bundle) {
+        updateWidgets(context, manager, intArrayOf(id))
+    }
+
+    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        WidgetUpdatedAt.remove(context, appWidgetIds)
+    }
+
     private fun updateWidgets(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         val pendingResult = goAsync()
 
@@ -52,67 +61,54 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        WidgetRefresh.schedule("analysis", pendingResult) {
-                val nowMonth = YearMonth.now(net.wastu.artha.core.model.AccountingTime.clock)
-                val monthTitle = nowMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US))
-
-                val reconciled = widgetSpending(context).transactions
-                val analysis = BudgetAnalyzer.analyzeMonth(nowMonth, reconciled)
-                val totalCurrent = analysis.totalPersonalSpendingMinor
-                val delta = analysis.totalDeltaPercent
-                val deltaText = if (delta != null && analysis.previousMonthTotalMinor > 0L) {
-                    val symbol = if (delta < 0) "▼" else "▲"
-                    "$symbol ${kotlin.math.abs(delta).toInt()}% vs last month"
-                } else {
-                    null
-                }
-
+        fun status(failed: Boolean = false) {
+            for (id in appWidgetIds) {
+                val previous = WidgetUpdatedAt.read(context, id)
+                val views = RemoteViews(context.packageName, R.layout.widget_analysis)
+                views.setTextViewText(R.id.widget_status, widgetFreshness(previous, System.currentTimeMillis(), updating = !failed, failed = failed))
+                views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
+                if (previous == null) appWidgetManager.updateAppWidget(id, views)
+                else appWidgetManager.partiallyUpdateAppWidget(id, views)
+            }
+        }
+        status()
+        WidgetRefresh.schedule("analysis", pendingResult, onFailure = { status(failed = true) }) {
+            val month = YearMonth.now(net.wastu.artha.core.model.AccountingTime.clock)
+            val analysis = BudgetAnalyzer.analyzeMonth(month, widgetSpending(context).transactions)
+            val updatedAt = System.currentTimeMillis()
+            for (id in appWidgetIds) {
+                val options = appWidgetManager.getAppWidgetOptions(id)
+                val fontScale = context.resources.configuration.fontScale
+                val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 180)
+                val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110)
+                val detailed = showAnalysisDetails(width, height, fontScale)
+                val views = RemoteViews(context.packageName, R.layout.widget_analysis)
+                val monthTitle = month.format(DateTimeFormatter.ofPattern(if (width < 240 * fontScale) "MMM yyyy" else "MMMM yyyy", Locale.US))
+                views.setTextViewText(R.id.widget_month_title, monthTitle)
+                views.setTextViewText(R.id.widget_total_amount, formatMoney(Money(analysis.totalPersonalSpendingMinor)))
+                views.setTextViewText(R.id.widget_status, widgetFreshness(updatedAt, updatedAt))
+                views.setViewVisibility(R.id.widget_details, if (detailed) View.VISIBLE else View.GONE)
+                // The current month is incomplete. Compare amounts with an explicitly full prior month.
+                views.setTextViewText(R.id.widget_delta_text, "Previous full month ${formatMoney(Money(analysis.previousMonthTotalMinor))}")
                 val topCats = analysis.categories.take(3)
-
-                for (appWidgetId in appWidgetIds) {
-                    val views = RemoteViews(context.packageName, R.layout.widget_analysis)
-                    views.setTextViewText(R.id.widget_month_title, monthTitle)
-                    views.setTextViewText(
-                        R.id.widget_total_amount,
-                        if (totalCurrent <= 0L) "Rp0" else formatMoney(Money(totalCurrent)),
-                    )
-
-                    if (deltaText != null) {
-                        views.setViewVisibility(R.id.widget_delta_text, View.VISIBLE)
-                        views.setTextViewText(R.id.widget_delta_text, deltaText)
-                    } else {
-                        views.setViewVisibility(R.id.widget_delta_text, View.GONE)
+                views.setViewVisibility(R.id.widget_categories_container, if (topCats.isEmpty()) View.GONE else View.VISIBLE)
+                views.setViewVisibility(R.id.widget_empty_text, if (topCats.isEmpty() && detailed) View.VISIBLE else View.GONE)
+                views.setTextViewText(R.id.widget_empty_text, "No spending this month")
+                val rowIds = listOf(R.id.widget_row_cat1, R.id.widget_row_cat2, R.id.widget_row_cat3)
+                val nameIds = listOf(R.id.widget_cat1_name, R.id.widget_cat2_name, R.id.widget_cat3_name)
+                val amtIds = listOf(R.id.widget_cat1_amount, R.id.widget_cat2_amount, R.id.widget_cat3_amount)
+                for (i in 0..2) {
+                    val cat = topCats.getOrNull(i)
+                    views.setViewVisibility(rowIds[i], if (cat == null) View.GONE else View.VISIBLE)
+                    if (cat != null) {
+                        views.setTextViewText(nameIds[i], cat.category)
+                        views.setTextViewText(amtIds[i], formatMoney(Money(cat.amountMinor)))
                     }
-
-                    if (topCats.isEmpty()) {
-                        views.setViewVisibility(R.id.widget_categories_container, View.GONE)
-                        views.setViewVisibility(R.id.widget_empty_text, View.VISIBLE)
-                    } else {
-                        views.setViewVisibility(R.id.widget_categories_container, View.VISIBLE)
-                        views.setViewVisibility(R.id.widget_empty_text, View.GONE)
-
-                        val rowIds = listOf(R.id.widget_row_cat1, R.id.widget_row_cat2, R.id.widget_row_cat3)
-                        val nameIds = listOf(R.id.widget_cat1_name, R.id.widget_cat2_name, R.id.widget_cat3_name)
-                        val amtIds = listOf(R.id.widget_cat1_amount, R.id.widget_cat2_amount, R.id.widget_cat3_amount)
-
-                        for (i in 0 until 3) {
-                            val cat = topCats.getOrNull(i)
-                            if (cat != null) {
-                                views.setViewVisibility(rowIds[i], View.VISIBLE)
-                                views.setTextViewText(nameIds[i], "${cat.category} (${cat.sharePercent.toInt()}%)")
-                                views.setTextViewText(
-                                    amtIds[i],
-                                    if (cat.amountMinor <= 0L) "Rp0" else formatMoney(Money(cat.amountMinor)),
-                                )
-                            } else {
-                                views.setViewVisibility(rowIds[i], View.GONE)
-                            }
-                        }
-                    }
-
-                    views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
-                    appWidgetManager.updateAppWidget(appWidgetId, views)
                 }
+                views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
+                appWidgetManager.updateAppWidget(id, views)
+                WidgetUpdatedAt.save(context, id, updatedAt)
+            }
         }
     }
 

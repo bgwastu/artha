@@ -33,11 +33,15 @@ class ArthaViewModel(
     val driveSyncManager: DriveSyncManager? = null,
     private val computationDispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val spendingState: StateFlow<SpendingState>? = null,
+    private val retrySpending: (() -> Unit)? = null,
 ) : ViewModel() {
     private val _rootGate = MutableStateFlow(RootGateState.LOCKED)
     val rootGate = _rootGate.asStateFlow()
     private val _ledgerState = MutableStateFlow<LedgerState>(LedgerState.Loading)
     val ledgerState = _ledgerState.asStateFlow()
+    private val _ledgerLoadFailed = MutableStateFlow(false)
+    val ledgerLoadFailed = _ledgerLoadFailed.asStateFlow()
+    @Volatile private var hasSavedProjection = false
     private val _providerCounts = MutableStateFlow<Map<Provider, Int>>(emptyMap())
     val providerCounts = _providerCounts.asStateFlow()
     val analysisSnapshot = analysisStore?.snapshot ?: MutableStateFlow(AnalysisSnapshot()).asStateFlow()
@@ -85,24 +89,33 @@ class ArthaViewModel(
     fun restoreDriveBackup() { viewModelScope.launch { driveSyncManager?.restoreNow() } }
 
     fun enterForeground() {
+        observeSavedLedger()
+        automaticRefresh()
+        analyzeMonth(_selectedMonth.value)
+    }
+
+    private fun observeSavedLedger() {
         if (observerJob?.isActive != true) {
             observerJob = viewModelScope.launch {
-                val state = spendingState ?: spendingFlow(ledger(), analysisSnapshot, computationDispatcher,
-                    migrate = { analysisStore?.migrateMetadata(it) }).stateIn(this, SharingStarted.Eagerly, SpendingState.Loading)
+                val state = spendingState ?: flow {
+                    emitAll(spendingFlow(ledger(), analysisSnapshot, computationDispatcher,
+                        migrate = { analysisStore?.migrateMetadata(it) }))
+                }.flowOn(computationDispatcher).catch { emit(SpendingState.Failed) }
+                    .stateIn(this, SharingStarted.Eagerly, SpendingState.Loading)
                 launch {
                     combine(state, enabledProviders, _dateRangeFilter, _categoryFilter) { projection, enabled, dates, category ->
                         when (projection) {
-                            SpendingState.Loading -> LedgerState.Loading
-                            SpendingState.Failed -> LedgerState.Failed
+                            SpendingState.Loading -> if (hasSavedProjection) visibleLedger(_reconciledCache.value, enabled, dates, category) else LedgerState.Loading
+                            SpendingState.Failed -> {
+                                _ledgerLoadFailed.value = true
+                                if (hasSavedProjection) visibleLedger(_reconciledCache.value, enabled, dates, category) else LedgerState.Failed
+                            }
                             is SpendingState.Ready -> {
+                                _ledgerLoadFailed.value = false
+                                hasSavedProjection = true
                                 _providerCounts.value = projection.providerCounts
                                 _reconciledCache.value = projection.transactions
-                                val (start, end) = dates ?: (null to null)
-                                LedgerState.Ready(projection.transactions.filter { tx ->
-                                    val millis = tx.occurredAt.toEpochMilli()
-                                    (category != null || tx.provider in enabled) && (category == null || tx.category == category && BudgetAnalyzer.isSpending(tx)) && (start == null || millis >= start) &&
-                                        (end == null || millis < AccountingTime.dayAfter(end))
-                                })
+                                visibleLedger(projection.transactions, enabled, dates, category)
                             }
                         }
                     }.flowOn(computationDispatcher).collect { _ledgerState.value = it }
@@ -121,8 +134,23 @@ class ArthaViewModel(
                 }
             }
         }
-        automaticRefresh()
-        analyzeMonth(_selectedMonth.value)
+    }
+
+    private fun visibleLedger(rows: List<UnifiedTransaction>, enabled: Set<Provider>, dates: Pair<Long?, Long?>?, category: String?): LedgerState.Ready {
+        val (start, end) = dates ?: (null to null)
+        return LedgerState.Ready(rows.filter { tx ->
+            val millis = tx.occurredAt.toEpochMilli()
+            (category != null || tx.provider in enabled) && (category == null || tx.category == category && BudgetAnalyzer.isSpending(tx)) &&
+                (start == null || millis >= start) && (end == null || millis < AccountingTime.dayAfter(end))
+        })
+    }
+
+    fun retryLedger() {
+        if (!hasSavedProjection) _ledgerState.value = LedgerState.Loading
+        if (retrySpending != null) retrySpending.invoke() else {
+            observerJob?.cancel(); observerJob = null
+        }
+        observeSavedLedger()
     }
 
     private fun automaticRefresh() {
@@ -186,11 +214,35 @@ class ArthaViewModel(
         clearCategoryFilter()
         setTargetDestination("ANALYSIS")
     }
-    fun setUserNote(transaction: UnifiedTransaction, note: String) {
-        viewModelScope.launch(Dispatchers.IO) { analysisStore?.setUserNote(transaction.key, note) }
+    fun setUserNote(transaction: UnifiedTransaction, note: String, onComplete: (Result<Unit>) -> Unit) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    checkNotNull(analysisStore) { "Notes are unavailable" }.setUserNote(transaction.key, note)
+                    Result.success(Unit)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Result.failure<Unit>(error)
+                }
+            }
+            onComplete(result)
+        }
     }
-    fun setTransactionCategory(transaction: UnifiedTransaction, category: String) {
-        viewModelScope.launch(Dispatchers.IO) { analysisStore?.setClassification(transaction.key, category, "", manual = true) }
+    fun setTransactionCategory(transaction: UnifiedTransaction, category: String, onComplete: (Result<Unit>) -> Unit) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    checkNotNull(analysisStore) { "Categories are unavailable" }.setClassification(transaction.key, category, "", manual = true)
+                    Result.success(Unit)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Result.failure<Unit>(error)
+                }
+            }
+            onComplete(result)
+        }
     }
     fun applyKnowledgeRewrite(rewritten: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setKnowledge(rewritten) } }
     fun updateAiConfig(config: AiConfig, onComplete: (String?) -> Unit = {}) {

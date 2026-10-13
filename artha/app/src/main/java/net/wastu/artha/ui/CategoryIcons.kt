@@ -86,3 +86,5 @@ fun categoryIconFor(category: String, customIcons: Map<String, String> = emptyMa
     val key = customIcons[category] ?: DEFAULT_CATEGORY_ICONS[category] ?: "default"
     return ICON_MAP[key] ?: DEFAULT_CATEGORY_ICON
 }
+
+fun categoryIconLabel(key: String): String = key.replace('_', ' ').replaceFirstChar { it.uppercase() }

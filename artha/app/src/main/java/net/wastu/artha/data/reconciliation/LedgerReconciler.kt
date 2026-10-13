@@ -326,7 +326,11 @@ object LedgerReconciler {
             }
         }
         if (!alreadyPresent) {
-            val secondaryRole = if (secondary.cardLast4 != null) "Card Payment" else "Bank Payment"
+            val secondaryRole = when {
+                secondaryProvider == Provider.JAGO -> if (secondary.cardLast4 != null) "Card Payment" else "Bank Payment"
+                evidence(secondary).origin in setOf("gopay-order-history", "grab-wallet-api") -> "Wallet Payment"
+                else -> "Linked Record"
+            }
             grouped.put(buildGroupEntry(secondary, secondaryRole, secondaryProvider))
         }
 
@@ -380,7 +384,7 @@ object LedgerReconciler {
                 "$pickup to $dropoff"
             }
             else -> {
-                val card = (tx.cardLast4 ?: p?.optString("cardLast4"))?.takeUnless { it == "null" || it.isBlank() }?.let { "Visa Debit Card $it" }
+                val card = (tx.cardLast4 ?: p?.optString("cardLast4"))?.takeUnless { it == "null" || it.isBlank() }?.let { "Card $it" }
                 val pocket = tx.pocket?.name ?: p?.optString("pocketName")?.takeUnless { it == "null" || it.isBlank() }
                 listOfNotNull(card, pocket).joinToString(" - ").ifBlank { tx.description }
             }

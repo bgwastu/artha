@@ -6,7 +6,8 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
+import android.view.View
+import android.os.Bundle
 import android.net.Uri
 import android.os.Build
 import android.widget.RemoteViews
@@ -16,7 +17,6 @@ import net.wastu.artha.R
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.ui.formatMoney
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +42,14 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
         if (targetIds.isNotEmpty()) {
             updateWidgets(context, appWidgetManager, targetIds)
         }
+    }
+
+    override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, options: Bundle) {
+        updateWidgets(context, manager, intArrayOf(id))
+    }
+
+    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        WidgetUpdatedAt.remove(context, appWidgetIds)
     }
 
     private fun updateWidgets(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
@@ -71,16 +79,32 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
             itemTemplateFlags,
         )
 
-        WidgetRefresh.schedule("transactions", pendingResult) {
+        fun status(failed: Boolean = false) {
+            for (id in appWidgetIds) {
+                val previous = WidgetUpdatedAt.read(context, id)
+                val views = RemoteViews(context.packageName, R.layout.widget_transactions)
+                views.setTextViewText(R.id.widget_transactions_status, widgetFreshness(previous, System.currentTimeMillis(), updating = !failed, failed = failed))
+                views.setOnClickPendingIntent(R.id.widget_transactions_header, openAppIntent)
+                if (previous == null) appWidgetManager.updateAppWidget(id, views)
+                else appWidgetManager.partiallyUpdateAppWidget(id, views)
+            }
+        }
+        status()
+        WidgetRefresh.schedule("transactions", pendingResult, onFailure = { status(failed = true) }) {
                 val app = context.applicationContext as net.wastu.artha.ArthaApplication
                 val enabled = app.providerPreferences.enabled.value
-                val reconciled = widgetSpending(context).transactions.filter { it.isConfirmed && it.provider in enabled }.take(40)
+                val allPayments = widgetSpending(context).transactions.filter { it.isConfirmed && it.provider in enabled }
+                val reconciled = recentWidgetPayments(allPayments, enabled)
+                val updatedAt = System.currentTimeMillis()
 
                 val dateFormatter = DateTimeFormatter.ofPattern("d MMM", Locale.US)
 
                 for (appWidgetId in appWidgetIds) {
                     val views = RemoteViews(context.packageName, R.layout.widget_transactions)
-                    views.setTextViewText(R.id.widget_transactions_count, "${reconciled.size} items")
+                    views.setTextViewText(R.id.widget_transactions_count, widgetPaymentScope(allPayments.size))
+                    views.setTextViewText(R.id.widget_transactions_status, widgetFreshness(updatedAt, updatedAt))
+                    views.setViewVisibility(R.id.widget_transactions_list, View.VISIBLE)
+                    views.setTextViewText(R.id.widget_transactions_empty, "No saved payments")
                     views.setOnClickPendingIntent(R.id.widget_transactions_header, openAppIntent)
                     views.setPendingIntentTemplate(R.id.widget_transactions_list, itemTemplatePendingIntent)
                     views.setEmptyView(R.id.widget_transactions_list, R.id.widget_transactions_empty)
@@ -103,6 +127,7 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
                         @Suppress("DEPRECATION")
                         appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.widget_transactions_list)
                     }
+                    WidgetUpdatedAt.save(context, appWidgetId, updatedAt)
                 }
         }
     }
@@ -146,14 +171,7 @@ internal fun buildTransactionItemView(
     }
     val dateStr = "$dayPrefix, $timeStr"
     val isCredit = tx.direction == Direction.CREDIT
-    val subtitleParts = mutableListOf(dateStr)
-    if (!isCredit && !tx.category.isNullOrBlank()) {
-        subtitleParts += tx.category
-    }
-    if (!tx.userNote.isNullOrBlank()) {
-        subtitleParts += "#${tx.userNote}"
-    }
-    views.setTextViewText(R.id.widget_item_subtitle, subtitleParts.joinToString(" - "))
+    views.setTextViewText(R.id.widget_item_subtitle, dateStr)
 
     val isZero = tx.isReversal || tx.money.amountMinor == 0L
     val amountText = if (isZero) {
@@ -162,9 +180,9 @@ internal fun buildTransactionItemView(
         "${if (isCredit) "+" else "−"}${formatMoney(tx.money)}"
     }
     val amountColor = when {
-        isZero -> Color.parseColor("#8E9099")
-        isCredit -> Color.parseColor("#81C784")
-        else -> Color.parseColor("#E3E2E6")
+        isZero -> WidgetPalette.supporting
+        isCredit -> WidgetPalette.income
+        else -> WidgetPalette.text
     }
     views.setTextViewText(R.id.widget_item_amount, amountText)
     views.setTextColor(R.id.widget_item_amount, amountColor)
@@ -172,6 +190,7 @@ internal fun buildTransactionItemView(
     val fillInIntent = Intent().apply {
         putExtra("extra_destination", "TRANSACTIONS")
     }
+    views.setContentDescription(R.id.widget_item_root, "${tx.provider.displayName}, $title, ${if (isCredit) "Incoming" else "Outgoing"}, $amountText, $dateStr. Open Transactions")
     views.setOnClickFillInIntent(R.id.widget_item_root, fillInIntent)
 
     return views
@@ -197,7 +216,7 @@ private class TransactionsRemoteViewsFactory(
             try {
                 val app = context.applicationContext as net.wastu.artha.ArthaApplication
                 val enabled = app.providerPreferences.enabled.value
-                transactions = widgetSpending(context).transactions.filter { it.isConfirmed && it.provider in enabled }.take(40)
+                transactions = recentWidgetPayments(widgetSpending(context).transactions, enabled)
             } catch (_: Exception) { /* Keep the last valid collection. */ }
         }
     }

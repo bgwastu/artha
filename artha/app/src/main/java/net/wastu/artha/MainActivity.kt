@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
                             analysisStore = application.analysisStore,
                             driveSyncManager = application.driveSyncManager,
                             spendingState = application.spending.state,
+                            retrySpending = application.spending::retry,
                         ).also {
                             if (initialDest != null) it.setTargetDestination(initialDest)
                         }

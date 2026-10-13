@@ -2,6 +2,19 @@ package net.wastu.artha.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import net.wastu.artha.ui.categoryIconLabel
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -126,7 +139,7 @@ fun AnalysisScreen(
     }
     val largest = remember(analysis.categories) { analysis.categories.flatMap { it.transactions }.maxByOrNull { it.money.amountMinor } }
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.widthIn(max = 720.dp).fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -155,12 +168,12 @@ fun AnalysisScreen(
                     else Icon(Icons.Default.ChevronRight, contentDescription = null)
                 },
                 colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier.clickable { onOpenTransaction(largest) },
+                modifier = Modifier.clickable(onClickLabel = "Open payment") { onOpenTransaction(largest) },
             )
         }
         item(key = "category_header") {
             Text("Categories", style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(top = 12.dp, bottom = 4.dp), fontWeight = FontWeight.SemiBold)
+                modifier = Modifier.semantics { heading() }.padding(top = 12.dp, bottom = 4.dp), fontWeight = FontWeight.SemiBold)
         }
         if (analysis.categories.isEmpty()) item(key = "empty_categories") {
             Text("No confirmed spending this month", style = MaterialTheme.typography.bodyMedium,
@@ -270,10 +283,8 @@ private fun MonthSummaryCard(
                     Text("${kotlin.math.abs(delta).toInt()}% ${if (delta < 0) "less" else "more"} than previous month",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (analysis.unsupportedCurrencyCount > 0) Text("${analysis.unsupportedCurrencyCount} non-IDR records excluded",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (!monthlyNote.isNullOrBlank()) Text(monthlyNote, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth().clickable(onClick = onEditNote).padding(vertical = 12.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClickLabel = "Edit monthly note", onClick = onEditNote).padding(vertical = 12.dp),
                     style = MaterialTheme.typography.bodySmall)
             }
         }
@@ -287,23 +298,24 @@ fun MonthlyNoteDialog(
     onDismiss: () -> Unit,
     onSave: (String) -> Unit,
 ) {
-    var text by remember { mutableStateOf(initialNote) }
+    var text by rememberSaveable(initialNote) { mutableStateOf(initialNote) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Note for $monthLabel", fontWeight = FontWeight.Bold) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "Explain what you spent on this month (e.g. trips, big purchases, home repairs). AI uses this context to explain spending and provide commentary; your categories are kept.",
+                    "Add context for commentary. Your chosen categories stay.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
-                    placeholder = { Text("e.g., Vacation to Jogja; bought laptop on Tokopedia...") },
-                    modifier = Modifier.fillMaxWidth().height(140.dp),
+                    label = { Text("Month note") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         },
@@ -355,6 +367,7 @@ private fun AiInsightsCard(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CategorySpendingRow(category: CategorySpending, categoryIcons: Map<String, String>, onOpenCategory: (String) -> Unit) {
     val fontScale = LocalDensity.current.fontScale
@@ -365,7 +378,7 @@ private fun CategorySpendingRow(category: CategorySpending, categoryIcons: Map<S
             supportingContent = {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     if (stackAmount) Text(formatAmountMinor(category.amountMinor), fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("${category.sharePercent.toInt()}%", style = MaterialTheme.typography.bodySmall)
                         Text("${category.transactions.size} payments", style = MaterialTheme.typography.bodySmall)
                     }
@@ -374,7 +387,7 @@ private fun CategorySpendingRow(category: CategorySpending, categoryIcons: Map<S
             leadingContent = { Icon(categoryIconFor(category.category, categoryIcons), null) },
             trailingContent = if (stackAmount) null else ({ Text(formatAmountMinor(category.amountMinor), fontWeight = FontWeight.SemiBold) }),
             colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-            modifier = Modifier.clickable { onOpenCategory(category.category) },
+            modifier = Modifier.clickable(onClickLabel = "Open category payments") { onOpenCategory(category.category) },
         )
     }
 }
@@ -385,29 +398,31 @@ fun KnowledgeEditorDialog(
     onDismiss: () -> Unit,
     onSave: (String) -> Unit,
 ) {
-    var text by remember { mutableStateOf(initialKnowledge) }
+    var text by rememberSaveable(initialKnowledge) { mutableStateOf(initialKnowledge) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Personal Context Rules", fontWeight = FontWeight.Bold) },
+        title = { Text("Personal context", fontWeight = FontWeight.Bold) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "Simple markdown bullet list governing personal relationships, accounting heuristics, and categorization rules for AI.",
+                    "Context for AI commentary. Your chosen categories stay.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
-                    modifier = Modifier.fillMaxWidth().height(320.dp),
+                    label = { Text("Personal context") },
+                    minLines = 4,
+                    modifier = Modifier.fillMaxWidth(),
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 )
             }
         },
         confirmButton = {
             FilledTonalButton(onClick = { onSave(text) }) {
-                Text("Save Knowledge")
+                Text("Save context")
             }
         },
         dismissButton = {
@@ -418,287 +433,85 @@ fun KnowledgeEditorDialog(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ManageCategoriesSheet(
-    categories: List<String>,
-    categoryIcons: Map<String, String>,
-    onDismiss: () -> Unit,
-    onAdd: (String) -> Unit,
-    onRemove: (String) -> Unit,
-    onSetIcon: (category: String, iconKey: String?) -> Unit,
-    onReset: () -> Unit,
+    categories: List<String>, categoryIcons: Map<String, String>, onDismiss: () -> Unit,
+    onAdd: (String) -> Unit, onRemove: (String) -> Unit,
+    onSetIcon: (String, String?) -> Unit, onReset: () -> Unit,
 ) {
-    var newCategoryText by remember { mutableStateOf("") }
-    var selectedNewIconKey by remember { mutableStateOf<String?>("default") }
-    var categoryToEditIcon by remember { mutableStateOf<String?>(null) }
-    var showResetConfirm by remember { mutableStateOf(false) }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier.size(36.dp),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.Tune,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                    }
-                    Column {
-                        Text(
-                            "Categories",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            "${categories.size} categories active",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-
-                TextButton(
-                    onClick = { showResetConfirm = true },
-                ) {
-                    Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Reset")
+    var name by rememberSaveable { mutableStateOf("") }
+    var newIcon by rememberSaveable { mutableStateOf("default") }
+    var editingIcon by rememberSaveable { mutableStateOf<String?>(null) }
+    var removing by rememberSaveable { mutableStateOf<String?>(null) }
+    var reset by rememberSaveable { mutableStateOf(false) }
+    val duplicate = categories.any { it.equals(name.trim(), ignoreCase = true) }
+    fun add() {
+        val value = name.trim()
+        if (value.isNotEmpty() && !duplicate) {
+            onAdd(value)
+            if (newIcon != "default") onSetIcon(value, newIcon)
+            name = ""
+            newIcon = "default"
+        }
+    }
+    ModalBottomSheet(onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        LazyColumn(Modifier.fillMaxWidth().imePadding(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            item {
+                Text("Categories", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { reset = true }) { Text("Reset picker") }
+                    TextButton(onClick = onDismiss) { Text("Done") }
                 }
             }
-
-            // Add new category surface
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Text(
-                        "ADD NEW CATEGORY",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        // Tappable Icon button to pick an icon for the new category
-                        Surface(
-                            onClick = { categoryToEditIcon = "__NEW__" },
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            modifier = Modifier.size(48.dp),
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                val currentVector = categoryIconFor("", mapOf("" to (selectedNewIconKey ?: "default")))
-                                Icon(
-                                    currentVector,
-                                    contentDescription = "Pick Icon",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(24.dp),
-                                )
-                            }
-                        }
-
-                        OutlinedTextField(
-                            value = newCategoryText,
-                            onValueChange = { newCategoryText = it },
-                            placeholder = { Text("Category name...") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(1f),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(
-                                onDone = {
-                                    val trimmed = newCategoryText.trim()
-                                    if (trimmed.isNotBlank()) {
-                                        onAdd(trimmed)
-                                        if (selectedNewIconKey != null && selectedNewIconKey != "default") {
-                                            onSetIcon(trimmed, selectedNewIconKey)
-                                        }
-                                        newCategoryText = ""
-                                        selectedNewIconKey = "default"
-                                    }
-                                }
-                            ),
-                        )
-
-                        FilledTonalButton(
-                            onClick = {
-                                val trimmed = newCategoryText.trim()
-                                if (trimmed.isNotBlank()) {
-                                    onAdd(trimmed)
-                                    if (selectedNewIconKey != null && selectedNewIconKey != "default") {
-                                        onSetIcon(trimmed, selectedNewIconKey)
-                                    }
-                                    newCategoryText = ""
-                                    selectedNewIconKey = "default"
-                                }
-                            },
-                            enabled = newCategoryText.isNotBlank(),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.height(50.dp),
-                        ) {
-                            Text("Add")
-                        }
+            item {
+                OutlinedTextField(name, { name = it }, label = { Text("Category name") },
+                    isError = duplicate, supportingText = if (duplicate) ({ Text("Already in picker") }) else null,
+                    singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { add() }))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { editingIcon = "__NEW__" }) {
+                        Icon(categoryIconFor("", mapOf("" to newIcon)), null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Choose icon")
                     }
+                    FilledTonalButton(onClick = { add() }, enabled = name.isNotBlank() && !duplicate) { Text("Add") }
                 }
             }
-
-            // Categories list
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 380.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                items(categories, key = { it }) { cat ->
-                    val icon = categoryIconFor(cat, categoryIcons)
-                    val hasCustomIcon = categoryIcons.containsKey(cat)
-
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                // Tappable icon: click to customize the icon for this category!
-                                Surface(
-                                    onClick = { categoryToEditIcon = cat },
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = if (hasCustomIcon) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                    modifier = Modifier.size(36.dp),
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            icon,
-                                            contentDescription = "Customize Icon",
-                                            tint = if (hasCustomIcon) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    }
-                                }
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        cat,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                    )
-                                    if (hasCustomIcon) {
-                                        Text(
-                                            "Custom icon",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary,
-                                        )
-                                    }
-                                }
-                            }
-
-                            IconButton(
-                                onClick = { onRemove(cat) },
-                                modifier = Modifier.size(32.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.DeleteOutline,
-                                    contentDescription = "Remove",
-                                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.75f),
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                        }
+            items(categories, key = { it }) { category ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { editingIcon = category }, modifier = Modifier.size(48.dp)) {
+                        Icon(categoryIconFor(category, categoryIcons), "Choose icon for $category")
+                    }
+                    Text(category, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
+                    IconButton(onClick = { removing = category }, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Default.DeleteOutline, "Remove $category from picker", tint = MaterialTheme.colorScheme.error)
                     }
                 }
-            }
-
-            FilledTonalButton(
-                onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Done")
             }
         }
     }
-
-    // Icon Picker Dialog when user taps an icon to customize
-    categoryToEditIcon?.let { targetCat ->
-        IconPickerDialog(
-            currentKey = if (targetCat == "__NEW__") selectedNewIconKey else categoryIcons[targetCat],
-            onDismiss = { categoryToEditIcon = null },
-            onSelect = { chosenKey ->
-                if (targetCat == "__NEW__") {
-                    selectedNewIconKey = chosenKey
-                } else {
-                    onSetIcon(targetCat, chosenKey)
-                }
-                categoryToEditIcon = null
-            },
-        )
+    editingIcon?.let { category ->
+        IconPickerDialog(if (category == "__NEW__") newIcon else categoryIcons[category],
+            onDismiss = { editingIcon = null }, onSelect = {
+                if (category == "__NEW__") newIcon = it else onSetIcon(category, it)
+                editingIcon = null
+            })
     }
-
-    // Reset confirmation alert
-    if (showResetConfirm) {
-        AlertDialog(
-            onDismissRequest = { showResetConfirm = false },
-            title = { Text("Reset Categories?") },
-            text = { Text("This will restore default categories and clear custom icon assignments.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    onReset()
-                    showResetConfirm = false
-                }) {
-                    Text("Reset")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showResetConfirm = false }) {
-                    Text("Cancel")
-                }
-            },
-        )
+    removing?.let { category ->
+        AlertDialog(onDismissRequest = { removing = null }, title = { Text("Remove from picker?") },
+            text = { Text("Saved payments keep their categories and notes.") },
+            confirmButton = { TextButton(onClick = { onRemove(category); removing = null }) { Text("Remove") } },
+            dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } })
     }
+    if (reset) AlertDialog(onDismissRequest = { reset = false }, title = { Text("Reset picker?") },
+        text = { Text("Restore default categories and icons. Saved payment categories and notes stay.") },
+        confirmButton = { TextButton(onClick = { onReset(); reset = false }) { Text("Reset") } },
+        dismissButton = { TextButton(onClick = { reset = false }) { Text("Cancel") } })
 }
 
 @Composable
@@ -722,23 +535,22 @@ fun IconPickerDialog(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
                 ) {
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(5),
-                        modifier = Modifier.fillMaxSize().padding(8.dp),
+                        columns = GridCells.Adaptive(56.dp),
+                        modifier = Modifier.fillMaxSize().padding(8.dp).selectableGroup(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         items(AVAILABLE_CATEGORY_ICONS, key = { it.first }) { (key, vector) ->
                             val isSelected = (currentKey ?: "default") == key
                             Surface(
-                                onClick = { onSelect(key) },
                                 shape = RoundedCornerShape(10.dp),
                                 color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-                                modifier = Modifier.size(44.dp),
+                                modifier = Modifier.heightIn(min = 48.dp).selectable(isSelected, role = Role.RadioButton, onClick = { onSelect(key) }),
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         vector,
-                                        contentDescription = key,
+                                        contentDescription = categoryIconLabel(key),
                                         tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.size(22.dp),
                                     )

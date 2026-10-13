@@ -7,7 +7,17 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.Alignment
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -78,7 +88,10 @@ fun HomeScreen(
     var showFilter by rememberSaveable { mutableStateOf(false) }
     var showCategoriesSheet by rememberSaveable { mutableStateOf(false) }
     var showKnowledgeEditor by rememberSaveable { mutableStateOf(false) }
-    var selectedTransaction by remember { mutableStateOf<UnifiedTransaction?>(null) }
+    var selectedKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedFallback by remember { mutableStateOf<UnifiedTransaction?>(null) }
+    var openBackup by rememberSaveable { mutableStateOf(false) }
+    val ledgerLoadFailed by viewModel?.ledgerLoadFailed?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
     val rootGate by viewModel?.rootGate?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(net.wastu.artha.core.root.RootGateState.LOCKED) }
     val categoryFilter by viewModel?.categoryFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<String?>(null) }
     val targetDest by viewModel?.targetDestination?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
@@ -93,16 +106,21 @@ fun HomeScreen(
         }
     }
 
-    BackHandler(enabled = destination != Destination.TRANSACTIONS && selectedTransaction == null) {
+    BackHandler(enabled = destination != Destination.TRANSACTIONS && selectedKey == null) {
         destination = Destination.TRANSACTIONS
     }
 
-    BackHandler(enabled = destination == Destination.TRANSACTIONS && categoryFilter != null && selectedTransaction == null && !showSearch && !showFilter) {
+    BackHandler(enabled = destination == Destination.TRANSACTIONS && categoryFilter != null && selectedKey == null && !showSearch && !showFilter) {
         viewModel?.closeCategoryTransactions()
     }
 
+    val latestTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyList<UnifiedTransaction>()) }
+    val selected = latestTransactions.firstOrNull { it.key == selectedKey } ?: selectedFallback?.takeIf { it.key == selectedKey }
+    val closeDetails = { selectedKey = null; selectedFallback = null }
+    val detailsState = selected?.let { rememberTransactionDetailsState(it.key) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val showRail = maxWidth >= 600.dp
+        val showDetailsPane = maxWidth >= 1080.dp && maxHeight >= 480.dp && destination == Destination.TRANSACTIONS && !showSearch && selected != null
+        val showRail = maxWidth >= 600.dp && maxHeight >= 480.dp
         Scaffold(
             modifier = if (showSearch) Modifier.clearAndSetSemantics {} else Modifier,
             topBar = {
@@ -135,7 +153,7 @@ fun HomeScreen(
                                 }
                                 Icon(
                                     Icons.Default.Sync,
-                                    contentDescription = "Sync",
+                                    contentDescription = if (refreshing) "Importing history" else "Import history",
                                     modifier = if (refreshing) {
                                         Modifier.graphicsLayer { rotationZ = angle }
                                     } else Modifier,
@@ -166,7 +184,7 @@ fun HomeScreen(
                 }
             },
         ) { padding ->
-            Row(Modifier.fillMaxSize().padding(padding)) {
+            Row(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
                 if (showRail) {
                     NavigationRail {
                         Destination.entries.forEach { item ->
@@ -180,29 +198,47 @@ fun HomeScreen(
                     }
                 }
                 Column(Modifier.weight(1f)) {
+                    if (ledgerLoadFailed && ledgerState is LedgerState.Ready) {
+                        Row(Modifier.padding(horizontal = 16.dp).semantics { liveRegion = LiveRegionMode.Polite }, verticalAlignment = Alignment.CenterVertically) {
+                            Text("Saved history update failed", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                            TextButton(onClick = onRetryLedger) { Text("Retry") }
+                        }
+                    }
                     if (rootGate == net.wastu.artha.core.root.RootGateState.DENIED) {
                         androidx.compose.material3.TextButton(onClick = onRefresh, modifier = Modifier.padding(horizontal = 16.dp)) {
                             Text("Root unavailable. Retry imports.")
                         }
                     }
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
                     saveableStateHolder.SaveableStateProvider(destination.name) {
                         when (destination) {
-                            Destination.TRANSACTIONS -> LedgerScreen(
+                            Destination.TRANSACTIONS -> Row(Modifier.fillMaxSize()) {
+                            Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
+                            LedgerScreen(
                                 state = ledgerState,
                                 enabledProviders = enabledProviders,
-                                onTransaction = { selectedTransaction = it },
+                                onTransaction = { selectedKey = it.key; selectedFallback = it },
                                 onRetry = onRetryLedger,
+                                onImportHistory = { destination = Destination.SETTINGS },
+                                onRestoreBackup = { openBackup = true; destination = Destination.SETTINGS },
                                 showFilter = showFilter,
                                 onDismissFilter = { showFilter = false },
                                 viewModel = viewModel,
                                 filters = transactionFilters,
                                 onFiltersChanged = { transactionFilters = it },
                             )
+                            }
+                            if (showDetailsPane && selected != null) {
+                                Box(Modifier.weight(1f).fillMaxHeight()) {
+                                    if (detailsState != null) TransactionDetailsContent(selected, viewModel, onClose = closeDetails, state = detailsState)
+                                }
+                            }
+                            }
                             Destination.ANALYSIS -> {
                                 if (viewModel != null) {
                                     AnalysisScreen(
                                         viewModel = viewModel,
-                                        onOpenTransaction = { selectedTransaction = it },
+                                        onOpenTransaction = { selectedKey = it.key; selectedFallback = it },
                                         showCategoriesSheet = showCategoriesSheet,
                                         onOpenCategoriesSheet = { showCategoriesSheet = true },
                                         onDismissCategoriesSheet = { showCategoriesSheet = false },
@@ -213,6 +249,8 @@ fun HomeScreen(
                                 }
                             }
                             Destination.SETTINGS -> ProvidersScreen(
+                                openBackup = openBackup,
+                                onBackupOpened = { openBackup = false },
                                 enabled = enabledProviders,
                                 syncingProvider = syncingProvider,
                                 providerCounts = providerCounts,
@@ -220,6 +258,7 @@ fun HomeScreen(
                                 viewModel = viewModel,
                             )
                         }
+                    }
                     }
                 }
             }
@@ -229,18 +268,15 @@ fun HomeScreen(
                 SearchTransactionsScreen(
                     ledgerState,
                     onBack = { showSearch = false },
-                    onTransaction = { selectedTransaction = it },
+                    onTransaction = { selectedKey = it.key; selectedFallback = it },
                     filters = transactionFilters,
                     viewModel = viewModel,
                     onRetry = onRetryLedger,
                 )
             }
         }
-    }
-
-    val latestTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyList<UnifiedTransaction>()) }
-    selectedTransaction?.let { selected ->
-        val transaction = latestTransactions.firstOrNull { it.key == selected.key } ?: selected
-        TransactionDetailsSheet(transaction, viewModel = viewModel, onDismiss = { selectedTransaction = null })
+        if (!showDetailsPane && selected != null) {
+            if (detailsState != null) TransactionDetailsSheet(selected, viewModel = viewModel, state = detailsState, onDismiss = closeDetails)
+        }
     }
 }

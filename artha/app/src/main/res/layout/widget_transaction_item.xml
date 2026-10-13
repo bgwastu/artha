@@ -1,62 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    android:id="@+id/widget_item_root"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:gravity="center_vertical"
-    android:orientation="horizontal"
-    android:paddingTop="6dp"
-    android:paddingBottom="6dp"
-    tools:ignore="HardcodedText">
-
-    <!-- Provider Icon -->
-    <ImageView
-        android:id="@+id/widget_item_icon"
-        android:layout_width="24dp"
-        android:layout_height="24dp"
-        android:layout_marginEnd="10dp"
-        android:contentDescription="Provider"
-        android:scaleType="fitCenter" />
-
-    <!-- Description & Subtitle -->
-    <LinearLayout
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginEnd="8dp"
-        android:layout_weight="1"
-        android:orientation="vertical">
-
-        <TextView
-            android:id="@+id/widget_item_description"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:text="Transaction"
-            android:textColor="#F1F0F4"
-            android:textSize="13sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/widget_item_subtitle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:text="12 Oct - Dining Out"
-            android:textColor="#A0A2AB"
-            android:textSize="11sp" />
-    </LinearLayout>
-
-    <!-- Amount -->
-    <TextView
-        android:id="@+id/widget_item_amount"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="-Rp0"
-        android:textColor="#E3E2E6"
-        android:textSize="13sp"
-        android:textStyle="bold" />
-
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/widget_item_root" android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:minHeight="48dp" android:orientation="horizontal" android:paddingTop="8dp" android:paddingBottom="8dp" tools:ignore="HardcodedText">
+    <ImageView android:id="@+id/widget_item_icon" android:layout_width="24dp" android:layout_height="24dp" android:layout_marginEnd="10dp" android:importantForAccessibility="no" android:scaleType="fitCenter" />
+    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+    <TextView android:id="@+id/widget_item_description" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="" android:textSize="13sp" android:textColor="#F1F0F4" android:maxLines="2" android:ellipsize="end" android:textStyle="bold" />
+    <TextView android:id="@+id/widget_item_amount" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="" android:textSize="13sp" android:textColor="#F1F0F4" android:textStyle="bold" />
+    <TextView android:id="@+id/widget_item_subtitle" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="" android:textSize="12sp" android:textColor="#C4C6CF"  />
+</LinearLayout>
 </LinearLayout>

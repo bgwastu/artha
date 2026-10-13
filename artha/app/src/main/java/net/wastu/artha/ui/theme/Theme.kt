@@ -11,7 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
-private val LightColors = lightColorScheme(
+internal val LightColors = lightColorScheme(
     primary = Color(0xFF276749),
     onPrimary = Color(0xFFFFFFFF),
     primaryContainer = Color(0xFFD3EEDB),
@@ -32,7 +32,7 @@ private val LightColors = lightColorScheme(
     outlineVariant = Color(0xFFC1CAC1),
 )
 
-private val DarkColors = darkColorScheme(
+internal val DarkColors = darkColorScheme(
     primary = Color(0xFF9BD5AE),
     onPrimary = Color(0xFF00391D),
     primaryContainer = Color(0xFF145132),
@@ -69,15 +69,8 @@ fun ArthaTheme(
     MaterialTheme(colorScheme = colors, content = content)
 }
 
-object ArthaColors {
-    val expenseLight = Color(0xFFBA1A1A)
-    val expenseDark = Color(0xFFFFB4AB)
-    val incomeLight = Color(0xFF1B6E35)
-    val incomeDark = Color(0xFF81C784)
-}
+@Composable
+fun incomeColor(): Color = MaterialTheme.colorScheme.primary
 
 @Composable
-fun incomeColor(): Color = if (isSystemInDarkTheme()) ArthaColors.incomeDark else ArthaColors.incomeLight
-
-@Composable
-fun expenseColor(): Color = if (isSystemInDarkTheme()) ArthaColors.expenseDark else ArthaColors.expenseLight
+fun expenseColor(): Color = MaterialTheme.colorScheme.onSurface
