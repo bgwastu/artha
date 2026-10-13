@@ -42,6 +42,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -127,7 +128,14 @@ fun TransactionDetailsSheet(
 ) {
     ModalBottomSheet(
         onDismissRequest = { state.dismiss(onDismiss) },
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = rememberModalBottomSheetState(
+            skipPartiallyExpanded = true,
+            // Material hides the sheet before its Back callback. Keep it visible
+            // while that callback returns an editor to the transaction details.
+            confirmValueChange = { value ->
+                value != SheetValue.Hidden || (state.editor == null && !state.saving)
+            },
+        ),
     ) {
         TransactionDetailsBody(transaction, viewModel, state)
     }
