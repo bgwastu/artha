@@ -1,0 +1,14 @@
+.DS_Store
+*.log
+/tmp/
+build/
+.gradle/
+local.properties
+app/build/
+
+# Sensitive personal data & extracted dumps
+*-data/
+Cookies
+*.hive
+*.jks
+*.keystore

@@ -1,0 +1,91 @@
+package net.wastu.artha.data.analysis
+
+import net.wastu.artha.core.model.Direction
+import net.wastu.artha.core.model.UnifiedTransaction
+import net.wastu.artha.ui.CategorySpending
+import net.wastu.artha.ui.MonthSpendingAnalysis
+import java.time.YearMonth
+import java.time.ZoneId
+import org.json.JSONObject
+
+object BudgetAnalyzer {
+    fun analyzeMonth(
+        month: YearMonth,
+        allTransactions: List<UnifiedTransaction>,
+        aiSummary: String? = null,
+    ): MonthSpendingAnalysis {
+        val zone = ZoneId.systemDefault()
+        val currentMonthTxs = allTransactions.filter { YearMonth.from(it.occurredAt.atZone(zone)) == month }
+        val prevMonth = month.minusMonths(1)
+        val prevMonthTxs = allTransactions.filter { YearMonth.from(it.occurredAt.atZone(zone)) == prevMonth }
+
+        val currentSpendingTxs = currentMonthTxs.filter(::isSpending)
+        val prevSpendingTxs = prevMonthTxs.filter(::isSpending)
+
+        val currentByCategory = currentSpendingTxs.groupBy { it.category ?: CategoryConstants.UNCATEGORIZED }
+        val prevByCategory = prevSpendingTxs.groupBy { it.category ?: CategoryConstants.UNCATEGORIZED }
+
+        fun sumCategory(txs: List<UnifiedTransaction>): Long =
+            txs.filter { it.direction == Direction.DEBIT }.sumOf { it.money.amountMinor }
+
+        val prevTotal = prevSpendingTxs.sumOf { it.money.amountMinor }
+        val categories = currentByCategory.map { (cat, txs) ->
+            val catCurrent = sumCategory(txs)
+            val catPrev = sumCategory(prevByCategory[cat].orEmpty())
+            val deltaPercent = if (catPrev > 0L) ((catCurrent - catPrev).toFloat() / catPrev.toFloat()) * 100f else null
+            CategorySpending(
+                category = cat,
+                amountMinor = catCurrent,
+                sharePercent = 0f,
+                previousMonthAmountMinor = catPrev,
+                deltaPercent = deltaPercent,
+                deltaAmountMinor = catCurrent - catPrev,
+                transactions = txs.sortedByDescending { it.occurredAt },
+            )
+        }.filter { it.amountMinor > 0L }.sortedByDescending { it.amountMinor }
+
+        val totalCurrent = categories.sumOf { it.amountMinor }
+        val categoriesWithShare = categories.map {
+            val share = if (totalCurrent > 0L) (it.amountMinor.toFloat() / totalCurrent.toFloat()) * 100f else 0f
+            it.copy(sharePercent = share)
+        }
+        val totalDelta = if (prevTotal > 0L) ((totalCurrent - prevTotal).toFloat() / prevTotal.toFloat()) * 100f else null
+
+        return MonthSpendingAnalysis(
+            month = month,
+            totalPersonalSpendingMinor = totalCurrent,
+            previousMonthTotalMinor = prevTotal,
+            totalDeltaPercent = totalDelta,
+            categories = categoriesWithShare,
+            monthlyAiSummary = aiSummary,
+        )
+    }
+
+    fun isSpending(tx: UnifiedTransaction): Boolean {
+        if (tx.direction != Direction.DEBIT) return false
+        if (tx.isReversal || tx.description.contains("(Reversed)", ignoreCase = true)) return false
+        val p = runCatching { JSONObject(tx.rawPayload) }.getOrNull()
+        if (p?.optBoolean("isPocketTransfer") == true || tx.description.startsWith("Pocket Transfer:", ignoreCase = true)) return false
+        val code = p?.optString("code").orEmpty()
+        if (code in setOf("TDD02", "TDC02", "TDC03", "TDC08", "TDC12", "SAD01", "SAD02", "SAC01", "SAC02")) return false
+        if (p?.optJSONObject("fields")?.optString("f22") == "INTERNAL") return false
+        val cat = tx.category ?: CategoryClassifier.classify(tx, tx.userNote).category
+        return cat != CategoryConstants.INVESTMENTS_TRANSFERS
+    }
+
+    fun computeMonthFingerprint(
+        monthTransactions: List<UnifiedTransaction>,
+        monthlyNote: String,
+        knowledge: String,
+        customCategories: List<String>,
+    ): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        md.update("note:${monthlyNote.trim()}\n".toByteArray(Charsets.UTF_8))
+        md.update("knowledge:${knowledge.trim()}\n".toByteArray(Charsets.UTF_8))
+        md.update("cats:${customCategories.sorted().joinToString(",")}\n".toByteArray(Charsets.UTF_8))
+        for (tx in monthTransactions.sortedBy { it.providerTransactionId }) {
+            md.update("${tx.providerTransactionId}:${tx.money.amountMinor}:${tx.direction}:${tx.userNote.orEmpty()}:${tx.category.orEmpty()}\n".toByteArray(Charsets.UTF_8))
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
+    }
+}

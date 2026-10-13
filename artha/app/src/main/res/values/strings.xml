@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Artha</string>
+    <string name="widget_analysis_title">Monthly Spending</string>
+    <string name="widget_analysis_description">Monthly spending summary with top category breakdown</string>
+    <string name="widget_transactions_title">Recent Transactions</string>
+    <string name="widget_transactions_description">Scrollable timeline of recent transactions across all accounts</string>
+</resources>

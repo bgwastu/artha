@@ -1,0 +1,65 @@
+name: Release
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+concurrency:
+  group: artha-release
+  cancel-in-progress: false
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      ARTHA_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ARTHA_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ARTHA_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ARTHA_ANDROID_CERTIFICATE_SHA256: ${{ vars.ANDROID_CERTIFICATE_SHA256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platforms;android-36 build-tools;36.0.0
+      - uses: gradle/actions/setup-gradle@v4
+      - id: version
+        run: |
+          number=$(git rev-list --count HEAD)
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "name=0.1.$number" >> "$GITHUB_OUTPUT"
+      - name: Materialize signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: python3 tools/release/android-key.py
+      - name: Build signed APK
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.number }}
+        run: ./artha/gradlew -p artha -ParthaVersionName="$VERSION_NAME" -ParthaVersionCode="$VERSION_CODE" assembleRelease
+      - name: Stage APK
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          mkdir -p build/release
+          cp artha/app/build/outputs/apk/release/app-release.apk "build/release/Artha-$VERSION_NAME.apk"
+          cd build/release
+          sha256sum "Artha-$VERSION_NAME.apk" > SHA256SUMS
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          gh release create "v$VERSION_NAME" build/release/* \
+            --target "$GITHUB_SHA" \
+            --title "Artha $VERSION_NAME" \
+            --notes "Artha Android release built from $GITHUB_SHA." \
+            --latest
+      - name: Remove temporary key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/artha-production-signing.keystore"
