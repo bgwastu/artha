@@ -81,7 +81,7 @@ class JagoProviderContractTest {
     }
 
     @Test fun fractionalOverflowAndUnsupportedAmountsNeverRoundOrCoerce() {
-        for (amount in listOf(BigDecimal("12.345"), Long.MAX_VALUE, Double.NaN, Double.POSITIVE_INFINITY, "25000", null)) {
+        for (amount in listOf(BigDecimal("12.345"), Long.MAX_VALUE, Double.NaN, Double.POSITIVE_INFINITY, 90_071_992_547_409.94, 167_772.16f, "25000", null)) {
             val malformed = fields("fictional-invalid").apply { put("f3", amount) }
             val partial = partial { parse(malformed, fields()) }
             assertEquals(1, partial.transactions.size)
@@ -167,16 +167,62 @@ class JagoProviderContractTest {
     }
 
     @Test fun missingAndMalformedPocketsCannotMasqueradeAsMainPocket() {
-        for (bad in listOf(null, "broken", mapOf("f4" to 123), emptyMap<String, Any>())) {
+        for (bad in listOf(null, "broken", mapOf("f4" to 123), mapOf("f4" to ""), emptyMap<String, Any>())) {
             val pockets = mapOf(POCKET_ID to pocket(), "fictional-other-pocket" to bad)
             val history = mapOf(POCKET_ID to mapOf("f2" to listOf(fields())),
                 "fictional-other-pocket" to mapOf("f2" to listOf(fields("fictional-bank-02"))))
-            assertEquals(1, partial { JagoCachedHistory.parse(pockets, history) }.transactions.size)
+            val rows = JagoCachedHistory.parse(pockets, history)
+            assertEquals(2, rows.size)
+            val orphan = rows.single { it.providerTransactionId.startsWith("jago:fictional-bank-02:") }
+            assertNull(orphan.pocket)
+            assertEquals(2_500_000L, orphan.money.amountMinor)
+            assertEquals(SOURCE_INSTANT, orphan.occurredAt)
+            assertFalse(JSONObject(orphan.rawPayload).has("pocketName"))
+            assertEquals("fictional-other-pocket", JSONObject(orphan.rawPayload).getString("pocketId"))
         }
     }
 
+    @Test fun orphanDuplicateBeforeNamedPocketPreservesTheNamedOriginalPayload() {
+        val original = parse(fields()).single()
+        val orphan = fields().apply { put("f13", 0L) }
+        val history = linkedMapOf("fictional-aggregate" to mapOf("f2" to listOf(orphan)),
+            POCKET_ID to mapOf("f2" to listOf(fields())))
+        val rows = JagoCachedHistory.parse(mapOf(POCKET_ID to pocket()), history)
+        assertEquals(listOf(original), rows)
+        assertEquals(original.rawPayload, rows.single().rawPayload)
+    }
+
+    @Test fun orphanWithoutCurrencyRejectsOnlyThatRowAndNeverDefaultsToRupiah() {
+        val malformed = fields("fictional-invalid").apply { remove("f41") }
+        val history = mapOf("fictional-aggregate" to mapOf("f2" to listOf(malformed, fields())))
+        val retained = partial { JagoCachedHistory.parse(emptyMap(), history) }.transactions.single()
+        assertEquals("jago:fictional-bank-01:$SOURCE_DATE", retained.providerTransactionId)
+        assertNull(retained.pocket)
+        assertEquals("IDR", retained.money.currencyCode)
+        failure { JagoCachedHistory.parse(emptyMap(), mapOf("fictional-aggregate" to mapOf("f2" to listOf(malformed)))) }
+    }
+
+    @Test fun unnamedPocketCurrencyRetainsProofWithoutInventingPocketEnrichment() {
+        val unnamed = mapOf("f4" to "", "f44" to "IDR")
+        val row = parse(fields().apply { remove("f41") }, sourcePocket = unnamed).single()
+        assertEquals("IDR", row.money.currencyCode)
+        assertNull(row.pocket)
+        assertFalse(JSONObject(row.rawPayload).has("pocketName"))
+        assertEquals(SOURCE_DATE, JSONObject(row.rawPayload).getJSONObject("fields").getString("f5"))
+    }
+
+    @Test fun preferredMalformedObservationStillCannotShadowAValidOrphan() {
+        val malformed = fields().apply { put("f3", BigDecimal("25.001")) }
+        val history = linkedMapOf("fictional-aggregate" to mapOf("f2" to listOf(fields())),
+            POCKET_ID to mapOf("f2" to listOf(malformed)))
+        val retained = partial { JagoCachedHistory.parse(mapOf(POCKET_ID to pocket()), history) }.transactions.single()
+        assertEquals("jago:fictional-bank-01:$SOURCE_DATE", retained.providerTransactionId)
+        assertEquals(2_500_000L, retained.money.amountMinor)
+        assertNull(retained.pocket)
+    }
+
     @Test fun absentOrUnsupportedContainersFailTypedInsteadOfReportingEmptySuccess() {
-        failure { JagoCachedHistory.parse(emptyMap(), mapOf(POCKET_ID to mapOf("f2" to listOf(fields())))) }
+        assertNull(JagoCachedHistory.parse(emptyMap(), mapOf(POCKET_ID to mapOf("f2" to listOf(fields())))).single().pocket)
         failure { JagoCachedHistory.parse(mapOf(POCKET_ID to pocket()), emptyMap()) }
         failure { JagoCachedHistory.parse(mapOf(POCKET_ID to pocket()), mapOf(POCKET_ID to mapOf("f2" to "unsupported"))) }
         assertTrue(JagoCachedHistory.parse(mapOf(POCKET_ID to pocket()), mapOf(POCKET_ID to mapOf("f2" to emptyList<Any>()))).isEmpty())
@@ -204,11 +250,11 @@ class JagoProviderContractTest {
         var checkpoints = 0
         try {
             JagoCachedHistory.parse(mapOf(POCKET_ID to pocket()), mapOf(POCKET_ID to mapOf("f2" to listOf(fields(), later)))) {
-                if (++checkpoints == 6) throw CancellationException("Fictional sorting cancellation")
+                if (++checkpoints == 7) throw CancellationException("Fictional sorting cancellation")
             }
             fail("Expected cancellation")
         } catch (_: CancellationException) {
-            assertEquals(6, checkpoints)
+            assertEquals(7, checkpoints)
         }
     }
 

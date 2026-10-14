@@ -75,36 +75,35 @@ internal object JagoCachedHistory {
         checkpoint: () -> Unit = {},
     ): List<UnifiedTransaction> {
         checkpoint()
-        if (pockets.isEmpty() || history.isEmpty()) {
-            throw ProviderReadException(AccountStatus.ERROR, "Jago cached pocket/history containers unavailable. Open Jago to populate its saved history.")
+        if (history.isEmpty()) {
+            throw ProviderReadException(AccountStatus.ERROR, "Jago cached history containers unavailable. Open Jago to populate its saved history.")
         }
         val seen = mutableSetOf<String>()
         val transactions = mutableListOf<UnifiedTransaction>()
         var malformedRows = 0
         var malformedContainers = 0
-        for ((pocketId, value) in history) {
-            checkpoint()
-            val pocket = pockets[pocketId] as? Map<*, *>
-            val list = (value as? Map<*, *>)?.get("f2") as? List<*>
-            if (list == null || pocketId.isBlank()) {
-                malformedContainers++
-                continue
-            }
-            // Native Hive retains empty history lists after their pocket metadata disappears.
-            if (list.isEmpty()) continue
-            if (pocket == null || !pocket.containsKey("f4") ||
-                (pocket["f4"] != null && pocket["f4"] !is String)) {
-                malformedContainers++
-                continue
-            }
-            for (raw in list) {
+        // Native lists without pocket metadata can repeat bank rows with different unverified f13.
+        // Prefer usable pocket enrichment so existing identities and payloads remain unchanged.
+        for (withPocketName in listOf(true, false)) {
+            for ((pocketId, value) in history) {
                 checkpoint()
-                try {
-                    val transaction = row(raw as? Map<*, *> ?: error("Unsupported Jago row"), pocketId, pocket)
-                    // A rejected or zero-value observation must never reserve the source identity.
-                    if (transaction != null && seen.add(transaction.providerTransactionId)) transactions += transaction
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) { checkpoint(); malformedRows++ }
+                val pocket = pockets[pocketId] as? Map<*, *>
+                val pocketName = if (pocketId.isBlank()) null else pocketName(pocket)
+                if ((pocketName != null) != withPocketName) continue
+                val list = (value as? Map<*, *>)?.get("f2") as? List<*>
+                if (list == null) {
+                    malformedContainers++
+                    continue
+                }
+                for (raw in list) {
+                    checkpoint()
+                    try {
+                        val transaction = row(raw as? Map<*, *> ?: error("Unsupported Jago row"), pocketId, pocket, pocketName)
+                        // A rejected or zero-value observation must never reserve the source identity.
+                        if (transaction != null && seen.add(transaction.providerTransactionId)) transactions += transaction
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { checkpoint(); malformedRows++ }
+                }
             }
         }
         checkpoint()
@@ -121,7 +120,12 @@ internal object JagoCachedHistory {
         return ordered
     }
 
-    private fun row(fields: Map<*, *>, pocketId: String, pocket: Map<*, *>): UnifiedTransaction? {
+    private fun pocketName(pocket: Map<*, *>?): String? {
+        val name = (pocket?.get("f4") as? String)?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        return if (name.equals("MAIN_ACCOUNT", ignoreCase = true)) "Main Pocket" else name
+    }
+
+    private fun row(fields: Map<*, *>, pocketId: String, pocket: Map<*, *>?, pocketName: String?): UnifiedTransaction? {
         fun text(index: Int): String = when (val value = fields["f$index"]) {
             null -> ""
             is String -> value.takeUnless { it == "null" }.orEmpty()
@@ -133,8 +137,11 @@ internal object JagoCachedHistory {
         val sourceAmount = fields["f3"] as? Number ?: error("Jago numeric amount unavailable")
         val amount = BigDecimal(sourceAmount.toString()).abs().movePointRight(2).longValueExact()
         if (amount == 0L) return null
+        // A floating source may already have lost cents before decimal conversion.
+        require(sourceAmount !is Double || amount < (1L shl 53)) { "Jago floating amount exceeds exact minor-unit precision" }
+        require(sourceAmount !is Float || amount < (1L shl 24)) { "Jago floating amount exceeds exact minor-unit precision" }
         val currency = text(41).ifBlank {
-            (pocket["f44"] as? String).orEmpty()
+            (pocket?.get("f44") as? String).orEmpty()
         }
         require(currency.isNotBlank() && Currency.getInstance(currency).defaultFractionDigits == 2) {
             "Jago currency or supported minor-unit scale unavailable"
@@ -146,10 +153,6 @@ internal object JagoCachedHistory {
         val date = OffsetDateTime.parse(rawDate).toInstant()
         // Room stores epoch millis. Reject finer source precision instead of changing bank time.
         require(date == Instant.ofEpochMilli(date.toEpochMilli())) { "Jago source timestamp exceeds ledger precision" }
-        val rawPocketName = (pocket["f4"] as? String).orEmpty().trim()
-        val pocketName = if (rawPocketName.isBlank() || rawPocketName.equals("MAIN_ACCOUNT", ignoreCase = true)) {
-            "Main Pocket"
-        } else rawPocketName
         val localized = try { JSONObject(text(14)).let { it.optString("en").ifBlank { it.optString("id") } } }
         catch (_: org.json.JSONException) { "" }
         val deciphered = TransactionDecipherer.decipher(
@@ -166,7 +169,7 @@ internal object JagoCachedHistory {
             money = money,
             occurredAt = date,
             description = deciphered.title,
-            pocket = Pocket(pocketId, pocketName),
+            pocket = pocketName?.let { Pocket(pocketId, it) },
             isQris = deciphered.isQris,
             cardLast4 = deciphered.cardLast4,
             rawPayload = JSONObject()
