@@ -83,7 +83,7 @@ class PresentationContrastTest {
             .first { it.isDirectory }
         val drawable = File(resources, "drawable/bg_widget_analysis.xml").readText()
         assertTrue(drawable.contains("#1A1C1E"))
-        listOf("widget_analysis.xml", "widget_transactions.xml", "widget_transaction_item.xml").forEach { name ->
+        listOf("widget_analysis.xml", "widget_transactions.xml", "widget_transaction_item.xml", "widget_transaction_day.xml").forEach { name ->
             val xml = File(resources, "layout/$name").readText()
             Regex("android:textColor=\"#([0-9A-Fa-f]{6})\"").findAll(xml).forEach { match ->
                 val color = (0xff000000L or match.groupValues[1].toLong(16)).toInt()

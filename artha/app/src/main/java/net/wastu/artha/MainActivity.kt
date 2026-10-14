@@ -36,12 +36,14 @@ class MainActivity : ComponentActivity() {
                             ingest = {
                                 application.ingestion.ingestAll().also {
                                     net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(application)
+                                    net.wastu.artha.ui.widget.TransactionsWidgetProvider.triggerUpdate(application)
                                 }
                             },
                             ingestStale = { application.ingestion.ingestAll(force = false) },
                             syncSingle = {
                                 application.ingestion.syncProvider(it).also {
                                     net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(application)
+                                    net.wastu.artha.ui.widget.TransactionsWidgetProvider.triggerUpdate(application)
                                 }
                             },
                             preferences = application.providerPreferences,
@@ -81,5 +83,6 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         if (redirectToDemo()) return
         net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(this)
+        net.wastu.artha.ui.widget.TransactionsWidgetProvider.triggerUpdate(this)
     }
 }

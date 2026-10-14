@@ -16,7 +16,6 @@ import net.wastu.artha.MainActivity
 import net.wastu.artha.R
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.UnifiedTransaction
-import net.wastu.artha.ui.formatMoney
 import net.wastu.artha.ui.paymentRowAmount
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -95,14 +94,11 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
                 val app = context.applicationContext as net.wastu.artha.ArthaApplication
                 val enabled = app.providerPreferences.enabled.value
                 val allPayments = widgetSpending(context).transactions.filter { it.isConfirmed && it.provider in enabled }
-                val reconciled = recentWidgetPayments(allPayments, enabled)
+                val rows = groupedWidgetPayments(allPayments, enabled)
                 val updatedAt = System.currentTimeMillis()
-
-                val dateFormatter = DateTimeFormatter.ofPattern("d MMM", Locale.US)
 
                 for (appWidgetId in appWidgetIds) {
                     val views = RemoteViews(context.packageName, R.layout.widget_transactions)
-                    views.setTextViewText(R.id.widget_transactions_count, widgetPaymentScope(allPayments.size))
                     views.setTextViewText(R.id.widget_transactions_status, widgetFreshness(updatedAt, updatedAt))
                     views.setViewVisibility(R.id.widget_transactions_list, View.VISIBLE)
                     views.setTextViewText(R.id.widget_transactions_empty, "No saved payments")
@@ -111,9 +107,9 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
                     views.setEmptyView(R.id.widget_transactions_list, R.id.widget_transactions_empty)
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        val builder = RemoteViews.RemoteCollectionItems.Builder()
-                        for (tx in reconciled) {
-                            builder.addItem(java.util.UUID.nameUUIDFromBytes(tx.key.toByteArray()).mostSignificantBits, buildTransactionItemView(context, tx, dateFormatter))
+                        val builder = RemoteViews.RemoteCollectionItems.Builder().setViewTypeCount(2).setHasStableIds(true)
+                        for (row in rows) {
+                            builder.addItem(widgetRowId(row), buildWidgetRowView(context, row))
                         }
                         views.setRemoteAdapter(R.id.widget_transactions_list, builder.build())
                         appWidgetManager.updateAppWidget(appWidgetId, views)
@@ -145,10 +141,16 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
     }
 }
 
+internal fun buildWidgetRowView(context: Context, row: WidgetPaymentRow): RemoteViews = when (row) {
+    is WidgetPaymentRow.Day -> RemoteViews(context.packageName, R.layout.widget_transaction_day).apply {
+        setTextViewText(R.id.widget_day_heading, widgetDayLabel(row.date))
+    }
+    is WidgetPaymentRow.Payment -> buildTransactionItemView(context, row.transaction)
+}
+
 internal fun buildTransactionItemView(
     context: Context,
     tx: UnifiedTransaction,
-    dateFormatter: DateTimeFormatter,
 ): RemoteViews {
     val views = RemoteViews(context.packageName, R.layout.widget_transaction_item)
 
@@ -162,17 +164,11 @@ internal fun buildTransactionItemView(
 
     val zone = net.wastu.artha.core.model.AccountingTime.zone
     val localDate = tx.occurredAt.atZone(zone).toLocalDate()
-    val today = java.time.LocalDate.now(zone)
     val timeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
     val timeStr = tx.occurredAt.atZone(zone).format(timeFormatter)
-    val dayPrefix = when (localDate) {
-        today -> "Today"
-        today.minusDays(1) -> "Yesterday"
-        else -> tx.occurredAt.atZone(zone).format(dateFormatter)
-    }
-    val dateStr = "$dayPrefix, $timeStr"
+    val dateStr = "${widgetDayLabel(localDate)}, $timeStr"
     val isCredit = tx.direction == Direction.CREDIT
-    views.setTextViewText(R.id.widget_item_subtitle, dateStr)
+    views.setTextViewText(R.id.widget_item_subtitle, timeStr)
 
     val isZero = !isCredit && (tx.isReversal || tx.description.contains("(Reversed)", ignoreCase = true))
     val amountText = paymentRowAmount(tx)
@@ -203,8 +199,7 @@ private class TransactionsRemoteViewsFactory(
     private val context: Context,
 ) : RemoteViewsService.RemoteViewsFactory {
 
-    private var transactions: List<UnifiedTransaction> = emptyList()
-    private val dateFormatter = DateTimeFormatter.ofPattern("d MMM", Locale.US)
+    private var rows: List<WidgetPaymentRow> = emptyList()
 
     override fun onCreate() {}
 
@@ -213,27 +208,27 @@ private class TransactionsRemoteViewsFactory(
             try {
                 val app = context.applicationContext as net.wastu.artha.ArthaApplication
                 val enabled = app.providerPreferences.enabled.value
-                transactions = recentWidgetPayments(widgetSpending(context).transactions, enabled)
+                rows = groupedWidgetPayments(widgetSpending(context).transactions, enabled)
             } catch (_: Exception) { /* Keep the last valid collection. */ }
         }
     }
 
     override fun onDestroy() {
-        transactions = emptyList()
+        rows = emptyList()
     }
 
-    override fun getCount(): Int = transactions.size
+    override fun getCount(): Int = rows.size
 
     override fun getViewAt(position: Int): RemoteViews? {
-        val tx = transactions.getOrNull(position) ?: return null
-        return buildTransactionItemView(context, tx, dateFormatter)
+        val row = rows.getOrNull(position) ?: return null
+        return buildWidgetRowView(context, row)
     }
 
     override fun getLoadingView(): RemoteViews? = null
 
-    override fun getViewTypeCount(): Int = 1
+    override fun getViewTypeCount(): Int = 2
 
-    override fun getItemId(position: Int): Long = transactions.getOrNull(position)?.let { java.util.UUID.nameUUIDFromBytes(it.key.toByteArray()).mostSignificantBits } ?: position.toLong()
+    override fun getItemId(position: Int): Long = rows.getOrNull(position)?.let(::widgetRowId) ?: position.toLong()
 
     override fun hasStableIds(): Boolean = true
 }

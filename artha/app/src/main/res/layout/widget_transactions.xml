@@ -7,8 +7,6 @@
     <LinearLayout android:id="@+id/widget_transactions_header" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="48dp" android:orientation="vertical">
     <TextView android:id="@+id/widget_transactions_title" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:text="Recent payments" android:textSize="14sp" android:textColor="#F1F0F4" android:textStyle="bold" />
-    <TextView android:id="@+id/widget_transactions_count" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="" android:textSize="12sp" android:textColor="#C4C6CF"  />
     <TextView android:id="@+id/widget_transactions_status" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:text="Loading saved payments" android:textSize="12sp" android:textColor="#C4C6CF"  />
 </LinearLayout>

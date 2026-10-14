@@ -45,8 +45,30 @@ class WidgetPresentationTest {
         assertEquals("fictional-5", result.last().providerTransactionId)
         assertTrue(result.all { it.isConfirmed && it.provider == Provider.JAGO })
         assertEquals(47, saved.size)
-        assertEquals("Latest 40 payments", widgetPaymentScope(45))
-        assertEquals("0 payments", widgetPaymentScope(0))
+    }
+
+    @Test fun groupedPaymentsUseJakartaDaysAndPreserveStableIdentities() {
+        fun payment(id: String, time: String, confirmed: Boolean = true) = UnifiedTransaction(Provider.JAGO, id, Direction.DEBIT,
+            Money(10000), Instant.parse(time), "Fixture", "{}", isConfirmed = confirmed)
+        val latest = payment("latest", "2026-10-14T01:00:00Z")
+        val midnight = payment("midnight", "2026-10-13T18:00:00Z") // 14 October in Jakarta.
+        val earlier = payment("earlier", "2026-10-13T10:00:00Z")
+        val input = listOf(earlier, midnight, latest, payment("ignored", "2026-10-14T02:00:00Z", false))
+        val rows = groupedWidgetPayments(input, setOf(Provider.JAGO))
+        assertEquals(listOf(java.time.LocalDate.of(2026, 10, 14), java.time.LocalDate.of(2026, 10, 13)),
+            rows.filterIsInstance<WidgetPaymentRow.Day>().map { it.date })
+        assertEquals(listOf("latest", "midnight", "earlier"), rows.filterIsInstance<WidgetPaymentRow.Payment>().map { it.transaction.providerTransactionId })
+        assertEquals(rows.size, rows.map(::widgetRowId).distinct().size)
+        assertEquals(rows.map(::widgetRowId), groupedWidgetPayments(input.reversed(), setOf(Provider.JAGO)).map(::widgetRowId))
+        assertTrue(groupedWidgetPayments(emptyList(), setOf(Provider.JAGO)).isEmpty())
+    }
+
+    @Test fun dayHeadersGiveRelativeDatesAndIncludeOlderYears() {
+        val today = java.time.LocalDate.of(2026, 10, 14)
+        assertEquals("Today", widgetDayLabel(today, today))
+        assertEquals("Yesterday", widgetDayLabel(today.minusDays(1), today))
+        assertEquals("12 Oct", widgetDayLabel(today.minusDays(2), today))
+        assertEquals("14 Oct 2025", widgetDayLabel(today.minusYears(1), today))
     }
 
     @Test fun optionalAnalysisDetailsRequireRoomAtTheCurrentTextScale() {

@@ -15,8 +15,29 @@ internal fun recentWidgetPayments(transactions: List<UnifiedTransaction>, enable
     transactions.asSequence().filter { it.isConfirmed && it.provider in enabled }
         .sortedByDescending { it.occurredAt }.take(RECENT_PAYMENT_LIMIT).toList()
 
-internal fun widgetPaymentScope(totalCount: Int): String =
-    if (totalCount > RECENT_PAYMENT_LIMIT) "Latest $RECENT_PAYMENT_LIMIT payments" else "$totalCount payments"
+internal sealed interface WidgetPaymentRow {
+    data class Day(val date: java.time.LocalDate) : WidgetPaymentRow
+    data class Payment(val transaction: UnifiedTransaction) : WidgetPaymentRow
+}
+
+internal fun groupedWidgetPayments(transactions: List<UnifiedTransaction>, enabled: Set<net.wastu.artha.core.model.Provider>): List<WidgetPaymentRow> = buildList {
+    val grouped = recentWidgetPayments(transactions, enabled).groupBy { it.occurredAt.atZone(AccountingTime.zone).toLocalDate() }
+    grouped.forEach { (day, payments) ->
+        add(WidgetPaymentRow.Day(day))
+        payments.forEach { add(WidgetPaymentRow.Payment(it)) }
+    }
+}
+
+internal fun widgetRowId(row: WidgetPaymentRow): Long = java.util.UUID.nameUUIDFromBytes(when (row) {
+    is WidgetPaymentRow.Day -> "day:${row.date}"
+    is WidgetPaymentRow.Payment -> "payment:${row.transaction.key}"
+}.toByteArray(Charsets.UTF_8)).mostSignificantBits
+
+internal fun widgetDayLabel(day: java.time.LocalDate, today: java.time.LocalDate = java.time.LocalDate.now(AccountingTime.clock.withZone(AccountingTime.zone))): String = when (day) {
+    today -> "Today"
+    today.minusDays(1) -> "Yesterday"
+    else -> day.format(DateTimeFormatter.ofPattern(if (day.year == today.year) "d MMM" else "d MMM yyyy", Locale.US))
+}
 
 internal fun showAnalysisDetails(widthDp: Int, heightDp: Int, fontScale: Float): Boolean =
     widthDp >= 240 * fontScale && heightDp >= 240 * fontScale
