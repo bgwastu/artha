@@ -363,10 +363,15 @@ private fun AiInsightsCard(
             if (!summary.isNullOrBlank()) net.wastu.artha.ui.AnalysisListContent(summary)
             else Text(if (configured) "Analyze spending and find practical next steps." else "Set up AI for analysis and recommendations.", style = MaterialTheme.typography.bodySmall)
             if (error != null) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            if (!readOnly) FilledTonalButton(onClick = if (configured) onReanalyze else onConfigure, enabled = !isAnalyzing) {
-                Text(if (isAnalyzing) "Analyzing" else if (configured) "Analyze" else "Set up AI")
+            if (!readOnly) FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                FilledTonalButton(onClick = if (configured) onReanalyze else onConfigure, enabled = !isAnalyzing) {
+                    Text(if (isAnalyzing) "Analyzing" else if (configured) "Analyze" else "Set up AI")
+                }
+                TextButton(onClick = onOpenKnowledge) { Text("Personal context") }
             }
-            if (!readOnly) TextButton(onClick = onOpenKnowledge) { Text("Personal context") }
             if (savedAt != null) Text("Saved ${formatDate(java.time.Instant.ofEpochMilli(savedAt))}",
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
