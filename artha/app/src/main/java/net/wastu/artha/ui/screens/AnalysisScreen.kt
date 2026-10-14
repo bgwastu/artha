@@ -99,6 +99,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.ui.AVAILABLE_CATEGORY_ICONS
 import net.wastu.artha.ui.ArthaViewModel
+import net.wastu.artha.ui.theme.expenseColor
+import net.wastu.artha.ui.theme.incomeColor
 import net.wastu.artha.data.analysis.CategoryAutomationState
 import net.wastu.artha.data.analysis.CategorySpending
 import net.wastu.artha.ui.MarkdownText
@@ -170,11 +172,11 @@ fun AnalysisScreen(
                 supportingContent = {
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(largest.description, maxLines = if (stackAmount) 2 else 1, overflow = TextOverflow.Ellipsis)
-                        if (stackAmount) Text(formatAmountMinor(largest.money.amountMinor), fontWeight = FontWeight.SemiBold)
+                        if (stackAmount) Text(formatAmountMinor(largest.money.amountMinor), fontWeight = FontWeight.SemiBold, color = expenseColor())
                     }
                 },
                 trailingContent = {
-                    if (!stackAmount) Text(formatAmountMinor(largest.money.amountMinor), fontWeight = FontWeight.SemiBold)
+                    if (!stackAmount) Text(formatAmountMinor(largest.money.amountMinor), fontWeight = FontWeight.SemiBold, color = expenseColor())
                     else Icon(Icons.Default.ChevronRight, contentDescription = null)
                 },
                 colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
@@ -287,7 +289,7 @@ private fun MonthSummaryCard(
                     Icon(Icons.Default.Info, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Text(formatAmountMinor(analysis.totalPersonalSpendingMinor), style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold)
+                    fontWeight = FontWeight.Bold, color = spendingAmountColor(analysis.totalPersonalSpendingMinor))
                 if (!canGoNext && analysis.previousMonthTotalMinor > 0) {
                     Text("Previous full month ${formatAmountMinor(analysis.previousMonthTotalMinor)}",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -389,7 +391,7 @@ private fun CategorySpendingRow(category: CategorySpending, categoryIcons: Map<S
             headlineContent = { Text(category.category) },
             supportingContent = {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    if (stackAmount) Text(formatAmountMinor(category.amountMinor), fontWeight = FontWeight.SemiBold)
+                    if (stackAmount) Text(formatAmountMinor(category.amountMinor), fontWeight = FontWeight.SemiBold, color = spendingAmountColor(category.amountMinor))
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("${category.sharePercent.toInt()}%", style = MaterialTheme.typography.bodySmall)
                         Text("${category.transactions.size} payments", style = MaterialTheme.typography.bodySmall)
@@ -397,7 +399,7 @@ private fun CategorySpendingRow(category: CategorySpending, categoryIcons: Map<S
                 }
             },
             leadingContent = { Icon(categoryIconFor(category.category, categoryIcons), null) },
-            trailingContent = if (stackAmount) null else ({ Text(formatAmountMinor(category.amountMinor), fontWeight = FontWeight.SemiBold) }),
+            trailingContent = if (stackAmount) null else ({ Text(formatAmountMinor(category.amountMinor), fontWeight = FontWeight.SemiBold, color = spendingAmountColor(category.amountMinor)) }),
             colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
             modifier = Modifier.clickable(onClickLabel = "Open category payments") { onOpenCategory(category.category) },
         )
@@ -648,4 +650,15 @@ fun IconPickerDialog(currentKey: String?, onDismiss: () -> Unit, onSelect: (Stri
 }
 
 private fun formatAmountMinor(amountMinor: Long): String =
-    if (amountMinor <= 0L) "Rp0" else formatMoney(Money(amountMinor))
+    when {
+        amountMinor == 0L -> "Rp0"
+        amountMinor > 0L -> "−${formatMoney(Money(amountMinor))}"
+        else -> "+${net.wastu.artha.ui.formatMinorAmount(java.math.BigInteger.valueOf(amountMinor).abs())}"
+    }
+
+@Composable
+private fun spendingAmountColor(amountMinor: Long) = when {
+    amountMinor > 0L -> expenseColor()
+    amountMinor < 0L -> incomeColor()
+    else -> MaterialTheme.colorScheme.onSurface
+}

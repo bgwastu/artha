@@ -93,7 +93,8 @@ internal fun paymentAmountColors(colors: ColorScheme): PaymentAmountColors {
         ?: listOf(Color.Black, Color.White).maxBy { minimumContrast(it) }
     val dark = colors.surface.luminance() < .5f
     fun readableTint(reference: Color): Color {
-        for (step in 7 downTo 1) {
+        // Start with the muted hue; blend toward neutral only to recover contrast.
+        for (step in 20 downTo 1) {
             val tinted = lerp(base, reference, step * .05f)
             if (minimumContrast(tinted) >= 4.6f) return tinted
         }

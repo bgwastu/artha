@@ -26,6 +26,8 @@ class PresentationContrastTest {
             assertNotEquals("Income and expense must have distinct hues", amounts.income.toArgb(), amounts.expense.toArgb())
             assertTrue("Income uses a muted green", amounts.income.green > amounts.income.red)
             assertTrue("Expenses use a muted red", amounts.expense.red > amounts.expense.green)
+            assertTrue("Income must look green rather than gray", amounts.income.green - amounts.income.red >= .12f)
+            assertTrue("Expenses must look red rather than gray", amounts.expense.red - amounts.expense.green >= .12f)
             listOf(amounts.income, amounts.expense).forEach { foreground ->
                 assertTrue("Financial text is opaque", foreground.alpha == 1f)
                 paymentAmountSurfaces(colors).forEach { background ->
