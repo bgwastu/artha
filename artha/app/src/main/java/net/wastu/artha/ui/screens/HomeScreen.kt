@@ -284,7 +284,6 @@ fun HomeScreen(
                     ledgerState,
                     onBack = { showSearch = false },
                     onTransaction = { selectedKey = it.key; selectedFallback = it },
-                    filters = transactionFilters,
                     viewModel = viewModel,
                     onRetry = onRetryLedger,
                 )

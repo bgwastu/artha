@@ -35,7 +35,7 @@ class TransactionPresentationTest {
         assertEquals("−${formatMoney(ordinary.money)}", paymentRowAmount(ordinary))
     }
 
-    @Test fun browsingAndSearchUseTheSameConfirmationSourceAndDirectionScope() {
+    @Test fun browsingUsesConfirmationSourceAndDirectionFilters() {
         val records = listOf(
             transaction("payment"), transaction("order", confirmed = false),
             transaction("incoming", direction = Direction.CREDIT), transaction("other-source", provider = Provider.GRAB),
@@ -49,14 +49,32 @@ class TransactionPresentationTest {
     @Test fun allSavedSearchExpandsBeyondCurrentDateAndSourceFiltersWithoutChangingRecords() {
         val saved = listOf(transaction("current"), transaction("unmatched", confirmed = false),
             transaction("outside-current-view", provider = Provider.GRAB))
-        val currentDateView = saved.take(2)
-        val filters = TransactionFilters(provider = Provider.JAGO)
-        assertEquals(listOf("current"), transactionSearchScope(currentDateView, saved, filters, false).map { it.providerTransactionId })
-        assertEquals(listOf("current", "outside-current-view"), transactionSearchScope(currentDateView, saved, filters, true).map { it.providerTransactionId })
-        assertFalse(transactionSearchScope(currentDateView, saved, filters, false).any { !it.isConfirmed })
-        assertFalse(transactionSearchScope(currentDateView, saved, filters, true).any { !it.isConfirmed })
+        assertEquals(listOf("current", "outside-current-view"), transactionSearchScope(saved).map { it.providerTransactionId })
+        assertFalse(transactionSearchScope(saved).any { !it.isConfirmed })
         assertEquals(3, saved.size)
         assertFalse(saved[1].isConfirmed)
+    }
+
+    @Test fun explicitSearchFiltersCombineSourceAndDirectionWithoutChangingSavedRecords() {
+        val saved = listOf(transaction("bank-out"), transaction("bank-in", direction = Direction.CREDIT),
+            transaction("wallet-in", provider = Provider.GRAB, direction = Direction.CREDIT),
+            transaction("unverified", direction = Direction.CREDIT, confirmed = false))
+        assertEquals(listOf("bank-in"), transactionSearchScope(saved,
+            TransactionFilters(provider = Provider.JAGO, direction = Direction.CREDIT)).map { it.providerTransactionId })
+        assertEquals(listOf("bank-out", "bank-in", "wallet-in"), transactionSearchScope(saved).map { it.providerTransactionId })
+        assertFalse(saved.last().isConfirmed)
+    }
+
+    @Test fun searchDatesUseAccountingDaysWithInclusiveFinalDay() {
+        val day = LocalDate.of(2026, 1, 12)
+        val start = day.atStartOfDay(AccountingTime.zone).toInstant()
+        val end = day.plusDays(1).atStartOfDay(AccountingTime.zone).toInstant()
+        val saved = listOf(transaction("before").copy(occurredAt = start.minusMillis(1)),
+            transaction("start").copy(occurredAt = start), transaction("late").copy(occurredAt = end.minusMillis(1)),
+            transaction("after").copy(occurredAt = end))
+        val range = start.toEpochMilli() to start.toEpochMilli()
+        assertEquals(listOf("start", "late"), transactionSearchScope(saved, range = range).map { it.providerTransactionId })
+        assertEquals(4, transactionSearchScope(saved).size)
     }
 
     @Test fun previousMonthUsesItsActualLastDayAcrossLeapYearAndYearBoundary() {

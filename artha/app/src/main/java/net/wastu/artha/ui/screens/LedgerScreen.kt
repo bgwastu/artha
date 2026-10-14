@@ -2,8 +2,16 @@ package net.wastu.artha.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.TopAppBar
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -20,6 +28,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -29,14 +38,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import net.wastu.artha.ui.theme.incomeColor
 import net.wastu.artha.ui.theme.expenseColor
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.DatePickerDialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.util.Locale
@@ -111,9 +120,18 @@ data class TransactionFilters(
         (direction == null || transaction.direction == direction)
 }
 
-internal fun transactionSearchScope(currentView: List<UnifiedTransaction>, allSaved: List<UnifiedTransaction>,
-    filters: TransactionFilters, searchAllSaved: Boolean): List<UnifiedTransaction> =
-    if (searchAllSaved) allSaved.filter { it.isConfirmed } else currentView.filter(filters::matches)
+internal fun transactionSearchScope(
+    allSaved: List<UnifiedTransaction>,
+    filters: TransactionFilters = TransactionFilters(),
+    range: Pair<Long?, Long?>? = null,
+): List<UnifiedTransaction> {
+    val start = range?.first
+    val endExclusive = range?.second?.let(AccountingTime::dayAfter)
+    return allSaved.filter {
+        val millis = it.occurredAt.toEpochMilli()
+        filters.matches(it) && (start == null || millis >= start) && (endExclusive == null || millis < endExclusive)
+    }
+}
 
 val TransactionFiltersSaver = listSaver<TransactionFilters, String>(
     save = { listOf(it.provider?.name.orEmpty(), it.direction?.name.orEmpty()) },
@@ -305,22 +323,29 @@ fun SearchTransactionsScreen(
     ledgerState: LedgerState,
     onBack: () -> Unit,
     onTransaction: (UnifiedTransaction) -> Unit,
-    filters: TransactionFilters = TransactionFilters(),
     viewModel: ArthaViewModel? = null,
     onRetry: (() -> Unit)? = null,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     val keyword = query.trim()
     val focusRequester = remember { FocusRequester() }
-    var allSaved by rememberSaveable { mutableStateOf(false) }
-    val allTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyList<UnifiedTransaction>()) }
-    val category by viewModel?.categoryFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
-    val scopedFilters = if (category == null) filters else TransactionFilters(direction = Direction.DEBIT)
-    val currentView = (ledgerState as? LedgerState.Ready)?.transactions.orEmpty()
-    val transactions = remember(currentView, allTransactions, scopedFilters, allSaved) {
-        transactionSearchScope(currentView, allTransactions, scopedFilters, allSaved)
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    var filters by rememberSaveable(stateSaver = TransactionFiltersSaver) { mutableStateOf(TransactionFilters()) }
+    var firstDay by rememberSaveable { mutableStateOf<Long?>(null) }
+    var lastDay by rememberSaveable { mutableStateOf<Long?>(null) }
+    var showFilter by rememberSaveable { mutableStateOf(false) }
+    val dateRange = if (firstDay != null || lastDay != null) firstDay to lastDay else null
+    val allTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle()
+        ?: remember(ledgerState) { mutableStateOf((ledgerState as? LedgerState.Ready)?.transactions.orEmpty()) }
+    val transactions = remember(allTransactions, filters, dateRange) { transactionSearchScope(allTransactions, filters, dateRange) }
+    fun clearFilters() { filters = TransactionFilters(); firstDay = null; lastDay = null }
+    val activeFilters = buildList {
+        filters.provider?.let { add(ActiveTransactionFilter(it.displayName) { filters = filters.copy(provider = null) }) }
+        filters.direction?.let { add(ActiveTransactionFilter(if (it == Direction.CREDIT) "Incoming" else "Outgoing") { filters = filters.copy(direction = null) }) }
+        dateRange?.let { add(ActiveTransactionFilter(rangeLabel(it)) { firstDay = null; lastDay = null }) }
     }
-    // Decode each payload once per ledger update, away from composition and scrolling.
+    // Build the search index off the main thread, outside composition and scrolling.
     val index by produceState<List<SearchEntry>?>(null, transactions) {
         value = null
         value = withContext(Dispatchers.Default) {
@@ -348,38 +373,52 @@ fun SearchTransactionsScreen(
             }.map { it.transaction })
         }
     }
-    BackHandler(onBack = onBack)
+    val closeSearch = { keyboard?.hide(); onBack() }
+    BackHandler(onBack = closeSearch)
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
     Scaffold(
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = closeSearch) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 title = {
-                    OutlinedTextField(
+                    BasicTextField(
                         value = query,
                         onValueChange = { query = it },
-                        label = { Text("Search transactions") },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                            .focusRequester(focusRequester)
+                            .semantics { contentDescription = "Search payments" },
+                        decorationBox = { input ->
+                            Box(contentAlignment = Alignment.CenterStart) {
+                                if (query.isEmpty()) Text("Search payments", style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                input()
+                            }
+                        },
                     )
                 },
                 actions = {
-                    IconButton(onClick = { query = "" }, enabled = query.isNotEmpty()) {
+                    if (query.isNotEmpty()) IconButton(onClick = { query = "" }) {
                         Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                    }
+                    IconButton(onClick = { keyboard?.hide(); focusManager.clearFocus(); showFilter = true },
+                        modifier = Modifier.semantics { stateDescription = if (activeFilters.isEmpty()) "No filters" else "${activeFilters.size} filters applied" }) {
+                        Icon(Icons.Default.FilterList, contentDescription = "Filter",
+                            tint = if (activeFilters.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)
                     }
                 },
             )
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
-            if (viewModel != null) FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = !allSaved, onClick = { allSaved = false }, label = { Text("Current view") })
-                FilterChip(selected = allSaved, onClick = { allSaved = true }, label = { Text("All saved history") })
-            }
             when {
                 ledgerState == LedgerState.Failed -> LedgerFeedback(title = "Couldn't load transactions", onRetry = onRetry)
                 ledgerState == LedgerState.Loading || results == null || results?.query != keyword ->
@@ -388,12 +427,24 @@ fun SearchTransactionsScreen(
                     transactions = results!!.transactions,
                     onTransaction = onTransaction,
                     highlightQuery = keyword,
-                    resetKey = listOf(keyword, allSaved),
+                    resetKey = listOf(keyword, filters, dateRange),
+                    activeFilters = activeFilters,
+                    onClearFilters = ::clearFilters,
                     resultCount = results!!.transactions.size,
                 )
             }
         }
     }
+    if (showFilter) TransactionFilterSheet(
+        filters = filters, range = dateRange, category = null, providers = Provider.entries,
+        onDismiss = { showFilter = false },
+        onApply = { updated, dates, _ ->
+            filters = updated
+            firstDay = dates?.first
+            lastDay = dates?.second
+            showFilter = false
+        },
+    )
 }
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
