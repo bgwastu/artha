@@ -29,6 +29,4 @@ Artha helps people in Indonesia understand their spending on rooted Android phon
   <img src="assets/screenshot.png" alt="Artha transaction timeline and spending analysis with fictional sample data">
 </picture>
 
-Screenshots use fictional sample data.
-
 AI disclosure: Human validated.
