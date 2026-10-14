@@ -30,3 +30,5 @@ Artha helps people in Indonesia understand their spending on rooted Android phon
 </picture>
 
 AI disclosure: Human validated.
+
+Licensed under [GPL-3.0](LICENSE).
