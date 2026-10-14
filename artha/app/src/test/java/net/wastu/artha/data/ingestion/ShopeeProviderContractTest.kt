@@ -192,23 +192,75 @@ class ShopeeProviderContractTest {
             JSONObject().put("details_list", JSONArray().put(marketplaceListing())).put("next_offset", 40)))
         assertEquals(1, page.orders.length())
         assertEquals(40, page.nextOffset)
+        assertNull(page.paginationIssue)
         val terminal = ShopeeProviderParser.marketplacePage(JSONObject("""{"error":0,"data":{"next_offset":-1}}"""))
         assertEquals(0, terminal.orders.length())
         assertNull(terminal.nextOffset)
+        assertNull(terminal.paginationIssue)
         expectSchema { ShopeeProviderParser.marketplacePage(JSONObject("""{"error":0,"data":{}}""")) }
     }
 
-    @Test fun foodEmptySearchIsOnlyTerminalForThatSearchAndMissingCursorIsFailure() {
+    @Test fun brokenMarketplacePaginationRetainsOrdersForVerifiedPartialImport() {
+        for (cursor in listOf(null, JSONObject.NULL, "invalid", -2L, Int.MAX_VALUE.toLong() + 1L)) {
+            val data = JSONObject().put("details_list", JSONArray().put(marketplaceListing()))
+            if (cursor != null) data.put("next_offset", cursor)
+            val page = ShopeeProviderParser.marketplacePage(JSONObject().put("error", 0).put("data", data))
+            assertNull(page.nextOffset)
+            val issue = requireNotNull(page.paginationIssue)
+            assertEquals(AccountStatus.ERROR, issue.status)
+            val listing = page.orders.getJSONObject(0)
+            val payment = ShopeeProviderParser.marketplace(
+                ShopeeProviderParser.orderId(listing, food = false), listing, marketplaceDetail(),
+            )!!.transaction
+            val rows = ImportRows()
+            rows.transactions += payment
+            rows.issue(issue)
+            try { rows.finish(); fail("Expected partial history") }
+            catch (partial: PartialImportException) {
+                assertEquals(listOf(payment), partial.transactions)
+                assertEquals("shopee:101", partial.transactions.single().providerTransactionId)
+                assertEquals(1_250_000L, partial.transactions.single().money.amountMinor)
+                assertTrue(partial.transactions.single().isConfirmed)
+            }
+        }
+    }
+
+    @Test fun foodEmptySearchIsOnlyTerminalForThatSearchAndBrokenCursorRemainsFailure() {
         val response = JSONObject("""{"code":0,"data":{"orders":[],"has_more":false,"next_id":""}}""")
         assertNull(ShopeeProviderParser.foodPage(response, search = true).nextId)
         val data = response.getJSONObject("data").put("has_more", true).put("next_id", "404")
         assertEquals("404", ShopeeProviderParser.foodPage(response, search = true).nextId)
         data.remove("next_id")
-        expectSchema { ShopeeProviderParser.foodPage(response, search = true) }
+        assertEquals(AccountStatus.ERROR, ShopeeProviderParser.foodPage(response, search = true).paginationIssue!!.status)
         data.put("last_id", "405")
         assertEquals("405", ShopeeProviderParser.foodPage(response, search = false).nextId)
         data.put("has_more", "false")
-        expectSchema { ShopeeProviderParser.foodPage(response, search = false) }
+        assertEquals(AccountStatus.ERROR, ShopeeProviderParser.foodPage(response, search = false).paginationIssue!!.status)
+    }
+
+    @Test fun brokenFoodListAndSearchPaginationRetainsOrdersWithoutClaimingCompletion() {
+        for (search in listOf(false, true)) {
+            for (more in listOf(true, "false", JSONObject.NULL)) {
+                val order = foodOrder()
+                val response = JSONObject().put("code", 0).put("data", JSONObject()
+                    .put("orders", JSONArray().put(order)).put("has_more", more))
+                val page = ShopeeProviderParser.foodPage(response, search)
+                assertNull(page.nextId)
+                val issue = requireNotNull(page.paginationIssue)
+                assertEquals(AccountStatus.ERROR, issue.status)
+                val payment = ShopeeProviderParser.food(page.orders.getJSONObject(0), foodDetail(order))!!.transaction
+                val rows = ImportRows()
+                rows.transactions += payment
+                rows.issue(issue)
+                try { rows.finish(); fail("Expected partial history") }
+                catch (partial: PartialImportException) {
+                    assertEquals(listOf(payment), partial.transactions)
+                    assertEquals("shopee:202", partial.transactions.single().providerTransactionId)
+                    assertEquals(2_350_000L, partial.transactions.single().money.amountMinor)
+                    assertTrue(partial.transactions.single().isConfirmed)
+                }
+            }
+        }
     }
 
     @Test fun sourceAuthAndSchemaFailuresRemainTypedAndValidRowsSurvive() {

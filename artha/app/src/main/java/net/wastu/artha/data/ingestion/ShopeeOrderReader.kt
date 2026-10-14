@@ -46,6 +46,7 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { rows.issue(error); break }
                 collect(response.orders, food = false, market, rows)
+                response.paginationIssue?.let(rows::issue)
                 val next = response.nextOffset ?: break
                 if (next <= offset || response.orders.length() == 0) {
                     rows.issue("Marketplace cursor did not advance; history incomplete"); break
@@ -88,6 +89,10 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { rows.issue(error); listFailed = true; break }
             collect(response.orders, food = true, food, rows)
+            val paginationIssue = response.paginationIssue
+            if (paginationIssue != null) {
+                rows.issue(paginationIssue); listFailed = true; break
+            }
             val next = response.nextId
             if (next == null) { listComplete = true; break }
             if (next == lastId || !visited.add(next) || response.orders.length() == 0) {
@@ -115,6 +120,7 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
                         val row = response.orders.optJSONObject(index)
                         if (row == null) issues += schema("food search row") else searchRows += row
                     }
+                    response.paginationIssue?.let(issues::add)
                     val next = response.nextId ?: break
                     if (next == cursor || !seen.add(next) || response.orders.length() == 0) {
                         issues += schema("food search cursor did not advance"); break

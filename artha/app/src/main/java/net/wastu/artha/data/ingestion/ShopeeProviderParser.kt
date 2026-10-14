@@ -13,13 +13,20 @@ import org.json.JSONObject
 /** Contracts checked against the installed Shopee app and its read-only API responses. */
 internal object ShopeeProviderParser {
     data class Payment(val transaction: UnifiedTransaction, val refundExpected: Boolean)
-    data class MarketplacePage(val orders: JSONArray, val nextOffset: Int?)
-    data class FoodPage(val orders: JSONArray, val nextId: String?)
+    data class MarketplacePage(val orders: JSONArray, val nextOffset: Int?, val paginationIssue: ProviderReadException? = null)
+    data class FoodPage(val orders: JSONArray, val nextId: String?, val paginationIssue: ProviderReadException? = null)
 
     fun marketplacePage(response: JSONObject): MarketplacePage {
         val data = data(response, food = false)
-        val offset = integer(data, "next_offset")
-        if (offset !in -1L..Int.MAX_VALUE.toLong()) schema("marketplace cursor")
+        val offset = try {
+            integer(data, "next_offset").also {
+                if (it !in -1L..Int.MAX_VALUE.toLong()) schema("marketplace cursor")
+            }
+        } catch (error: ProviderReadException) {
+            // A broken cursor prevents traversal, not detail verification of this page's orders.
+            val orders = data.optJSONArray("details_list") ?: throw error
+            return MarketplacePage(orders, null, error)
+        }
         // The live endpoint omits details_list entirely on its terminal page.
         val orders = data.optJSONArray("details_list")
             ?: if (offset == -1L && (!data.has("details_list") || data.isNull("details_list"))) JSONArray()
@@ -30,11 +37,15 @@ internal object ShopeeProviderParser {
     fun foodPage(response: JSONObject, search: Boolean): FoodPage {
         val data = data(response, food = true)
         val orders = data.optJSONArray("orders") ?: schema("food order list")
-        val more = data.opt("has_more") as? Boolean ?: schema("food pagination")
-        // Search uses next_id in live responses; the app's /orders list service reads lastId.
-        val next = if (more) string(data, if (search) "next_id" else "last_id")
-            .takeIf { it.isNotBlank() } ?: schema("food cursor") else null
-        return FoodPage(orders, next)
+        return try {
+            val more = data.opt("has_more") as? Boolean ?: schema("food pagination")
+            // Search uses next_id in live responses; the app's /orders list service reads lastId.
+            val next = if (more) string(data, if (search) "next_id" else "last_id")
+                .takeIf { it.isNotBlank() } ?: schema("food cursor") else null
+            FoodPage(orders, next)
+        } catch (error: ProviderReadException) {
+            FoodPage(orders, null, error)
+        }
     }
 
     fun data(response: JSONObject, food: Boolean): JSONObject {
