@@ -47,8 +47,8 @@ internal fun AnalysisListContent(text: String) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         sections.forEach { section ->
             Column(Modifier.semantics { collectionInfo = CollectionInfo(section.items.size, 1) }, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                section.title?.let { Text(it, style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.semantics { heading() }) }
+                Text(section.title ?: "Findings", style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.semantics { heading() })
                 section.items.forEachIndexed { index, item ->
                     Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { collectionItemInfo = CollectionItemInfo(index, 1, 0, 1) }, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("${index + 1}.", style = MaterialTheme.typography.bodyMedium,
