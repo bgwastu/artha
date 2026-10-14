@@ -161,26 +161,9 @@ fun AnalysisScreen(
                 monthlyNote = snapshot.monthlyNotes[selectedMonth.toString()],
                 onEditNote = { showMonthlyNoteDialog = true },
                 onOpenCategories = onOpenCategoriesSheet, onOpenScope = { showScopeDialog = true },
+                onOpenLargestPayment = largest?.let { { onOpenTransaction(it) } },
                 onPreviousMonth = { viewModel.setAnalysisMonth(selectedMonth.minusMonths(1)) },
                 onNextMonth = { viewModel.setAnalysisMonth(selectedMonth.plusMonths(1)) },
-            )
-        }
-        if (largest != null) item(key = "largest_payment") {
-            val stackAmount = LocalDensity.current.fontScale > 1.3f
-            ListItem(
-                headlineContent = { Text("Largest payment", style = MaterialTheme.typography.labelMedium) },
-                supportingContent = {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(largest.description, maxLines = if (stackAmount) 2 else 1, overflow = TextOverflow.Ellipsis)
-                        if (stackAmount) Text(formatAmountMinor(largest.money.amountMinor), fontWeight = FontWeight.SemiBold, color = expenseColor())
-                    }
-                },
-                trailingContent = {
-                    if (!stackAmount) Text(formatAmountMinor(largest.money.amountMinor), fontWeight = FontWeight.SemiBold, color = expenseColor())
-                    else Icon(Icons.Default.ChevronRight, contentDescription = null)
-                },
-                colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier.clickable(onClickLabel = "Open payment") { onOpenTransaction(largest) },
             )
         }
         item(key = "category_header") {
@@ -207,6 +190,7 @@ fun AnalysisScreen(
         onDismissRequest = { showScopeDialog = false }, title = { Text("Spending total") },
         text = { Text("Paid expenses in rupiah, counted once across saved sources. Transfers, wallet top-ups and refunded charges are excluded. History may be incomplete.") },
         confirmButton = { TextButton(onClick = { showScopeDialog = false }) { Text("Close") } },
+        dismissButton = { TextButton(onClick = { showScopeDialog = false; viewModel.setTargetDestination("SETTINGS") }) { Text("Sources") } },
     )
 
     if (showMonthlyNoteDialog) {
@@ -255,6 +239,7 @@ fun AnalysisScreen(
 private fun MonthSummaryCard(
     month: YearMonth, analysis: MonthSpendingAnalysis, monthlyNote: String?,
     onEditNote: () -> Unit, onOpenCategories: () -> Unit, onOpenScope: () -> Unit,
+    onOpenLargestPayment: (() -> Unit)?,
     onPreviousMonth: () -> Unit, onNextMonth: () -> Unit,
 ) {
     val monthTitle = remember(month) { month.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)) }
@@ -275,6 +260,9 @@ private fun MonthSummaryCard(
             Box {
                 IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Month options") }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    onOpenLargestPayment?.let { open ->
+                        DropdownMenuItem(text = { Text("Largest payment") }, onClick = { showMenu = false; open() })
+                    }
                     DropdownMenuItem(text = { Text("Monthly note") }, onClick = { showMenu = false; onEditNote() })
                     DropdownMenuItem(text = { Text("Manage categories") }, onClick = { showMenu = false; onOpenCategories() })
                     DropdownMenuItem(text = { Text("Spending scope") }, onClick = { showMenu = false; onOpenScope() })
