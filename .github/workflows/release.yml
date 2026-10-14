@@ -2,6 +2,19 @@ name: Release
 on:
   push:
     branches: [main]
+    paths:
+      - 'artha/app/src/main/**'
+      - 'artha/app/src/release/**'
+      - 'artha/app/*.gradle*'
+      - 'artha/app/proguard*.pro'
+      - 'artha/*.gradle*'
+      - 'artha/gradle.properties'
+      - 'artha/gradle/**'
+      - 'artha/gradlew'
+      - 'artha/gradlew.bat'
+      - 'artha/buildSrc/**'
+      - 'tools/release/**'
+      - '.github/workflows/release.yml'
 permissions:
   contents: write
 concurrency:
