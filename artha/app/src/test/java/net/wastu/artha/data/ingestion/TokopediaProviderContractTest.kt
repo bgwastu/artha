@@ -164,7 +164,9 @@ class TokopediaProviderContractTest {
     }
 
     @Test fun jweIsKeptOpaqueAndAmbiguousTokensFailWithoutExposingThem() {
-        val token = "eyJmaWN0aW9uYWwiOiJzdG9yZSJ9..ZmFrZS1pdg.ZmFrZS1jaXBoZXI.ZmFrZS10YWc"
+        // Fictional, nonfunctional JWE parts; keep the fixture readable rather than storing a token literal.
+        val token = listOf("""{"fictional":"store"}""", "", "fake-iv", "fake-cipher", "fake-tag")
+            .joinToString(".") { Base64.getUrlEncoder().withoutPadding().encodeToString(it.toByteArray(Charsets.UTF_8)) }
         val bytes = ("ACCESS_TOKEN_v2\u0000" + encrypted(token)).toByteArray()
         assertEquals(token, TokopediaProviderParser.sessionToken(bytes))
         val duplicate = bytes + ("\u0000" + encrypted(token + "x")).toByteArray()
