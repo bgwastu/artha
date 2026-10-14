@@ -216,7 +216,7 @@ object LedgerReconciler {
             val age = Duration.between(payment.tx.occurredAt, c.tx.occurredAt)
             c.tx.isConfirmed && c.reference.isBlank() && !d.tx.isReversal && c.tx.provider == payment.tx.provider &&
                 age >= Duration.ZERO && age <= Duration.ofDays(14) && compatibleAccount(c.tx, payment.tx) &&
-                c.code.endsWith("-R", true) && c.code.dropLast(2).equals(payment.code, true) && c.merchant == payment.merchant
+                c.code.endsWith("-R", true) && c.code.dropLast(2).equals(payment.code, true) && reversalIdentityMatches(c, payment)
         } }
         val reverseCount = choices.values.flatten().groupingBy { it.tx.key }.eachCount()
         val used = mutableSetOf<String>()
@@ -230,6 +230,21 @@ object LedgerReconciler {
             d.tx.key to d.tx.copy(description = "${d.tx.description} (Reversed)", isReversal = true, rawPayload = payload.toString())
         }.toMap()
         return transactions.filter { it.key !in used }.map { replacements[it.key] ?: it }
+    }
+
+    private fun reversalIdentityMatches(credit: Evidence, debit: Evidence): Boolean {
+        if (credit.tx.provider == Provider.JAGO && debit.tx.provider == Provider.JAGO &&
+            credit.origin == "jago-local-hive" && debit.origin == "jago-local-hive" &&
+            (debit.code == "PSD02" || debit.code.startsWith("VISA-ECOM-EDC-"))) {
+            // Native card reversals share f6 with their charge; counterpart text can
+            // instead contain a card mask on one side and merchant text on the other.
+            fun reference(row: Evidence) = (row.payload.optJSONObject("fields")?.opt("f6") as? String)
+                ?.trim()?.takeIf { it.isNotBlank() && !it.all { char -> char == '0' } }
+            val creditReference = reference(credit)
+            val debitReference = reference(debit)
+            if (creditReference != null || debitReference != null) return creditReference != null && creditReference == debitReference
+        }
+        return credit.merchant == debit.merchant
     }
 
     private fun paymentProvider(tx: UnifiedTransaction): Provider = tx.canonicalKey?.substringBefore(':')

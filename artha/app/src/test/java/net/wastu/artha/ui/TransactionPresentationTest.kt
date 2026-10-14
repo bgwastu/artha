@@ -14,6 +14,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TransactionPresentationTest {
+    @org.junit.Test fun reversedPaymentShowsZeroButOriginalChargeRemainsAvailable() {
+        val tx = net.wastu.artha.core.model.UnifiedTransaction(net.wastu.artha.core.model.Provider.JAGO, "fixture",
+            net.wastu.artha.core.model.Direction.DEBIT, net.wastu.artha.core.model.Money(125000),
+            java.time.Instant.EPOCH, "Fictional reversed payment", "{}", isReversal = true)
+        assertEquals("Rp0", paymentRowAmount(tx))
+        assertEquals(tx.money, originalPaymentMoney(tx))
+        val partiallyRefunded = tx.copy(money = net.wastu.artha.core.model.Money(25000), isReversal = false, rawPayload = """{"grossPaidAmountMinor":125000}""")
+        assertEquals(tx.money, originalPaymentMoney(partiallyRefunded))
+    }
+
     @Test fun reversingCreditsKeepTheirRecordedIncomingAmountInListsAndWidgets() {
         val ordinary = transaction("fixture")
         val credit = ordinary.copy(direction = Direction.CREDIT, isReversal = true)

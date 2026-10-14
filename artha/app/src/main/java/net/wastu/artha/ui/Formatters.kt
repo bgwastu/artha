@@ -35,3 +35,14 @@ internal fun paymentRowAmount(transaction: UnifiedTransaction): String {
     val reversed = transaction.isReversal || transaction.description.contains("(Reversed)", ignoreCase = true)
     return if (!credit && reversed) "Rp0" else "${if (credit) "+" else "−"}${formatMoney(transaction.money)}"
 }
+
+/** Keep the original charge available when a refund changes its displayed net amount. */
+internal fun originalPaymentMoney(transaction: UnifiedTransaction): Money {
+    val gross = runCatching { org.json.JSONObject(transaction.rawPayload).opt("grossPaidAmountMinor") }.getOrNull()
+    val amount = when (gross) {
+        is Byte, is Short, is Int, is Long -> (gross as Number).toLong()
+        is String -> gross.toLongOrNull()
+        else -> null
+    }?.takeIf { it > 0L } ?: transaction.money.amountMinor
+    return transaction.money.copy(amountMinor = amount)
+}

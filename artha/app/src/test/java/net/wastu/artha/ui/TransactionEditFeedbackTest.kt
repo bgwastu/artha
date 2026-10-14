@@ -282,6 +282,46 @@ class TransactionEditFeedbackTest {
         } finally { vm?.lock(); Dispatchers.resetMain() }
     }
 
+    @Test fun categoryTapWaitsForPersistenceAndBlocksRepeatedSubmission() {
+        val state = TransactionDetailsState().apply { editor = "category" }
+        var callback: ((Result<Unit>) -> Unit)? = null
+        var writes = 0
+        var closes = 0
+        val persist: (String, (Result<Unit>) -> Unit) -> Unit = { _, complete -> writes++; callback = complete }
+        state.chooseCategory("New category", "Current", persist) { closes++ }
+        assertTrue(state.saving)
+        assertNull(state.savedFeedback)
+        assertEquals(0, closes)
+        state.chooseCategory("Another category", "Current", persist) { closes++ }
+        assertEquals(1, writes)
+        callback!!(Result.success(Unit))
+        assertFalse(state.saving)
+        assertEquals(1, closes)
+    }
+
+    @Test fun failedCategoryTapRetainsChoiceForRetryWithoutClosing() {
+        val state = TransactionDetailsState().apply { editor = "category" }
+        var closes = 0
+        state.chooseCategory("Chosen category", "Current", { _, complete -> complete(Result.failure(Exception("Fixture"))) }) { closes++ }
+        assertFalse(state.saving)
+        assertNotNull(state.saveError)
+        assertNull(state.savedFeedback)
+        assertEquals("Chosen category", state.categoryDraft)
+        assertEquals(0, closes)
+        state.chooseCategory(state.categoryDraft, "Current", { chosen, complete ->
+            assertEquals("Chosen category", chosen); complete(Result.success(Unit))
+        }) { closes++ }
+        assertEquals(1, closes)
+    }
+
+    @Test fun tappingCurrentCategoryClosesWithoutWriting() {
+        val state = TransactionDetailsState().apply { editor = "category" }
+        var closes = 0
+        state.chooseCategory("Current", "Current", { _, _ -> error("No redundant write") }) { closes++ }
+        assertEquals(1, closes)
+        assertFalse(state.saving)
+    }
+
     private fun payment() = UnifiedTransaction(
         Provider.JAGO, "fictional-payment", Direction.DEBIT, Money(10000), Instant.EPOCH, "Fictional payment", "{}",
     )

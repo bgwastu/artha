@@ -74,6 +74,8 @@ import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.categoryIconFor
 import net.wastu.artha.ui.formatDate
 import net.wastu.artha.ui.formatMoney
+import net.wastu.artha.ui.paymentRowAmount
+import net.wastu.artha.ui.originalPaymentMoney
 import net.wastu.artha.ui.theme.expenseColor
 import net.wastu.artha.ui.theme.incomeColor
 import java.time.Instant
@@ -90,6 +92,23 @@ class TransactionDetailsState internal constructor() {
     internal var savedFeedback by mutableStateOf<String?>(null)
     internal var linkedExpanded by mutableStateOf(false)
     internal var sourceExpanded by mutableStateOf(false)
+
+    internal fun chooseCategory(category: String, current: String,
+        persist: (String, (Result<Unit>) -> Unit) -> Unit, onDone: () -> Unit,
+    ) {
+        if (saving) return
+        if (category == current) { onDone(); return }
+        categoryDraft = category
+        saveError = null
+        saving = true
+        persist(category) { result ->
+            saving = false
+            if (result.isSuccess) {
+                savedFeedback = "Category saved"
+                onDone()
+            } else saveError = "Couldn’t save category. Try again."
+        }
+    }
 
     internal fun dismiss(onClose: () -> Unit) {
         if (!saving) {
@@ -200,24 +219,22 @@ private fun TransactionDetailsBody(
     val isReversal = record.isReversal || record.description.contains("(Reversed)", ignoreCase = true)
 
     if (state.editor == "category") {
+        val selectCategory: (String) -> Unit = { category ->
+            state.chooseCategory(category, currentCategory,
+                persist = { selected, complete ->
+                    if (viewModel == null) complete(Result.failure(IllegalStateException("Editor unavailable")))
+                    else viewModel.setTransactionCategory(record, selected, complete)
+                }, onDone = closeEditor)
+        }
         CategoryPickerView(
-            currentCategory = state.categoryDraft,
+            currentCategory = currentCategory,
             availableCategories = (availableCategories + currentCategory).distinct(),
             categoryIcons = snapshot?.categoryIcons.orEmpty(),
             saving = state.saving,
             error = state.saveError,
-            onSelectCategory = { state.categoryDraft = it; state.saveError = null },
+            onSelectCategory = selectCategory,
             onBack = closeEditor,
-            onSave = {
-                state.saving = true
-                viewModel?.setTransactionCategory(record, state.categoryDraft) { result ->
-                    state.saving = false
-                    if (result.isSuccess) {
-                        state.savedFeedback = "Category saved"
-                        closeEditor()
-                    } else state.saveError = "Couldn’t save category. Try again."
-                }
-            },
+            onRetry = { selectCategory(state.categoryDraft) },
         )
     } else if (state.editor == "note") {
         TransactionNoteEditor(
@@ -256,12 +273,14 @@ private fun TransactionDetailsBody(
                     }
                 }
                 Text(
-                    "${if (credit) "+" else "−"}${formatMoney(record.money)}",
+                    paymentRowAmount(record),
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
-                    color = if (credit) incomeColor() else expenseColor(),
+                    color = if (!credit && isReversal) MaterialTheme.colorScheme.onSurfaceVariant
+                        else if (credit) incomeColor() else expenseColor(),
                 )
                 Text(transactionAccountingLabel(record), style = MaterialTheme.typography.labelLarge)
+                if (!credit && isReversal) DetailRow("Original charge", formatMoney(originalPaymentMoney(record)))
                 state.savedFeedback?.let { SaveFeedback(it, false) }
                 Text(record.description.trim(), style = MaterialTheme.typography.titleLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -528,7 +547,7 @@ private fun CategoryPickerView(
     onSelectCategory: (String) -> Unit,
     saving: Boolean,
     error: String?,
-    onSave: () -> Unit,
+    onRetry: () -> Unit,
     onBack: () -> Unit,
 ) {
     var searchQuery by remember { mutableStateOf("") }
@@ -564,6 +583,7 @@ private fun CategoryPickerView(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
             )
+            if (saving) CircularProgressIndicator(Modifier.size(20.dp))
         }
 
         // Search field
@@ -591,10 +611,10 @@ private fun CategoryPickerView(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        DetailRow("Selected category", currentCategory)
-        Text("Your choice stays when history or insights update.", style = MaterialTheme.typography.bodySmall)
-        error?.let { SaveFeedback(it, true) }
-        EditorActions(saving, onBack, onSave)
+        error?.let {
+            SaveFeedback(it, true)
+            TextButton(onClick = onRetry, enabled = !saving) { Text("Retry") }
+        }
 
         // A typed category can be assigned without changing the shared picker.
         if (queryTrimmed.isNotBlank() && !isExactMatch) {
@@ -662,7 +682,7 @@ private fun CategoryPickerView(
                     if (isSelected) {
                         Icon(
                             Icons.Default.Check,
-                            contentDescription = "Selected",
+                            contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(20.dp),
                         )
