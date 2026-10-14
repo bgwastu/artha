@@ -13,6 +13,13 @@ data class CategoryCandidate(val transaction: UnifiedTransaction, val fingerprin
 object AiCategorization {
     private const val REASON_PREFIX = "AI suggestion: "
 
+    /** UI decoration and commentary updates must not cancel a category request. */
+    fun requestSnapshot(snapshot: AnalysisSnapshot): AnalysisSnapshot = snapshot.copy(
+        monthlySummaries = emptyMap(), categoryIcons = emptyMap(), monthlyNotes = emptyMap(),
+        deletedCategories = emptyMap(), analysisFingerprints = emptyMap(),
+        updatedAt = snapshot.updatedAt.filterKeys { it.startsWith("cat:") || it.startsWith("note:") },
+    )
+
     fun categories(snapshot: AnalysisSnapshot): List<String> =
         (snapshot.customCategories + CategoryConstants.UNCATEGORIZED)
             .filter { it != CategoryConstants.INVESTMENTS_TRANSFERS }.distinct()

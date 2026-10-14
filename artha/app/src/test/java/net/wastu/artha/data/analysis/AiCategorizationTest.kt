@@ -10,6 +10,14 @@ class AiCategorizationTest {
     private val snapshot = AnalysisSnapshot()
     private val batch get() = AiCategorization.nextBatch(listOf(payment), snapshot)
 
+    @Test fun decorationAndSummaryChangesDoNotRestartCategoryRequests() {
+        val changed = snapshot.copy(categoryIcons = mapOf("Groceries" to "leaf"), monthlySummaries = mapOf("2026-10" to "Summary"),
+            monthlyNotes = mapOf("2026-10" to "Note"), analysisFingerprints = mapOf("2026-10" to "fingerprint"), updatedAt = mapOf("icon:Groceries" to 10))
+        assertEquals(AiCategorization.requestSnapshot(snapshot), AiCategorization.requestSnapshot(changed))
+        assertNotEquals(AiCategorization.requestSnapshot(snapshot), AiCategorization.requestSnapshot(changed.copy(userNotes = mapOf(payment.key to "Context"))))
+        assertNotEquals(AiCategorization.requestSnapshot(snapshot), AiCategorization.requestSnapshot(changed.copy(manualCategories = setOf(payment.key))))
+    }
+
     @Test fun noProviderKeywordOrPersonalNoteInventsACategory() {
         for (tx in listOf(payment, payment.copy(provider = Provider.SHOPEE), payment.copy(rawPayload = """{"serviceTier":"GoFood","pickupLocation":"here"}"""))) {
             assertEquals("Uncategorized", SpendingProjector().project(listOf(tx), snapshot).transactions.single().category)

@@ -249,31 +249,31 @@ class TransactionEditFeedbackTest {
         assertEquals(1, store.snapshot.value.customCategories.count { it == "New category" })
     }
 
-    @Test fun automaticAiRunsOnceThenRecategorizesNewContextWithoutOverwritingManualChoice() = runTest {
+    @Test fun automaticAiCompletesMultipleBatchesAndPreservesSubsequentManualChoice() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)
         var vm: ArthaViewModel? = null
         try {
             val prefs = FixturePreferences(mapOf("ai_base_url" to "https://fictional.example/v1", "ai_api_key" to "fictional-test-key", "ai_model" to "fictional-model"))
             val store = AnalysisStore(prefs.context)
-            val state = MutableStateFlow<SpendingState>(SpendingState.Ready(listOf(payment()), emptyMap()))
+            val state = MutableStateFlow<SpendingState>(SpendingState.Ready((0..32).map { payment().copy(providerTransactionId = if (it == 0) payment().providerTransactionId else "fixture-$it") }, emptyMap()))
             val called = CompletableDeferred<Unit>()
             var calls = 0
             vm = ArthaViewModel(RootAccess { false }, { error("Uses fixture state") }, analysisStore = store,
                 computationDispatcher = dispatcher, spendingState = state, categorize = { _, _, batch ->
-                    calls++; called.complete(Unit)
+                    calls++; if (calls == 2) called.complete(Unit)
                     batch.associate { it.transaction.key to CategorySuggestion("Uncategorized", "AI suggestion: Fixture") }
                 })
             vm.enterForeground(); called.await()
             // IO commit can complete after the test dispatcher reaches idle.
-            while (store.snapshot.value.aiCategoryFingerprints.isEmpty()) { kotlinx.coroutines.yield() }
+            while (store.snapshot.value.aiCategoryFingerprints.size < 33) { kotlinx.coroutines.yield() }
             advanceUntilIdle()
-            assertEquals(1, calls)
+            assertEquals(2, calls)
             assertEquals(CategoryAutomationState.READY, vm.categoryAutomation.value)
             store.setClassification(payment().key, "Manual", "", true)
             store.setUserNote(payment().key, "New context")
             advanceUntilIdle()
-            assertEquals(1, calls)
+            assertEquals(2, calls)
             assertEquals("Manual", store.snapshot.value.categories[payment().key])
         } finally { vm?.lock(); Dispatchers.resetMain() }
     }

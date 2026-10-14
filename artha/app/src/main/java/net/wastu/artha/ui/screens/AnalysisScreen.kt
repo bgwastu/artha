@@ -503,9 +503,9 @@ fun ManageCategoriesSheet(
         }
     }
     ModalBottomSheet(
-        onDismissRequest = { if (!saving) { focus.clearFocus(); onDismiss() } },
+        onDismissRequest = { if (!saving) { focus.clearFocus(); if (adding) adding = false else onDismiss() } },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true,
-            confirmValueChange = { !saving || it != androidx.compose.material3.SheetValue.Hidden }),
+            confirmValueChange = { it != androidx.compose.material3.SheetValue.Hidden || (!saving && !adding) }),
     ) {
         BackHandler(enabled = adding) {
             if (!saving) { focus.clearFocus(); adding = false }

@@ -158,7 +158,7 @@ class ArthaViewModel(
             var failedBatch: String? = null
             var previousConfig: AiConfig? = null
             var previousRetry = 0
-            combine(_reconciledCache, analysisSnapshot, _refreshing, categoryRetry) { rows, snapshot, importing, retry ->
+            combine(_reconciledCache, analysisSnapshot.map(AiCategorization::requestSnapshot).distinctUntilChanged(), _refreshing, categoryRetry) { rows, snapshot, importing, retry ->
                 CategoryInput(rows, snapshot, importing, retry)
             }.debounce(1000).collectLatest { input ->
                 val config = input.snapshot.aiConfig
