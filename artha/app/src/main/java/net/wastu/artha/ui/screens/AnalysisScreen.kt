@@ -360,7 +360,6 @@ private fun AiInsightsCard(
             modifier = Modifier.clickable { expanded = !expanded }.semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" },
         )
         if (expanded) Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (savedAt != null) Text("Saved ${formatDate(java.time.Instant.ofEpochMilli(savedAt))}", style = MaterialTheme.typography.labelSmall)
             if (!summary.isNullOrBlank()) net.wastu.artha.ui.AnalysisListContent(summary)
             else Text(if (configured) "Analyze spending and find practical next steps." else "Set up AI for analysis and recommendations.", style = MaterialTheme.typography.bodySmall)
             if (error != null) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -368,6 +367,8 @@ private fun AiInsightsCard(
                 Text(if (isAnalyzing) "Analyzing" else if (configured) "Analyze" else "Set up AI")
             }
             if (!readOnly) TextButton(onClick = onOpenKnowledge) { Text("Personal context") }
+            if (savedAt != null) Text("Saved ${formatDate(java.time.Instant.ofEpochMilli(savedAt))}",
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
