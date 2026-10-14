@@ -4,6 +4,8 @@ import android.accounts.AccountManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.imePadding
@@ -577,6 +579,7 @@ fun AiConfigDialog(currentConfig: AiConfig, onDismiss: () -> Unit, onSave: (AiCo
     var testResult by remember { mutableStateOf<String?>(null) }
     var testSucceeded by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val feedbackRequester = remember { BringIntoViewRequester() }
     fun draft() = currentConfig.copy(baseUrl = baseUrl.trim(), apiKey = apiKey.trim(), model = model.trim())
     AlertDialog(onDismissRequest = { if (!saving) onDismiss() },
         title = { Text("AI") },
@@ -605,9 +608,17 @@ fun AiConfigDialog(currentConfig: AiConfig, onDismiss: () -> Unit, onSave: (AiCo
                         }
                     }
                 }) { Text(if (testing) "Testing" else "Test connection") }
-                testResult?.let { Text(it, color = if (testSucceeded) incomeColor() else MaterialTheme.colorScheme.error,
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
-                (validationError ?: error)?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+                if (testResult != null || validationError != null || error != null) {
+                    Column(Modifier.bringIntoViewRequester(feedbackRequester)) {
+                        testResult?.let { Text(it, color = if (testSucceeded) incomeColor() else MaterialTheme.colorScheme.error,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+                        (validationError ?: error)?.let { Text(it, color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+                    }
+                    LaunchedEffect(testResult, validationError, error) {
+                        feedbackRequester.bringIntoView()
+                    }
+                }
             }
         },
         confirmButton = {

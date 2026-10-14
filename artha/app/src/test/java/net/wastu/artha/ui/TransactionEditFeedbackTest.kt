@@ -17,6 +17,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import net.wastu.artha.core.model.*
@@ -266,8 +267,9 @@ class TransactionEditFeedbackTest {
                     batch.associate { it.transaction.key to CategorySuggestion("Uncategorized", "AI suggestion: Fixture") }
                 })
             vm.enterForeground(); called.await()
-            // IO commit can complete after the test dispatcher reaches idle.
-            while (store.snapshot.value.aiCategoryFingerprints.size < 33) { kotlinx.coroutines.yield() }
+            // Publishing the IO commit precedes the main-thread completion state.
+            store.snapshot.first { it.aiCategoryFingerprints.size == 33 }
+            vm.categoryAutomation.first { it == CategoryAutomationState.READY }
             advanceUntilIdle()
             assertEquals(2, calls)
             assertEquals(CategoryAutomationState.READY, vm.categoryAutomation.value)
