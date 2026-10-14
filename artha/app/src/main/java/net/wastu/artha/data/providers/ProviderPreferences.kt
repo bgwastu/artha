@@ -23,7 +23,17 @@ data class ProviderDiagnostic(
     val accountStatus: AccountStatus = AccountStatus.UNKNOWN,
     val accountIdentifier: String? = null,
     val coverageHint: String? = null,
+    val lastImportWindow: ProviderImportWindow? = null,
 )
+
+/** Observed payment dates in one import, never a guarantee of continuous history. */
+data class ProviderImportWindow(val paymentCount: Int, val earliestMillis: Long?, val latestMillis: Long?) {
+    init {
+        require(paymentCount >= 0)
+        require(if (paymentCount == 0) earliestMillis == null && latestMillis == null
+            else earliestMillis != null && latestMillis != null && earliestMillis <= latestMillis)
+    }
+}
 
 class ProviderPreferences(context: Context) {
     private val preferences = context.getSharedPreferences("provider_visibility", Context.MODE_PRIVATE)
@@ -64,6 +74,11 @@ class ProviderPreferences(context: Context) {
                 accountIdentifier = ident,
                 coverageHint = preferences.getString("${p.name}_coverage_hint", null)
                     ?: if (legacy) p.historyCoverageHint else null,
+                lastImportWindow = preferences.getLong("${p.name}_read_count", -1L).takeIf { it in 0..Int.MAX_VALUE.toLong() }?.let { count ->
+                    runCatching { ProviderImportWindow(count.toInt(),
+                        preferences.getLong("${p.name}_read_first_ms", Long.MIN_VALUE).takeUnless { it == Long.MIN_VALUE },
+                        preferences.getLong("${p.name}_read_last_ms", Long.MIN_VALUE).takeUnless { it == Long.MIN_VALUE }) }.getOrNull()
+                },
             )
         }
 
@@ -86,6 +101,7 @@ class ProviderPreferences(context: Context) {
         accountIdentifier: String? = null,
         coverageHint: String? = null,
         partialReason: String? = null,
+        importWindow: ProviderImportWindow? = null,
     ) {
         val now = System.currentTimeMillis()
         val current = _diagnostics.value.toMutableMap()
@@ -99,6 +115,7 @@ class ProviderPreferences(context: Context) {
             accountStatus = if (partialReason == null) AccountStatus.CONNECTED else AccountStatus.PARTIAL,
             accountIdentifier = finalIdent,
             coverageHint = coverageHint,
+            lastImportWindow = importWindow,
         )
         current[provider] = updated
         preferences.edit {
@@ -109,6 +126,12 @@ class ProviderPreferences(context: Context) {
             if (coverageHint == null) remove("${provider.name}_coverage_hint") else putString("${provider.name}_coverage_hint", coverageHint)
             putString("${provider.name}_status", updated.accountStatus.name)
             if (finalIdent != null) putString("${provider.name}_identifier", finalIdent)
+            if (importWindow == null) remove("${provider.name}_read_count")
+            else putLong("${provider.name}_read_count", importWindow.paymentCount.toLong())
+            if (importWindow?.earliestMillis == null) remove("${provider.name}_read_first_ms")
+            else putLong("${provider.name}_read_first_ms", importWindow.earliestMillis)
+            if (importWindow?.latestMillis == null) remove("${provider.name}_read_last_ms")
+            else putLong("${provider.name}_read_last_ms", importWindow.latestMillis)
         }
         _diagnostics.value = current
     }

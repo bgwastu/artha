@@ -86,6 +86,36 @@ class ProviderDiagnosticsTest {
         assertEquals(Provider.GRAB.legacyCoverageHint, diagnostics.getValue(Provider.GRAB).lastError)
     }
 
+    @Test fun lastImportWindowTracksOnlyVerifiedPaymentsAndSurvivesFailedRefresh() = runTest {
+        val fixture = PreferencesFixture()
+        val preferences = ProviderPreferences(fixture.context)
+        val first = payment.copy(occurredAt = Instant.ofEpochMilli(1000))
+        val last = payment.copy(providerTransactionId = "later", occurredAt = Instant.ofEpochMilli(3000))
+        val quote = payment.copy(providerTransactionId = "quote", occurredAt = Instant.ofEpochMilli(999_000), isConfirmed = false)
+        val (reader, _) = coordinator(preferences) { listOf(last, first, first, quote) }
+        reader.syncProvider(Provider.JAGO)
+        val window = ProviderPreferences(fixture.context).diagnostics.value.getValue(Provider.JAGO).lastImportWindow
+        assertEquals(ProviderImportWindow(2, 1000, 3000), window)
+        val (failed, _) = coordinator(preferences) { throw ProviderReadException(AccountStatus.ERROR, "History blocked") }
+        failed.syncProvider(Provider.JAGO)
+        assertEquals(window, ProviderPreferences(fixture.context).diagnostics.value.getValue(Provider.JAGO).lastImportWindow)
+    }
+
+    @Test fun partialAndEmptyImportsKeepTheirActualReadScopeWithoutClaimingCompleteness() = runTest {
+        val fixture = PreferencesFixture()
+        val preferences = ProviderPreferences(fixture.context)
+        val (partial, _) = coordinator(preferences) { throw PartialImportException(listOf(payment), "Older page blocked") }
+        partial.syncProvider(Provider.JAGO)
+        var diagnostic = ProviderPreferences(fixture.context).diagnostics.value.getValue(Provider.JAGO)
+        assertEquals(ProviderImportWindow(1, 0, 0), diagnostic.lastImportWindow)
+        assertEquals(AccountStatus.PARTIAL, diagnostic.accountStatus)
+        val (empty, _) = coordinator(preferences) { emptyList() }
+        empty.syncProvider(Provider.JAGO)
+        diagnostic = ProviderPreferences(fixture.context).diagnostics.value.getValue(Provider.JAGO)
+        assertEquals(ProviderImportWindow(0, null, null), diagnostic.lastImportWindow)
+        assertEquals(AccountStatus.CONNECTED, diagnostic.accountStatus)
+    }
+
     private fun coordinator(preferences: ProviderPreferences, read: suspend () -> List<UnifiedTransaction>): Pair<IngestionCoordinator, FixtureLedger> {
         val ledger = FixtureLedger()
         val adapter = object : ProviderAdapter {

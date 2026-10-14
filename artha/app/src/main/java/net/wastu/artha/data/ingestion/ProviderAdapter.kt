@@ -12,6 +12,7 @@ import net.wastu.artha.data.ledger.AppendResult
 import net.wastu.artha.data.ledger.LedgerRepository
 import net.wastu.artha.data.providers.AccountStatus
 import net.wastu.artha.data.providers.ProviderPreferences
+import net.wastu.artha.data.providers.ProviderImportWindow
 
 interface ProviderAdapter {
     val provider: Provider
@@ -58,10 +59,12 @@ class IngestionCoordinator(
 
     suspend fun ingest(provider: Provider): AppendResult {
         check(rootAccess.verify()) { "The Root Gate must be granted before ingestion." }
-        return readAndAppend(provider).first
+        return readAndAppend(provider).result
     }
 
-    private suspend fun readAndAppend(provider: Provider): Pair<AppendResult, String?> {
+    private data class ImportResult(val result: AppendResult, val warning: String?, val window: ProviderImportWindow)
+
+    private suspend fun readAndAppend(provider: Provider): ImportResult {
         val adapter = requireNotNull(adaptersByProvider[provider]) { "Provider ingestion is not implemented yet." }
         var warning: String? = null
         val transactions = try { adapter.ingest() } catch (partial: PartialImportException) {
@@ -69,16 +72,19 @@ class IngestionCoordinator(
             warning = partial.message?.takeIf { it.isNotBlank() } ?: "Some history could not be imported"; partial.transactions
         }
         require(transactions.all { it.provider == provider }) { "Adapter returned another Provider's transaction." }
-        return ledger().appendProviderImport(transactions) to warning
+        val payments = transactions.filter { it.isConfirmed }.distinctBy { it.key }
+        val window = ProviderImportWindow(payments.size,
+            payments.minOfOrNull { it.occurredAt.toEpochMilli() }, payments.maxOfOrNull { it.occurredAt.toEpochMilli() })
+        return ImportResult(ledger().appendProviderImport(transactions), warning, window)
     }
 
     private suspend fun importAndRecord(provider: Provider): String = try {
-        val (result, warning) = readAndAppend(provider)
+        val (result, warning, window) = readAndAppend(provider)
         val summary = "${result.inserted} added, ${result.duplicates} already saved" +
             if (result.evidenceUpdates > 0) ", ${result.evidenceUpdates} details updated" else ""
         preferences?.recordSyncSuccess(provider, summary,
             accountIdentifier = adaptersByProvider[provider]?.accountIdentifier,
-            coverageHint = adaptersByProvider[provider]?.coverageHint, partialReason = warning)
+            coverageHint = adaptersByProvider[provider]?.coverageHint, partialReason = warning, importWindow = window)
         if (warning == null) summary else "$summary. $warning"
     } catch (cancelled: CancellationException) { throw cancelled }
     catch (e: Exception) {

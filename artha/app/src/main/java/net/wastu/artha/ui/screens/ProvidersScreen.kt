@@ -325,12 +325,14 @@ private fun SettingsLink(title: String, summary: String?, icon: androidx.compose
 @Composable
 private fun SettingsDetailSheet(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        Column(Modifier.fillMaxWidth().imePadding()) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Close settings") }
             }
-            content()
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+                content()
+            }
         }
     }
 }
@@ -347,7 +349,8 @@ private fun providerSummary(diagnostic: ProviderDiagnostic?, count: Int, importE
     !importEnabled -> "Import paused"
     else -> when (diagnostic?.accountStatus ?: AccountStatus.UNKNOWN) {
         AccountStatus.PARTIAL -> "Partial import"
-        AccountStatus.CONNECTED -> if (count > 0) "$count saved transactions" else "No saved history"
+        AccountStatus.CONNECTED -> diagnostic?.lastSyncEpochMillis?.let { "Imported ${formatRelativeTime(it)}" }
+            ?: if (count > 0) "$count saved transactions" else "No saved history"
         AccountStatus.NEEDS_LOGIN -> "Sign in required"
         AccountStatus.APP_NOT_INSTALLED -> "App not installed"
         AccountStatus.ERROR -> "Import failed"
@@ -366,13 +369,10 @@ private fun ProviderSettings(
     ListItem(headlineContent = { Text("Saved transactions") }, trailingContent = { Text(count.toString()) })
     diagnostic?.accountIdentifier?.let { ListItem(headlineContent = { Text("Account") }, supportingContent = { Text(it) }) }
     val status = providerSummary(diagnostic, count, importEnabled, importing)
-    ListItem(headlineContent = { Text(status) }, supportingContent = diagnostic?.lastSyncEpochMillis?.let { { Text(formatRelativeTime(it)) } })
+    ListItem(headlineContent = { Text(status) }, supportingContent = diagnostic?.lastSyncEpochMillis
+        ?.takeIf { diagnostic.accountStatus != AccountStatus.CONNECTED }?.let { { Text("Last imported ${formatRelativeTime(it)}") } })
     if (diagnostic?.accountStatus == AccountStatus.NEEDS_LOGIN) {
         Text("Sign in in the source app, then import again", modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodyMedium)
-    }
-    if (diagnostic?.lastError != null) {
-        Text(diagnostic.lastError, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.padding(horizontal = 16.dp), color = if (diagnostic.accountStatus == AccountStatus.ERROR) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyMedium)
     }
     FilledTonalButton(onClick = onImport, enabled = importEnabled && !importing && !busy,
         modifier = Modifier.fillMaxWidth().padding(16.dp)) {
@@ -380,14 +380,28 @@ private fun ProviderSettings(
         Text(if (importing) "Importing" else if (busy) "Import in progress" else "Import history")
     }
     feedback?.let { Text(it, modifier = Modifier.padding(horizontal = 16.dp).semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium) }
-    if (!diagnostic?.lastSyncSummary.isNullOrBlank() || !diagnostic?.coverageHint.isNullOrBlank()) {
+    if (!diagnostic?.lastSyncSummary.isNullOrBlank() || !diagnostic?.coverageHint.isNullOrBlank() || diagnostic?.lastError != null || diagnostic?.lastImportWindow != null) {
         var showDiagnostics by remember { mutableStateOf(false) }
         TextButton(onClick = { showDiagnostics = !showDiagnostics }, modifier = Modifier.padding(horizontal = 8.dp)) {
             Text(if (showDiagnostics) "Hide details" else "Import details")
         }
         if (showDiagnostics) {
+            diagnostic?.lastError?.let { Text(it,
+                modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall) }
             diagnostic?.coverageHint?.let { Text(it,
                 modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall) }
+            diagnostic?.lastImportWindow?.let { window ->
+                Text("${window.paymentCount} payments read in the last import", modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+                if (window.earliestMillis != null && window.latestMillis != null) {
+                    val formatter = java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale.US)
+                        .withZone(net.wastu.artha.core.model.AccountingTime.zone)
+                    val first = formatter.format(java.time.Instant.ofEpochMilli(window.earliestMillis))
+                    val last = formatter.format(java.time.Instant.ofEpochMilli(window.latestMillis))
+                    Text(if (first == last) "Payment dates: $first" else "Payment dates: $first to $last",
+                        modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+                }
+            }
             diagnostic?.lastSyncSummary?.let { Text(it.replace(" \u00b7 ", ". "),
                 modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall) }
         }
