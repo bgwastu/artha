@@ -124,6 +124,8 @@ fun AnalysisScreen(
     val savedTransactions by viewModel.allTransactions.collectAsStateWithLifecycle()
     val snapshot by viewModel.analysisSnapshot.collectAsStateWithLifecycle()
     val categoryAutomation by viewModel.categoryAutomation.collectAsStateWithLifecycle()
+    val analysisWindow by viewModel.analysisWindow.collectAsStateWithLifecycle()
+    val analysisStages by viewModel.analysisStages.collectAsStateWithLifecycle()
     val analyzingMonths by viewModel.analyzingMonths.collectAsStateWithLifecycle()
     val selectedMonth by viewModel.selectedMonth.collectAsStateWithLifecycle()
     val analysisErrors by viewModel.analysisErrors.collectAsStateWithLifecycle()
@@ -174,9 +176,10 @@ fun AnalysisScreen(
         }
         item(key = "ai_insights_bottom") {
             AiInsightsCard(
-                summary = analysis.monthlyAiSummary, isAnalyzing = isMonthAnalyzing, readOnly = viewModel.analysisStore == null,
+                summary = snapshot.monthlySummaries[analysisWindow.key(selectedMonth)], window = analysisWindow,
+                onWindowChanged = viewModel::setAnalysisWindow, stage = analysisStages[selectedMonth], isAnalyzing = isMonthAnalyzing, readOnly = viewModel.analysisStore == null,
                 onReanalyze = { viewModel.analyzeMonth(selectedMonth, forceReanalyze = true) },
-                error = analysisErrors[selectedMonth], savedAt = snapshot.updatedAt["monthSummary:$selectedMonth"],
+                error = analysisErrors[selectedMonth], savedAt = snapshot.updatedAt["monthSummary:${analysisWindow.key(selectedMonth)}"],
                 configured = snapshot.aiConfig.baseUrl.isNotBlank() && snapshot.aiConfig.model.isNotBlank() && snapshot.aiConfig.apiKey.isNotBlank(),
                 onConfigure = { viewModel.setTargetDestination("SETTINGS") }, onOpenKnowledge = onOpenKnowledgeEditor,
             )
@@ -330,18 +333,23 @@ fun MonthlyNoteDialog(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AiInsightsCard(
-    summary: String?, isAnalyzing: Boolean, readOnly: Boolean = false, onReanalyze: () -> Unit,
+    summary: String?, window: net.wastu.artha.data.analysis.AnalysisWindow,
+    onWindowChanged: (net.wastu.artha.data.analysis.AnalysisWindow) -> Unit,
+    stage: net.wastu.artha.data.analysis.AnalysisStage?, isAnalyzing: Boolean, readOnly: Boolean = false, onReanalyze: () -> Unit,
     onOpenKnowledge: () -> Unit, error: String?, savedAt: Long?,
     configured: Boolean, onConfigure: () -> Unit,
 ) {
     var expanded by rememberSaveable { mutableStateOf(readOnly && !summary.isNullOrBlank()) }
     Column(Modifier.fillMaxWidth()) {
         ListItem(
-            headlineContent = { Text("AI commentary") },
+            headlineContent = { Text("AI analysis") },
             supportingContent = if (isAnalyzing || error != null) ({
-                Text(if (isAnalyzing) "Updating" else "Refresh unavailable", style = MaterialTheme.typography.bodySmall)
+                Text(if (isAnalyzing) stage?.label ?: "Preparing analysis" else "Analysis unavailable",
+                    style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
             }) else null,
             trailingContent = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -353,12 +361,18 @@ private fun AiInsightsCard(
             modifier = Modifier.clickable { expanded = !expanded }.semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" },
         )
         if (expanded) Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                net.wastu.artha.data.analysis.AnalysisWindow.entries.forEach { option ->
+                    androidx.compose.material3.FilterChip(selected = window == option,
+                        onClick = { onWindowChanged(option) }, label = { Text(option.label) })
+                }
+            }
             if (savedAt != null) Text("Saved ${formatDate(java.time.Instant.ofEpochMilli(savedAt))}", style = MaterialTheme.typography.labelSmall)
             if (!summary.isNullOrBlank()) MarkdownText(markdown = summary, style = MaterialTheme.typography.bodyMedium)
-            else Text(if (configured) "A summary of saved spending." else "Connect a provider for spending commentary.", style = MaterialTheme.typography.bodySmall)
+            else Text(if (configured) "Analyze spending and find practical next steps." else "Set up AI for analysis and recommendations.", style = MaterialTheme.typography.bodySmall)
             if (error != null) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             if (!readOnly) FilledTonalButton(onClick = if (configured) onReanalyze else onConfigure, enabled = !isAnalyzing) {
-                Text(if (isAnalyzing) "Refreshing" else if (configured) "Refresh" else "Set up AI")
+                Text(if (isAnalyzing) "Analyzing" else if (configured) "Analyze" else "Set up AI")
             }
             if (!readOnly) TextButton(onClick = onOpenKnowledge) { Text("Personal context") }
         }

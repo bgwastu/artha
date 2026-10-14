@@ -209,10 +209,16 @@ class AnalysisStore(context: Context) {
         val current = _snapshot.value
         if (current.userNotes != input.userNotes || current.categories != input.categories || current.knowledge != input.knowledge ||
             current.aiConfig != input.aiConfig || current.customCategories != input.customCategories ||
-            current.manualCategories != input.manualCategories || current.monthlyNotes[month] != input.monthlyNotes[month]) return false
-        applyMergedSnapshot(current.copy(monthlySummaries = current.monthlySummaries + (month to summary),
-            analysisFingerprints = current.analysisFingerprints + (month to fingerprint),
-            updatedAt = current.updatedAt + ("monthSummary:$month" to System.currentTimeMillis())))
+            current.manualCategories != input.manualCategories || current.monthlyNotes[month.substringBefore(':')] != input.monthlyNotes[month.substringBefore(':')]) return false
+        val summaries = current.monthlySummaries + (month to summary)
+        val fingerprints = current.analysisFingerprints + (month to fingerprint)
+        val times = current.updatedAt + ("monthSummary:$month" to System.currentTimeMillis())
+        checkedPreferenceEdit(prefs, listOf("monthly_summaries", "analysis_fingerprints", "updated_at_map"), "Analysis could not be saved") {
+            putString("monthly_summaries", JSONObject(summaries as Map<*, *>).toString())
+            putString("analysis_fingerprints", JSONObject(fingerprints as Map<*, *>).toString())
+            putString("updated_at_map", JSONObject(times as Map<*, *>).toString())
+        }
+        _snapshot.value = current.copy(monthlySummaries = summaries, analysisFingerprints = fingerprints, updatedAt = times)
         return true
     }
 

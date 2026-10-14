@@ -268,7 +268,7 @@ fun HomeScreen(
                                 }
                             }
                             Destination.SETTINGS -> if (onExitDemo != null) Column(Modifier.padding(24.dp)) {
-                                Text("Fictional payments and example AI commentary", style = MaterialTheme.typography.bodyLarge)
+                                Text("Fictional payments and example AI analysis", style = MaterialTheme.typography.bodyLarge)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text("Demo mode", modifier = Modifier.weight(1f))
                                     Switch(checked = true, onCheckedChange = { if (!it) onExitDemo() })

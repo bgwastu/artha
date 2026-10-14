@@ -68,11 +68,11 @@ class AiCommentaryTest {
         } finally { server.close() }
     }
 
-    private class TestServer(handler: (JSONObject, Socket) -> Unit) {
+    private class TestServer(private val calls: Int = 1, handler: (JSONObject, Socket) -> Unit) {
         private val server = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))
         val port get() = server.localPort
         private val worker = kotlin.concurrent.thread(isDaemon = true) {
-            try { server.accept().use { socket ->
+            try { repeat(calls) { server.accept().use { socket ->
                 val input = socket.getInputStream()
                 fun line(): String {
                     val bytes = java.io.ByteArrayOutputStream()
@@ -88,7 +88,7 @@ class AiCommentaryTest {
                 var offset = 0
                 while (offset < length) { val count = input.read(bytes, offset, length - offset); if (count < 0) break; offset += count }
                 handler(JSONObject(bytes.toString(Charsets.UTF_8)), socket)
-            } } catch (_: java.io.IOException) { }
+            } } } catch (_: java.io.IOException) { }
         }
         fun close() { server.close(); worker.join(1000) }
     }
@@ -108,10 +108,13 @@ class AiCommentaryTest {
     }
 
     @Test fun entireRecordedMonthAndPreviousMonthReachCommentary() = runBlocking {
-        var prompt = ""
-        val server = TestServer { request, socket ->
-            prompt = request.getJSONArray("messages").getJSONObject(0).getString("content")
-            val response = """{"choices":[{"message":{"content":"{\"monthlySummary\":\"- Complete recorded totals\"}"}}]}""".toByteArray()
+        val prompts = mutableListOf<String>()
+        var number = 0
+        val server = TestServer(calls = 3) { request, socket ->
+            prompts += request.toString()
+            val message = if (number++ == 0) JSONObject("""{"role":"assistant","tool_calls":[{"id":"test-1","type":"function","function":{"name":"monthly_trends","arguments":"{}"}}]}""")
+                else JSONObject().put("role", "assistant").put("content", """{"findings":["Recorded totals reviewed"],"recommendations":[]}""")
+            val response = JSONObject().put("choices", org.json.JSONArray().put(JSONObject().put("message", message))).toString().toByteArray()
             socket.getOutputStream().apply {
                 write("HTTP/1.1 200 OK\r\nContent-Length: ${response.size}\r\nConnection: close\r\n\r\n".toByteArray()); write(response); flush()
             }
@@ -120,9 +123,14 @@ class AiCommentaryTest {
             val rows = (1..40).map { UnifiedTransaction(Provider.JAGO, "jago:$it", Direction.DEBIT, Money(123400), Instant.parse("2026-10-02T00:00:00Z"), "Coffee", "{}", category = "Dining Out") }
             val previous = rows.first().copy(providerTransactionId = "jago:previous", money = Money(200000), occurredAt = Instant.parse("2026-09-02T00:00:00Z"))
             AiAnalysisService.analyzeMonth(AiConfig("http://127.0.0.1:${server.port}", "fake-test-key", "fake-model"), "", "2026-10", rows + previous)
-            assertTrue(prompt.contains("\"confirmedSpendingRupiah\":49360"))
-            assertTrue(prompt.contains("\"previousCompleteMonthRupiah\":2000"))
-            assertTrue(prompt.contains("\"transactionCount\":40"))
+            assertEquals(3, prompts.size)
+            val evidence = JSONObject(JSONObject(prompts.first()).getJSONArray("messages").getJSONObject(1).getString("content")).getJSONObject("evidence")
+            val months = evidence.getJSONArray("months")
+            assertEquals(49360L, months.getJSONObject(2).getLong("spendingRupiah"))
+            assertEquals(2000L, months.getJSONObject(1).getLong("spendingRupiah"))
+            assertEquals(40, months.getJSONObject(2).getInt("paymentCount"))
+            assertTrue(prompts[1].contains("tool_call_id"))
+            assertFalse(JSONObject(prompts.last()).has("tools"))
         } finally { server.close() }
     }
 

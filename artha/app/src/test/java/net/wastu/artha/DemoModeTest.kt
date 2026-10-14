@@ -19,11 +19,27 @@ import java.time.YearMonth
 class DemoModeTest {
     @Test fun fictionalDatasetHasRequestedScaleIncomeAndReversal() {
         val rows = samplePayments()
-        assertTrue(rows.all { it.providerTransactionId.startsWith("demo-") && it.rawPayload == """{"demo":true}""" })
+        assertTrue(rows.all { it.providerTransactionId.startsWith("demo-") && org.json.JSONObject(it.rawPayload).getBoolean("demo") })
         val analysis = BudgetAnalyzer.analyzeMonth(YearMonth.of(2026, 10), rows)
         assertTrue(analysis.totalPersonalSpendingMinor in 400_000_000L..500_000_000L)
         assertTrue(rows.any { it.direction == Direction.CREDIT })
         assertTrue(rows.any { it.isReversal && !BudgetAnalyzer.isSpending(it) })
+    }
+
+    @Test fun multiYearLedgerIsLongStableAndKeepsTransfersOutOfSpending() {
+        val rows = samplePayments()
+        assertTrue(rows.size > 2700)
+        assertEquals(rows, samplePayments())
+        assertEquals(rows.size, rows.map { it.key }.distinct().size)
+        assertEquals(rows, rows.sortedByDescending { it.occurredAt })
+        val months = rows.map { YearMonth.from(it.occurredAt.atZone(net.wastu.artha.core.model.AccountingTime.zone)) }.toSet()
+        assertEquals(46, months.size)
+        assertEquals(YearMonth.of(2023, 1), months.minOrNull())
+        assertEquals(YearMonth.of(2026, 10), months.maxOrNull())
+        assertTrue(rows.any { it.occurredAt.atZone(net.wastu.artha.core.model.AccountingTime.zone).toLocalDate() == java.time.LocalDate.of(2024, 2, 29) })
+        assertTrue(rows.filter { it.description.startsWith("Pocket Transfer:") || it.description == "GoPay top-up" }
+            .all { !BudgetAnalyzer.isSpending(it) })
+        assertEquals(433500000L, BudgetAnalyzer.analyzeMonth(YearMonth.of(2026, 10), rows).totalPersonalSpendingMinor)
     }
 
     @Test fun demoFlagIsSeparateAndFailedExitDoesNotRevealPersonalMode() {
@@ -69,7 +85,7 @@ class DemoModeTest {
             advanceUntilIdle()
             assertTrue(model.ledgerState.value is LedgerState.Ready)
             assertEquals(samplePayments(), model.allTransactions.value)
-            assertFalse(model.analysisSnapshot.value.monthlySummaries["2026-10"].isNullOrBlank())
+            assertFalse(model.analysisSnapshot.value.monthlySummaries["2026-10:3m"].isNullOrBlank())
             assertNull(model.analysisStore)
             assertNull(model.driveSyncManager)
             assertEquals("", model.analysisSnapshot.value.aiConfig.apiKey)
