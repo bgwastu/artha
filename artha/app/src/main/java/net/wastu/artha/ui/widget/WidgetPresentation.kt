@@ -1,5 +1,8 @@
 package net.wastu.artha.ui.widget
 
+import java.math.BigInteger
+import net.wastu.artha.data.analysis.MonthSpendingAnalysis
+import net.wastu.artha.ui.formatMinorAmount
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -40,4 +43,14 @@ internal object WidgetPalette {
     const val text = 0xFFF1F0F4.toInt()
     const val supporting = 0xFFC4C6CF.toInt()
     const val income = 0xFF81C784.toInt()
+}
+
+/** Aggregates can be zero even though individual recorded payments must be positive. */
+internal data class AnalysisWidgetAmounts(val total: String, val previous: String?)
+internal fun analysisWidgetAmounts(analysis: MonthSpendingAnalysis): AnalysisWidgetAmounts {
+    require(analysis.totalPersonalSpendingMinor >= 0 && analysis.previousMonthTotalMinor >= 0)
+    return AnalysisWidgetAmounts(
+        formatMinorAmount(BigInteger.valueOf(analysis.totalPersonalSpendingMinor)),
+        analysis.previousMonthTotalMinor.takeIf { it > 0 }?.let { formatMinorAmount(BigInteger.valueOf(it)) },
+    )
 }

@@ -9,6 +9,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WidgetPresentationTest {
+    @Test fun genuineEmptySpendingAndAbsentPreviousMonthRenderWithoutInventingAPayment() {
+        val month = java.time.YearMonth.of(2026, 10)
+        val empty = analysisWidgetAmounts(net.wastu.artha.data.analysis.BudgetAnalyzer.analyzeMonth(month, emptyList()))
+        assertEquals("Rp0", empty.total.filterNot(Char::isWhitespace))
+        assertNull(empty.previous)
+        val payment = UnifiedTransaction(Provider.JAGO, "fictional-current", Direction.DEBIT, Money(123400),
+            Instant.parse("2026-10-02T00:00:00Z"), "Fixture", "{}")
+        val populated = analysisWidgetAmounts(net.wastu.artha.data.analysis.BudgetAnalyzer.analyzeMonth(month, listOf(payment)))
+        assertEquals(net.wastu.artha.ui.formatMoney(payment.money), populated.total)
+        assertNull(populated.previous)
+        val previousOnly = analysisWidgetAmounts(net.wastu.artha.data.analysis.BudgetAnalyzer.analyzeMonth(month.plusMonths(1), listOf(payment)))
+        assertEquals("Rp0", previousOnly.total.filterNot(Char::isWhitespace))
+        assertEquals(net.wastu.artha.ui.formatMoney(payment.money), previousOnly.previous)
+    }
+
     @Test fun firstLoadFailureAndStaleSavedValuesHaveDifferentLabels() {
         val now = Instant.parse("2026-10-13T06:00:00Z").toEpochMilli()
         assertEquals("Loading saved payments", widgetFreshness(null, now))

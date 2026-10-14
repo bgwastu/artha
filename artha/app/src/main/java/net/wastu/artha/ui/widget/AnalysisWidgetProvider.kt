@@ -75,6 +75,7 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
         WidgetRefresh.schedule("analysis", pendingResult, onFailure = { status(failed = true) }) {
             val month = YearMonth.now(net.wastu.artha.core.model.AccountingTime.clock)
             val analysis = BudgetAnalyzer.analyzeMonth(month, widgetSpending(context).transactions)
+            val amounts = analysisWidgetAmounts(analysis)
             val updatedAt = System.currentTimeMillis()
             for (id in appWidgetIds) {
                 val options = appWidgetManager.getAppWidgetOptions(id)
@@ -85,11 +86,12 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
                 val views = RemoteViews(context.packageName, R.layout.widget_analysis)
                 val monthTitle = month.format(DateTimeFormatter.ofPattern(if (width < 240 * fontScale) "MMM yyyy" else "MMMM yyyy", Locale.US))
                 views.setTextViewText(R.id.widget_month_title, monthTitle)
-                views.setTextViewText(R.id.widget_total_amount, formatMoney(Money(analysis.totalPersonalSpendingMinor)))
+                views.setTextViewText(R.id.widget_total_amount, amounts.total)
                 views.setTextViewText(R.id.widget_status, widgetFreshness(updatedAt, updatedAt))
                 views.setViewVisibility(R.id.widget_details, if (detailed) View.VISIBLE else View.GONE)
                 // The current month is incomplete. Compare amounts with an explicitly full prior month.
-                views.setTextViewText(R.id.widget_delta_text, "Previous full month ${formatMoney(Money(analysis.previousMonthTotalMinor))}")
+                views.setViewVisibility(R.id.widget_delta_text, if (amounts.previous == null) View.GONE else View.VISIBLE)
+                views.setTextViewText(R.id.widget_delta_text, amounts.previous?.let { "Previous full month $it" }.orEmpty())
                 val topCats = analysis.categories.take(3)
                 views.setViewVisibility(R.id.widget_categories_container, if (topCats.isEmpty()) View.GONE else View.VISIBLE)
                 views.setViewVisibility(R.id.widget_empty_text, if (topCats.isEmpty() && detailed) View.VISIBLE else View.GONE)
