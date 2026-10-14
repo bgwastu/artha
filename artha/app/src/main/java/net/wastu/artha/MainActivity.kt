@@ -18,6 +18,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (redirectToDemo()) return
         enableEdgeToEdge()
         val isDebuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
         if (!isDebuggable) {
@@ -63,13 +64,22 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (redirectToDemo()) return
         intent.getStringExtra("extra_destination")?.let {
             viewModelInstance?.setTargetDestination(it)
         }
     }
 
+    private fun redirectToDemo(): Boolean {
+        if (!DemoMode.isEnabled(this)) return false
+        startActivity(Intent(this, DemoActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        finish()
+        return true
+    }
+
     override fun onResume() {
         super.onResume()
+        if (redirectToDemo()) return
         net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(this)
     }
 }

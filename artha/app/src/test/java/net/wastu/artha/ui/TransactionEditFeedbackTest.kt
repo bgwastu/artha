@@ -137,7 +137,7 @@ class TransactionEditFeedbackTest {
             assertEquals("A long fictional manual category name", record.category)
             assertEquals("First line\nSecond line", record.userNote)
             assertTrue(record.classificationIsManual)
-            assertEquals("Included in spending", transactionAccountingLabel(record))
+            assertNull(transactionAccountingLabel(record))
         }
     }
 
@@ -153,7 +153,7 @@ class TransactionEditFeedbackTest {
 
     @Test fun accountingLabelUsesFactsAndPreservesRecordedReversalAmount() {
         val tx = payment().copy(category = "Investments & Transfers")
-        assertEquals("Included in spending", transactionAccountingLabel(tx))
+        assertNull(transactionAccountingLabel(tx))
         val reversed = tx.copy(isReversal = true)
         assertEquals("Reversed", transactionAccountingLabel(reversed))
         assertEquals(tx.money, reversed.money)

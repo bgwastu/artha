@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity android:name=".DemoScreenshotActivity"
+            android:exported="true" android:excludeFromRecents="true"
+            android:taskAffinity="net.wastu.artha.screenshots" android:process=":screenshots" />
+    </application>
     <queries>
         <package android:name="net.wastu.artha.test" />
     </queries>

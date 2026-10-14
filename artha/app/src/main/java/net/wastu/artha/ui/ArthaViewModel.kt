@@ -37,6 +37,7 @@ class ArthaViewModel(
     private val spendingState: StateFlow<SpendingState>? = null,
     private val retrySpending: (() -> Unit)? = null,
     private val categorize: suspend (AiConfig, AnalysisSnapshot, List<CategoryCandidate>) -> Map<String, CategorySuggestion> = AiCategorization::classify,
+    initialSnapshot: AnalysisSnapshot = AnalysisSnapshot(),
 ) : ViewModel() {
     private val _rootGate = MutableStateFlow(RootGateState.LOCKED)
     val rootGate = _rootGate.asStateFlow()
@@ -47,7 +48,7 @@ class ArthaViewModel(
     @Volatile private var hasSavedProjection = false
     private val _providerCounts = MutableStateFlow<Map<Provider, Int>>(emptyMap())
     val providerCounts = _providerCounts.asStateFlow()
-    val analysisSnapshot = analysisStore?.snapshot ?: MutableStateFlow(AnalysisSnapshot()).asStateFlow()
+    val analysisSnapshot = analysisStore?.snapshot ?: MutableStateFlow(initialSnapshot).asStateFlow()
     private val _selectedMonth = MutableStateFlow(YearMonth.now(clock.withZone(AccountingTime.zone)))
     val selectedMonth = _selectedMonth.asStateFlow()
     private val _dateRangeFilter = MutableStateFlow<Pair<Long?, Long?>?>(null)

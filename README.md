@@ -11,6 +11,7 @@ Artha helps people in Indonesia understand their spending on rooted Android phon
 - **Monthly spending:** Compare categories and totals with the previous month.
 - **Spending insights:** Local summaries are ready immediately; optional AI commentary refreshes in the background and keeps manual categories.
 - **Search and filters:** Find transactions by keyword, provider, or date range.
+- **Demo mode:** Explore fictional payments and example AI commentary from Settings, without changing personal history.
 - **Homescreen widgets:** Check recent transactions and monthly spending without opening the app.
 - **Encrypted backup:** Back up through Google Drive and explicitly restore missing history, encrypted on-device.
 
@@ -28,6 +29,6 @@ Artha helps people in Indonesia understand their spending on rooted Android phon
   <img src="assets/screenshot.png" alt="Artha transaction timeline and spending analysis with fictional sample data">
 </picture>
 
-Imports use provider caches and private endpoints, so available history can be incomplete. Settings reports limited coverage and separates importing from hiding a source. Imports currently support the primary Android profile; Tokopedia and Grab schemas remain experimental and uncertain payment fields are skipped. Saved data remains available when root or a source is unavailable.
+Screenshots use fictional sample data.
 
 AI disclosure: Human validated.

@@ -18,6 +18,8 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Artha">
+        <activity android:name=".DemoActivity" android:exported="false"
+            android:excludeFromRecents="true" android:taskAffinity="net.wastu.artha.demo" android:launchMode="singleTask" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

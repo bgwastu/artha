@@ -5,6 +5,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import java.io.File
 import net.wastu.artha.ui.widget.WidgetPalette
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
@@ -54,6 +55,23 @@ class PresentationContrastTest {
                     assertTrue(contrastRatio(foreground.toArgb(), background.toArgb()) >= 4.5)
                 }
             }
+        }
+    }
+
+    @Test fun wallpaperTintCannotLeakIntoPageBackgrounds() {
+        val purple = Color(0xFFDBC9F1)
+        listOf(false, true).forEach { dark ->
+            val base = if (dark) DarkColors else LightColors
+            val wallpaper = base.copy(background = purple, surface = purple, surfaceTint = purple,
+                surfaceContainer = purple, surfaceContainerLow = purple, surfaceContainerHigh = purple,
+                surfaceContainerLowest = purple, surfaceContainerHighest = purple, surfaceVariant = purple,
+                surfaceDim = purple, surfaceBright = purple, primary = Color(0xFF6750A4))
+            val actual = neutralSurfaces(wallpaper, dark)
+            assertEquals(base.background, actual.background)
+            assertEquals(base.surfaceTint, actual.surfaceTint)
+            assertEquals(paymentAmountSurfaces(base), paymentAmountSurfaces(actual))
+            assertEquals(wallpaper.primary, actual.primary)
+            assertTrue(contrastRatio(actual.onBackground.toArgb(), actual.background.toArgb()) >= 4.5)
         }
     }
 

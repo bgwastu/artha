@@ -279,7 +279,7 @@ private fun TransactionDetailsBody(
                     color = if (!credit && isReversal) MaterialTheme.colorScheme.onSurfaceVariant
                         else if (credit) incomeColor() else expenseColor(),
                 )
-                Text(transactionAccountingLabel(record), style = MaterialTheme.typography.labelLarge)
+                transactionAccountingLabel(record)?.let { Text(it, style = MaterialTheme.typography.labelLarge) }
                 if (!credit && isReversal) DetailRow("Original charge", formatMoney(originalPaymentMoney(record)))
                 state.savedFeedback?.let { SaveFeedback(it, false) }
                 Text(record.description.trim(), style = MaterialTheme.typography.titleLarge)
@@ -319,14 +319,14 @@ private fun TransactionDetailsBody(
                         label = "Category", value = currentCategory,
                         supporting = if (manualCategory) "Chosen by you" else null,
                         icon = categoryIconFor(currentCategory, snapshot?.categoryIcons.orEmpty()),
-                        enabled = viewModel != null,
+                        enabled = viewModel?.analysisStore != null,
                     ) {
                         state.categoryDraft = currentCategory; state.saveError = null; state.savedFeedback = null; state.editor = "category"
                     }
                 }
                 DetailEditRow(
                     label = "Note", value = currentNote.ifBlank { "Add note" },
-                    icon = Icons.Default.EditNote, enabled = viewModel != null,
+                    icon = Icons.Default.EditNote, enabled = viewModel?.analysisStore != null,
                 ) {
                     state.noteDraft = currentNote; state.saveError = null; state.savedFeedback = null; state.editor = "note"
                 }
@@ -725,8 +725,8 @@ private fun EditorActions(saving: Boolean, onCancel: () -> Unit, onSave: () -> U
     }
 }
 
-internal fun transactionAccountingLabel(transaction: UnifiedTransaction): String {
-    if (BudgetAnalyzer.isSpending(transaction)) return "Included in spending"
+internal fun transactionAccountingLabel(transaction: UnifiedTransaction): String? {
+    if (BudgetAnalyzer.isSpending(transaction)) return null
     val payload = try { JSONObject(transaction.rawPayload) } catch (_: JSONException) { null }
     return when {
         transaction.isReversal || transaction.description.contains("(Reversed)", ignoreCase = true) -> if (transaction.direction == Direction.CREDIT) "Incoming reversal" else "Reversed"

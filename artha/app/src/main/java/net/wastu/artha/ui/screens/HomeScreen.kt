@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Switch
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.liveRegion
@@ -84,7 +86,9 @@ fun HomeScreen(
     onRefresh: () -> Unit = {},
     onProviderEnabled: (Provider, Boolean) -> Unit = { _, _ -> },
     viewModel: ArthaViewModel? = null,
+    onExitDemo: (() -> Unit)? = null,
 ) {
+    val context = LocalContext.current
     val saveableStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     var transactionFilters by rememberSaveable(stateSaver = TransactionFiltersSaver) { mutableStateOf(TransactionFilters()) }
     var destination by rememberSaveable { mutableStateOf(Destination.TRANSACTIONS) }
@@ -149,7 +153,7 @@ fun HomeScreen(
                     title = { Text(destination.label, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     actions = {
                         if (destination == Destination.TRANSACTIONS) {
-                            IconButton(onClick = onRefresh, enabled = !refreshing || automaticImport) {
+                            IconButton(onClick = onRefresh, enabled = onExitDemo == null && (!refreshing || automaticImport)) {
                                 val angle = if (refreshing) {
                                     val transition = rememberInfiniteTransition(label = "Sync")
                                     val rotation by transition.animateFloat(
@@ -263,7 +267,13 @@ fun HomeScreen(
                                     )
                                 }
                             }
-                            Destination.SETTINGS -> ProvidersScreen(
+                            Destination.SETTINGS -> if (onExitDemo != null) Column(Modifier.padding(24.dp)) {
+                                Text("Fictional payments and example AI commentary", style = MaterialTheme.typography.bodyLarge)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Demo mode", modifier = Modifier.weight(1f))
+                                    Switch(checked = true, onCheckedChange = { if (!it) onExitDemo() })
+                                }
+                            } else ProvidersScreen(
                                 openBackup = openBackup,
                                 onBackupOpened = { openBackup = false },
                                 enabled = enabledProviders,
@@ -271,6 +281,7 @@ fun HomeScreen(
                                 providerCounts = providerCounts,
                                 onEnabled = onProviderEnabled,
                                 viewModel = viewModel,
+                                onOpenDemo = { net.wastu.artha.DemoMode.open(context) },
                             )
                         }
                     }

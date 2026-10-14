@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.SettingsSuggest
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Widgets
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -99,6 +100,7 @@ fun ProvidersScreen(
     providerCounts: Map<Provider, Int> = emptyMap(),
     onEnabled: (Provider, Boolean) -> Unit = { _, _ -> },
     viewModel: ArthaViewModel? = null,
+    onOpenDemo: (() -> Unit)? = null,
 ) {
     var selectedProvider by rememberSaveable { mutableStateOf<Provider?>(null) }
     var showBackup by rememberSaveable { mutableStateOf(false) }
@@ -201,6 +203,7 @@ fun ProvidersScreen(
             item { SettingsLink("Personal context", null, Icons.Default.EditNote) { showContext = true } }
         }
         item { SettingsLink("Widgets", null, Icons.Default.Widgets) { showWidgetHelp = true } }
+        if (onOpenDemo != null) item { SettingsLink("Demo mode", "Explore sample data", Icons.Default.PlayArrow, onOpenDemo) }
     }
 
     if (expanded) {
