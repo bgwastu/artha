@@ -9,6 +9,33 @@ import org.json.JSONObject
 /** Live charge/ride contracts and explicitly bounded Grab 5.430.0 native schema variants. */
 internal object GrabProviderParser {
     data class WalletPage(val items: JSONArray, val cursor: Long?, val partial: Boolean)
+    data class UniqueCharges(val transactions: List<UnifiedTransaction>, val conflictCount: Int)
+
+    fun uniqueCharges(charges: List<UnifiedTransaction>): UniqueCharges {
+        var conflicts = 0
+        val unique = charges.groupBy { it.key }.values.mapNotNull { copies ->
+            val proof = copies.map { charge ->
+                listOf(charge.direction, charge.money, charge.occurredAt,
+                    JSONObject(charge.rawPayload).optString("orderNumber"))
+            }
+            if (proof.distinct().size == 1) copies.first() else { conflicts++; null }
+        }
+        return UniqueCharges(unique, conflicts)
+    }
+
+    fun receiptIndices(rides: JSONArray, limit: Int = 20): Set<Int> {
+        require(limit >= 0)
+        val indices = linkedSetOf<Int>()
+        val seen = mutableSetOf<String>()
+        for (index in 0 until rides.length()) {
+            if (indices.size == limit) break
+            val ride = rides.optJSONObject(index) ?: continue
+            if (ride.optString("state") != "COMPLETED") continue
+            val id = ride.opt("bookingCode") as? String ?: continue
+            if (id.matches(Regex("[A-Za-z0-9_-]+")) && seen.add(id)) indices += index
+        }
+        return indices
+    }
 
     fun walletPage(raw: JSONObject): WalletPage {
         val items = raw.optJSONArray("transactions") ?: fail("charge history schema")

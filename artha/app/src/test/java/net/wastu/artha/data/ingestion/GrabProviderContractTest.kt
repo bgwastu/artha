@@ -5,6 +5,10 @@ import net.wastu.artha.data.reconciliation.LedgerReconciler
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 class GrabProviderContractTest {
     private fun charge() = JSONObject("""{"status":"COMPLETED","currency":"IDR","txID":"test-charge","partnerGroupTxID":"booking-test","txType":"BOOKING_CHARGE","coreTxType":"BookingCharge","amount":50000,"timestamp":1790917200,"title":"Grab test"}""")
@@ -36,6 +40,107 @@ class GrabProviderContractTest {
         val rows = LedgerReconciler.reconcileLedger(listOf(requireNotNull(GrabProviderParser.wallet(charge())), tip, requireNotNull(GrabProviderParser.ride(ride(), receipt()))))
         assertEquals(2, rows.size)
         assertTrue(rows.all { it.isConfirmed })
+    }
+
+    @Test fun repeatedChargeProofDeduplicatesWithoutChangingIdentityOrFunding() {
+        val original = requireNotNull(GrabProviderParser.wallet(charge().put("payMethod", "GrabPay Credits")))
+        val labeledAgain = original.copy(description = "Grab updated label")
+        val tip = requireNotNull(GrabProviderParser.wallet(charge().put("txID", "test-tip")
+            .put("txType", "TIPPING_CHARGE").put("coreTxType", "TippingCharge")))
+        val unique = GrabProviderParser.uniqueCharges(listOf(original, labeledAgain, tip, original))
+        assertEquals(0, unique.conflictCount)
+        assertEquals(listOf(original, tip), unique.transactions)
+        assertEquals(2, LedgerReconciler.reconcileLedger(unique.transactions).size)
+    }
+
+    @Test fun conflictingSettledIdentityCannotSilentlyPickMoneyDateOrBooking() {
+        val safe = requireNotNull(GrabProviderParser.wallet(charge().put("txID", "safe-charge")))
+        fun row(id: String, field: String? = null, value: Any? = null) = requireNotNull(
+            GrabProviderParser.wallet(charge().put("txID", id).also { if (field != null) it.put(field, value) }))
+        val unique = GrabProviderParser.uniqueCharges(listOf(safe,
+            row("amount-conflict"), row("amount-conflict", "amount", 40000),
+            row("time-conflict"), row("time-conflict", "timestamp", 1790917201L),
+            row("booking-conflict"), row("booking-conflict", "partnerGroupTxID", "other-booking")))
+        assertEquals(3, unique.conflictCount)
+        assertEquals(listOf(safe), unique.transactions)
+        assertEquals(safe.key, LedgerReconciler.reconcileLedger(unique.transactions).single().key)
+    }
+
+    @Test fun receiptBudgetCountsDistinctCompletedBookingsAfterCanceledEntries() {
+        val rides = org.json.JSONArray()
+        repeat(20) { rides.put(JSONObject().put("state", if (it % 2 == 0) "CANCELLED" else "FAILED")
+            .put("bookingCode", "canceled-$it")) }
+        for (id in listOf("booking-a", "booking-a", "booking-b", "../unsafe", "booking-c")) {
+            rides.put(JSONObject().put("state", "COMPLETED").put("bookingCode", id))
+        }
+        assertEquals(setOf(20, 22), GrabProviderParser.receiptIndices(rides, limit = 2))
+        assertEquals(setOf(20, 22, 24), GrabProviderParser.receiptIndices(rides))
+        assertTrue(GrabProviderParser.receiptIndices(rides, limit = 0).isEmpty())
+    }
+
+    @Test fun malformedRideRowsDoNotConsumeCompletedReceiptSlots() {
+        val rides = org.json.JSONArray("""[null, "unknown", {"state":"COMPLETED","bookingCode":null},
+            {"state":"COMPLETED","bookingCode":42}, {"state":"PENDING","bookingCode":"ongoing"},
+            {"state":"COMPLETED","bookingCode":"booking-good"}]""")
+        assertEquals(setOf(5), GrabProviderParser.receiptIndices(rides, limit = 1))
+        failed { GrabProviderParser.receiptIndices(rides, limit = -1) }
+    }
+
+    @Test fun tricklingResponseCannotResetTheTotalRequestDeadline() = runBlocking {
+        var now = 0L
+        var reads = 0
+        val timeouts = mutableListOf<Int>()
+        val input = object : java.io.InputStream() {
+            override fun read(): Int = error("Bulk reads expected")
+            override fun read(bytes: ByteArray, off: Int, len: Int): Int {
+                reads++
+                now += 7_000_000_000L
+                bytes[off] = 1
+                return 1
+            }
+        }
+        try {
+            GrabOrderReader.readResponse(input, 20_000_000_000L, nanoTime = { now }, prepareRead = { timeouts += it })
+            fail("A continuously trickling response must still expire")
+        } catch (error: ProviderReadException) {
+            assertEquals(net.wastu.artha.data.providers.AccountStatus.ERROR, error.status)
+            assertEquals(3, reads)
+            assertEquals(listOf(10000, 10000, 6000), timeouts)
+        }
+    }
+
+    @Test fun responseReadCancellationStopsBeforeAnotherChunk() = runBlocking {
+        var reads = 0
+        var closed = false
+        val child = launch(start = CoroutineStart.UNDISPATCHED) {
+            val job = requireNotNull(kotlin.coroutines.coroutineContext[Job])
+            val input = object : java.io.InputStream() {
+                override fun read(): Int = error("Bulk reads expected")
+                override fun read(bytes: ByteArray, off: Int, len: Int): Int {
+                    reads++
+                    bytes[off] = 1
+                    job.cancel()
+                    return 1
+                }
+                override fun close() { closed = true }
+            }
+            input.use { GrabOrderReader.readResponse(it, Long.MAX_VALUE, nanoTime = { 0L }) }
+        }
+        child.join()
+        assertTrue(child.isCancelled)
+        assertEquals(1, reads)
+        assertTrue(closed)
+    }
+
+    @Test fun boundedResponsePreservesBytesAndRejectsOversizeBodies() = runBlocking {
+        val body = "{\"transactions\":[]}".toByteArray()
+        val copied = body.inputStream().use { GrabOrderReader.readResponse(it, 1L, nanoTime = { 0L }) }
+        assertArrayEquals(body, copied)
+        val oversize = ByteArray(4 * 1024 * 1024 + 1).inputStream()
+        try {
+            oversize.use { GrabOrderReader.readResponse(it, 1L, nanoTime = { 0L }) }
+            fail("Oversize history cannot be imported")
+        } catch (_: IllegalArgumentException) { }
     }
 
     @Test fun cursorOnShortPageIsFollowedAndEmptyTerminalStops() {

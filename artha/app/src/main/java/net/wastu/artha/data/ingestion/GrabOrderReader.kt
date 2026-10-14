@@ -54,6 +54,7 @@ internal class GrabOrderReader(
             catch (error: Exception) { rows.issue(error); break }
             if (history.partial) rows.issue("Grab reports partially unavailable charge history")
             for (index in 0 until history.items.length()) {
+                coroutineContext.ensureActive()
                 try { GrabProviderParser.wallet(history.items.getJSONObject(index))?.let(wallet::add) }
                 catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                 catch (error: Exception) { rows.issue(error) }
@@ -67,38 +68,43 @@ internal class GrabOrderReader(
         try {
             val history = request(token, "/api/passenger/v3/rides/bookings/list?bookingTypes=PAST")
             val rides = history.optJSONArray("rides") ?: throw ProviderReadException(net.wastu.artha.data.providers.AccountStatus.ERROR, "Grab ride list schema changed")
-            val semaphore = kotlinx.coroutines.sync.Semaphore(3)
-            val results = kotlinx.coroutines.coroutineScope {
-                (0 until rides.length()).map { index -> async {
-                    semaphore.acquire()
-                    try {
-                        val ride = rides.getJSONObject(index)
-                        var receipt: JSONObject? = null
-                        var warning: Exception? = null
-                        if (index < 20 && ride.optString("state") == "COMPLETED") {
-                            try {
-                                val id = ride.getString("bookingCode")
-                                require(id.matches(Regex("[A-Za-z0-9_-]+")))
-                                receipt = request(token, "/api/passenger/v3/rides/history/$id")
-                            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                            catch (error: Exception) { warning = error }
-                        }
-                        Result.success(GrabProviderParser.ride(ride, receipt) to warning)
-                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                    catch (error: Exception) { Result.failure<Pair<UnifiedTransaction?, Exception?>>(error) }
-                    finally { semaphore.release() }
-                } }.map { it.await() }
+            val receiptIndices = GrabProviderParser.receiptIndices(rides)
+            // Bound both active requests and coroutine allocation, even if the source
+            // returns a large recent window. Canceled entries do not consume receipts.
+            for (batchStart in 0 until rides.length() step 3) {
+                coroutineContext.ensureActive()
+                val results = kotlinx.coroutines.coroutineScope {
+                    (batchStart until minOf(batchStart + 3, rides.length())).map { index -> async {
+                        try {
+                            val ride = rides.getJSONObject(index)
+                            var receipt: JSONObject? = null
+                            var warning: Exception? = null
+                            if (index in receiptIndices) {
+                                try {
+                                    val id = ride.getString("bookingCode")
+                                    require(id.matches(Regex("[A-Za-z0-9_-]+")))
+                                    receipt = request(token, "/api/passenger/v3/rides/history/$id")
+                                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                                catch (error: Exception) { warning = error }
+                            }
+                            Result.success(GrabProviderParser.ride(ride, receipt) to warning)
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                        catch (error: Exception) { Result.failure<Pair<UnifiedTransaction?, Exception?>>(error) }
+                    } }.map { it.await() }
+                }
+                for (result in results) result.fold(onSuccess = { (ride, warning) ->
+                    ride?.let(rideRows::add); warning?.let(rows::issue)
+                }, onFailure = { rows.issue(it as Exception) })
             }
-            for (result in results) result.fold(onSuccess = { (ride, warning) ->
-                ride?.let(rideRows::add); warning?.let(rows::issue)
-            }, onFailure = { rows.issue(it as Exception) })
             // Recent ride enrichment has no cursor. Its scope belongs in coverage,
             // rather than making every otherwise successful payment import an error.
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (error: Exception) { rows.issue(error) }
 
         // Exact booking identity enriches an authoritative charge; it never replaces charge amount/date.
-        for (charge in wallet.distinctBy { it.key }) {
+        val charges = GrabProviderParser.uniqueCharges(wallet)
+        if (charges.conflictCount > 0) rows.issue("Conflicting Grab charge identities; saved records are retained")
+        for (charge in charges.transactions) {
             val payload = JSONObject(charge.rawPayload)
             val ride = rideRows.singleOrNull { JSONObject(it.rawPayload).optString("orderNumber") == payload.optString("orderNumber") }
             rows.transactions += if (ride != null) GrabProviderParser.enrichCharge(charge, ride) else charge
@@ -126,6 +132,7 @@ internal class GrabOrderReader(
     private suspend fun request(token: String, path: String): JSONObject {
         kotlin.coroutines.coroutineContext.ensureActive()
         require(path.startsWith("/api/passenger/") && !path.contains(".."))
+        val deadlineNanos = System.nanoTime() + 20_000_000_000L
         val connection = (URL("https://p.grabtaxi.com$path").openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"; connectTimeout = 8_000; readTimeout = 10_000
             instanceFollowRedirects = false
@@ -136,20 +143,40 @@ internal class GrabOrderReader(
         try {
             requireHttpSuccess(connection.responseCode, "Grab")
             val bytes = connection.inputStream.use { input ->
-                val output = java.io.ByteArrayOutputStream(); val buffer = ByteArray(8192)
-                while (true) {
-                    kotlin.coroutines.coroutineContext.ensureActive()
-                    val count = input.read(buffer); if (count < 0) break
-                    require(output.size() + count <= 4 * 1024 * 1024) { "Grab history response exceeds the safe import limit" }
-                    output.write(buffer, 0, count)
-                }
-                output.toByteArray()
+                readResponse(input, deadlineNanos, prepareRead = { connection.readTimeout = it })
             }
             return JSONObject(bytes.toString(Charsets.UTF_8))
         } finally { connection.disconnect() }
     }
 
     companion object {
+        internal suspend fun readResponse(
+            input: InputStream,
+            deadlineNanos: Long,
+            nanoTime: () -> Long = System::nanoTime,
+            prepareRead: (Int) -> Unit = {},
+        ): ByteArray {
+            fun remainingMillis(): Int {
+                val remaining = deadlineNanos - nanoTime()
+                if (remaining <= 0) throw ProviderReadException(net.wastu.artha.data.providers.AccountStatus.ERROR,
+                    "Grab history request time limit reached")
+                return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(remaining).coerceIn(1L, 10_000L).toInt()
+            }
+            val output = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(8192)
+            while (true) {
+                kotlin.coroutines.coroutineContext.ensureActive()
+                prepareRead(remainingMillis())
+                val count = input.read(buffer)
+                kotlin.coroutines.coroutineContext.ensureActive()
+                remainingMillis()
+                if (count < 0) break
+                require(output.size() + count <= 4 * 1024 * 1024) { "Grab history response exceeds the safe import limit" }
+                output.write(buffer, 0, count)
+            }
+            return output.toByteArray()
+        }
+
         internal fun decryptSession(
             sessionId: String,
             salt: String,
