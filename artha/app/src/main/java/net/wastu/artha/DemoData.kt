@@ -11,7 +11,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.YearMonth
 import java.time.DayOfWeek
-import net.wastu.artha.data.analysis.AnalysisWindow
+import net.wastu.artha.data.analysis.analysisKey
 import net.wastu.artha.data.analysis.BudgetAnalyzer
 
 internal fun demoModel(dispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default): ArthaViewModel {
@@ -96,22 +96,19 @@ internal fun samplePayments(): List<UnifiedTransaction> {
 private fun sampleAnalyses(rows: List<UnifiedTransaction>): Map<String, String> = buildMap {
     var month = YearMonth.of(2023, 1)
     while (month <= YearMonth.of(2026, 10)) {
-        for (window in AnalysisWindow.entries) {
-            val text = if (month == YearMonth.of(2026, 10)) {
-                "- Headphones are the largest purchase this month; groceries are the next biggest category.\n" +
-                "- October is still in progress, so its total cannot be compared directly with a full month.\n" +
-                (if (window == AnalysisWindow.YEAR) "- Internet, rent and subscriptions recur across the year.\n\n### Recommendations\n"
-                 else "- The reversed subscription adds Rp0 to spending.\n\n### Recommendations\n") +
-                "- Space out other large purchases after the headphones.\n" +
-                "- Review the next grocery shop before adding another delivery."
-            } else {
-                val largest = BudgetAnalyzer.analyzeMonth(month, rows).categories.first().category
-                "- $largest is the largest recorded spending category.\n" +
-                "- Rent, internet and subscriptions recur in the recorded history.\n\n### Recommendations\n" +
-                "- Review recurring subscriptions before the next renewal."
-            }
-            put(window.key(month), "$text\n\nFictional example analysis.")
+        val text = if (month == YearMonth.of(2026, 10)) {
+            "- Headphones are the largest purchase this month; groceries are the next biggest category.\n" +
+            "- October is still in progress, so its total cannot be compared directly with a full month.\n" +
+            "- Internet, rent and subscriptions recur across the saved history.\n\n### Recommendations\n" +
+            "- Space out other large purchases after the headphones.\n" +
+            "- Review the next grocery shop before adding another delivery."
+        } else {
+            val largest = BudgetAnalyzer.analyzeMonth(month, rows).categories.first().category
+            "- $largest is the largest recorded spending category.\n" +
+            "- Rent, internet and subscriptions recur in the recorded history.\n\n### Recommendations\n" +
+            "- Review recurring subscriptions before the next renewal."
         }
+        put(analysisKey(month), text)
         month = month.plusMonths(1)
     }
 }

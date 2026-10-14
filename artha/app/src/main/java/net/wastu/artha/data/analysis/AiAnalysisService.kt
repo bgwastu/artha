@@ -67,8 +67,9 @@ object AiAnalysisService {
             require(array.length() <= maximum) { "AI returned too many $name." }
             return (0 until array.length()).map { index ->
                 val value = (array.opt(index) as? String)?.trim() ?: error("AI returned invalid $name.")
-                require(value.isNotEmpty() && value.length <= 600 && !value.contains('\n')) { "AI returned invalid $name." }
-                value.removePrefix("- ")
+                val clean = value.replace(Regex("^(?:[-*+]\\s+|[0-9]+[.)]\\s+|[\\u2022\\u25cf]\\s*)"), "").trim()
+                require(clean.isNotEmpty() && clean.length <= 600 && !clean.contains('\n') && !clean.contains("\\n")) { "AI returned invalid $name." }
+                clean
             }
         }
         if (json.has("findings")) {
@@ -94,12 +95,12 @@ object AiAnalysisService {
 
     suspend fun analyzeMonth(config: AiConfig, knowledge: String, monthLabel: String,
         transactions: List<UnifiedTransaction>, availableCategories: List<String> = INITIAL_DEFAULT_CATEGORIES,
-        monthlyUserNote: String = "", window: AnalysisWindow = AnalysisWindow.THREE_MONTHS,
+        monthlyUserNote: String = "",
         onProgress: (AnalysisStage) -> Unit = {},
     ): MonthAnalysisResult = withTimeout(90_000) {
         onProgress(AnalysisStage.COMPARING)
         val agent = withContext(Dispatchers.Default) {
-            SpendingAnalysisAgent(YearMonth.parse(monthLabel), window, transactions, LocalDate.now(AccountingTime.clock))
+            SpendingAnalysisAgent(YearMonth.parse(monthLabel), transactions, LocalDate.now(AccountingTime.clock))
         }
         agent.run(knowledge, monthlyUserNote, onProgress) { messages, tools, choice -> chat(config, messages, tools, choice) }
     }

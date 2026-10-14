@@ -9,7 +9,7 @@ Artha helps people in Indonesia understand their spending on rooted Android phon
 - **Unified timeline:** Automatically collect transactions and reconcile duplicates across providers.
 - **Order details:** See food items, shopping purchases, and ride routes.
 - **Monthly spending:** Compare categories and totals with the previous month.
-- **Spending insights:** Local summaries are ready immediately; AI analysis investigates three months or a year of recorded spending using read-only tools, then reviews its findings and recommendations. Manual categories stay protected.
+- **Spending insights:** Local summaries are ready immediately; AI analysis chooses its own historical comparisons and follow-up queries across saved spending, then reviews its findings and recommendations. Manual categories stay protected.
 - **Search and filters:** Find transactions by keyword, provider, or date range.
 - **Demo mode:** Explore multi-year fictional payments and example AI analysis from Settings, without changing personal history.
 - **Homescreen widgets:** Check recent transactions and monthly spending without opening the app.

@@ -85,7 +85,7 @@ class DemoModeTest {
             advanceUntilIdle()
             assertTrue(model.ledgerState.value is LedgerState.Ready)
             assertEquals(samplePayments(), model.allTransactions.value)
-            assertFalse(model.analysisSnapshot.value.monthlySummaries["2026-10:3m"].isNullOrBlank())
+            assertFalse(model.analysisSnapshot.value.monthlySummaries["2026-10:research"].isNullOrBlank())
             assertNull(model.analysisStore)
             assertNull(model.driveSyncManager)
             assertEquals("", model.analysisSnapshot.value.aiConfig.apiKey)

@@ -322,26 +322,26 @@ class TransactionEditFeedbackTest {
         assertFalse(state.saving)
     }
 
-    @Test fun analysisWindowsSaveSeparatelyAndFailedCommitKeepsPreviousResults() {
+    @Test fun researchAnalysisPreservesOldSavedResultsAndFailedCommitKeepsPreviousResults() {
         val prefs = FixturePreferences()
         val store = AnalysisStore(prefs.context)
         assertTrue(store.commitMonthSummary("2026-10:3m", "Three months", "three", store.snapshot.value))
-        assertTrue(store.commitMonthSummary("2026-10:12m", "Year", "year", store.snapshot.value))
+        assertTrue(store.commitMonthSummary("2026-10:research", "Research", "research", store.snapshot.value))
         val previous = store.snapshot.value
         prefs.updateMemoryOnFailure = true
         prefs.commitSucceeds = false
-        assertTrue(runCatching { store.commitMonthSummary("2026-10:12m", "Unsaved", "new", previous) }.isFailure)
+        assertTrue(runCatching { store.commitMonthSummary("2026-10:research", "Unsaved", "new", previous) }.isFailure)
         assertEquals(previous, store.snapshot.value)
         assertEquals(previous.monthlySummaries, AnalysisStore(prefs.context).snapshot.value.monthlySummaries)
         assertEquals("Three months", previous.monthlySummaries["2026-10:3m"])
-        assertEquals("Year", previous.monthlySummaries["2026-10:12m"])
+        assertEquals("Research", previous.monthlySummaries["2026-10:research"])
     }
 
-    @Test fun yearAnalysisCannotSaveOverChangedSelectedMonthContext() {
+    @Test fun researchCannotSaveOverChangedSelectedMonthContext() {
         val prefs = FixturePreferences(mapOf("monthly_notes" to "{\"2026-10\":\"New context\"}"))
         val store = AnalysisStore(prefs.context)
         val obsolete = store.snapshot.value.copy(monthlyNotes = mapOf("2026-10" to "Old context"))
-        assertFalse(store.commitMonthSummary("2026-10:12m", "Obsolete", "fingerprint", obsolete))
+        assertFalse(store.commitMonthSummary("2026-10:research", "Obsolete", "fingerprint", obsolete))
         assertTrue(store.snapshot.value.monthlySummaries.isEmpty())
     }
 

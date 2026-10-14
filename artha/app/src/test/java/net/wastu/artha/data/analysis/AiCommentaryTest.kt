@@ -112,7 +112,7 @@ class AiCommentaryTest {
         var number = 0
         val server = TestServer(calls = 3) { request, socket ->
             prompts += request.toString()
-            val message = if (number++ == 0) JSONObject("""{"role":"assistant","tool_calls":[{"id":"test-1","type":"function","function":{"name":"monthly_trends","arguments":"{}"}}]}""")
+            val message = if (number++ == 0) JSONObject("""{"role":"assistant","tool_calls":[{"id":"test-1","type":"function","function":{"name":"monthly_trends","arguments":"{\"from\":\"2026-09\",\"through\":\"2026-10\"}"}}]}""")
                 else JSONObject().put("role", "assistant").put("content", """{"findings":["Recorded totals reviewed"],"recommendations":[]}""")
             val response = JSONObject().put("choices", org.json.JSONArray().put(JSONObject().put("message", message))).toString().toByteArray()
             socket.getOutputStream().apply {
@@ -125,10 +125,12 @@ class AiCommentaryTest {
             AiAnalysisService.analyzeMonth(AiConfig("http://127.0.0.1:${server.port}", "fake-test-key", "fake-model"), "", "2026-10", rows + previous)
             assertEquals(3, prompts.size)
             val evidence = JSONObject(JSONObject(prompts.first()).getJSONArray("messages").getJSONObject(1).getString("content")).getJSONObject("evidence")
-            val months = evidence.getJSONArray("months")
-            assertEquals(49360L, months.getJSONObject(2).getLong("spendingRupiah"))
-            assertEquals(2000L, months.getJSONObject(1).getLong("spendingRupiah"))
-            assertEquals(40, months.getJSONObject(2).getInt("paymentCount"))
+            val selected = evidence.getJSONObject("selectedMonthEvidence").getJSONArray("months").getJSONObject(0)
+            assertEquals(49360L, selected.getLong("spendingRupiah"))
+            assertEquals(40, selected.getInt("paymentCount"))
+            val messages = JSONObject(prompts[1]).getJSONArray("messages")
+            val result = JSONObject(messages.getJSONObject(messages.length() - 1).getString("content"))
+            assertEquals(2000L, result.getJSONArray("months").getJSONObject(0).getLong("spendingRupiah"))
             assertTrue(prompts[1].contains("tool_call_id"))
             assertFalse(JSONObject(prompts.last()).has("tools"))
         } finally { server.close() }

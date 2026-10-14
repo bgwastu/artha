@@ -8,10 +8,7 @@ import net.wastu.artha.core.model.UnifiedTransaction
 import org.json.JSONArray
 import org.json.JSONObject
 
-enum class AnalysisWindow(val months: Int, val label: String) {
-    THREE_MONTHS(3, "3 months"), YEAR(12, "1 year");
-    fun key(month: YearMonth): String = "$month:${months}m"
-}
+fun analysisKey(month: YearMonth): String = "$month:research"
 
 enum class AnalysisStage(val label: String) {
     COMPARING("Comparing months"), EXAMINING("Investigating spending"),
@@ -20,9 +17,7 @@ enum class AnalysisStage(val label: String) {
 }
 
 /** Bounded, auditable evidence. No raw provider payloads, payment IDs or credentials leave the app. */
-internal fun analysisEvidence(month: YearMonth, window: AnalysisWindow, rows: List<UnifiedTransaction>, today: LocalDate): JSONObject {
-    val start = month.minusMonths(window.months - 1L)
-    val end = minOf(today, month.atEndOfMonth())
+internal fun analysisEvidence(month: YearMonth, start: YearMonth, end: LocalDate, rows: List<UnifiedTransaction>, today: LocalDate): JSONObject {
     val spending = rows.filter { BudgetAnalyzer.isSpending(it) &&
         it.occurredAt.atZone(AccountingTime.zone).toLocalDate() in start.atDay(1)..end }
     fun rupiah(minor: Long) = BigDecimal.valueOf(minor, 2)
@@ -31,7 +26,7 @@ internal fun analysisEvidence(month: YearMonth, window: AnalysisWindow, rows: Li
             .take(limit).map { (label, payments) -> JSONObject().put("name", label.take(160))
                 .put("amountRupiah", rupiah(payments.sumOf { it.money.amountMinor })).put("paymentCount", payments.size) })
     return JSONObject().put("selectedMonth", month.toString()).put("from", start.toString()).put("through", end.toString())
-        .put("months", JSONArray((0 until window.months).map { offset ->
+        .put("months", JSONArray((0..java.time.temporal.ChronoUnit.MONTHS.between(start, YearMonth.from(end)).toInt()).map { offset ->
             val current = start.plusMonths(offset.toLong())
             val payments = spending.filter { YearMonth.from(it.occurredAt.atZone(AccountingTime.zone)) == current }
             JSONObject().put("month", current.toString()).put("partial", current.atEndOfMonth() > today)
