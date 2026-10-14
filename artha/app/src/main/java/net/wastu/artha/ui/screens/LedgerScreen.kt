@@ -577,6 +577,11 @@ fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlig
         else -> null
     }
     val amount = paymentRowAmount(transaction)
+    val amountColor = when {
+        !credit && reversed -> MaterialTheme.colorScheme.onSurfaceVariant
+        credit -> incomeColor()
+        else -> expenseColor()
+    }
     val payloadValues by produceState(initialValue = emptyList<String>(), transaction.rawPayload, highlightQuery.isNotBlank()) {
         value = if (highlightQuery.isBlank()) emptyList() else withContext(Dispatchers.Default) { payloadTextValues(transaction.rawPayload) }
     }
@@ -597,14 +602,14 @@ fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlig
                             HighlightedText(transaction.description, highlightQuery, MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Medium, maxLines = 2)
                             HighlightedText(amount, highlightQuery, MaterialTheme.typography.titleSmall,
-                                color = if (credit) incomeColor() else expenseColor(),
+                                color = amountColor,
                                 fontWeight = FontWeight.SemiBold, maxLines = Int.MAX_VALUE)
                         }
                     } else Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         HighlightedText(transaction.description, highlightQuery, MaterialTheme.typography.bodyLarge,
                             modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium, maxLines = 2)
                         HighlightedText(amount, highlightQuery, MaterialTheme.typography.titleSmall,
-                                color = if (credit) incomeColor() else expenseColor(), fontWeight = FontWeight.SemiBold)
+                                color = amountColor, fontWeight = FontWeight.SemiBold)
                     }
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {

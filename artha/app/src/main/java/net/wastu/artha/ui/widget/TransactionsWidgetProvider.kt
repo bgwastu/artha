@@ -179,7 +179,7 @@ internal fun buildTransactionItemView(
     val amountColor = when {
         isZero -> WidgetPalette.supporting
         isCredit -> WidgetPalette.income
-        else -> WidgetPalette.text
+        else -> WidgetPalette.expense
     }
     views.setTextViewText(R.id.widget_item_amount, amountText)
     views.setTextColor(R.id.widget_item_amount, amountColor)

@@ -101,7 +101,7 @@ internal fun paymentAmountColors(colors: ColorScheme): PaymentAmountColors {
     }
     return PaymentAmountColors(
         income = readableTint(if (dark) Color(0xFF98C9AC) else Color(0xFF2F6A4F)),
-        expense = readableTint(if (dark) Color(0xFFD2B6AF) else Color(0xFF805D57)),
+        expense = readableTint(if (dark) Color(0xFFD8A6A6) else Color(0xFF8C4545)),
     )
 }
 

@@ -24,6 +24,8 @@ class PresentationContrastTest {
         listOf(LightColors, DarkColors).forEach { colors ->
             val amounts = paymentAmountColors(colors)
             assertNotEquals("Income and expense must have distinct hues", amounts.income.toArgb(), amounts.expense.toArgb())
+            assertTrue("Income uses a muted green", amounts.income.green > amounts.income.red)
+            assertTrue("Expenses use a muted red", amounts.expense.red > amounts.expense.green)
             listOf(amounts.income, amounts.expense).forEach { foreground ->
                 assertTrue("Financial text is opaque", foreground.alpha == 1f)
                 paymentAmountSurfaces(colors).forEach { background ->
@@ -54,7 +56,7 @@ class PresentationContrastTest {
     }
 
     @Test fun widgetPaletteAndActualLayoutTextColorsContrastWithItsBackground() {
-        listOf(WidgetPalette.text, WidgetPalette.supporting, WidgetPalette.income).forEach {
+        listOf(WidgetPalette.text, WidgetPalette.supporting, WidgetPalette.income, WidgetPalette.expense).forEach {
             assertTrue(contrastRatio(it, WidgetPalette.background) >= 4.5)
         }
         val resources = listOf(File("src/main/res"), File("app/src/main/res"), File("artha/app/src/main/res"))
