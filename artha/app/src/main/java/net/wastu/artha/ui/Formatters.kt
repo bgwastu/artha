@@ -1,6 +1,8 @@
 package net.wastu.artha.ui
 
 import net.wastu.artha.core.model.Money
+import net.wastu.artha.core.model.Direction
+import net.wastu.artha.core.model.UnifiedTransaction
 import java.math.BigDecimal
 import java.math.BigInteger
 import java.text.NumberFormat
@@ -26,3 +28,10 @@ private val TransactionTimeFormatter: DateTimeFormatter = DateTimeFormatter
     .withZone(net.wastu.artha.core.model.AccountingTime.zone)
 
 fun formatTime(instant: Instant): String = TransactionTimeFormatter.format(instant)
+
+/** A reversing credit is still incoming money; only a voided outgoing charge has zero net spending. */
+internal fun paymentRowAmount(transaction: UnifiedTransaction): String {
+    val credit = transaction.direction == Direction.CREDIT
+    val reversed = transaction.isReversal || transaction.description.contains("(Reversed)", ignoreCase = true)
+    return if (!credit && reversed) "Rp0" else "${if (credit) "+" else "−"}${formatMoney(transaction.money)}"
+}

@@ -14,6 +14,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TransactionPresentationTest {
+    @Test fun reversingCreditsKeepTheirRecordedIncomingAmountInListsAndWidgets() {
+        val ordinary = transaction("fixture")
+        val credit = ordinary.copy(direction = Direction.CREDIT, isReversal = true)
+        assertEquals("+${formatMoney(credit.money)}", paymentRowAmount(credit))
+        assertEquals("Incoming reversal", net.wastu.artha.ui.screens.transactionAccountingLabel(credit))
+        assertFalse(net.wastu.artha.data.analysis.BudgetAnalyzer.isSpending(credit))
+        assertEquals(ordinary.money, credit.money)
+        assertEquals("Rp0", paymentRowAmount(ordinary.copy(isReversal = true)))
+        assertEquals("−${formatMoney(ordinary.money)}", paymentRowAmount(ordinary))
+    }
+
     @Test fun browsingAndSearchUseTheSameConfirmationSourceAndDirectionScope() {
         val records = listOf(
             transaction("payment"), transaction("order", confirmed = false),

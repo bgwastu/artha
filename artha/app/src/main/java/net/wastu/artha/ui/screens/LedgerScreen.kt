@@ -73,6 +73,7 @@ import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.ui.LedgerState
 import net.wastu.artha.ui.formatMoney
+import net.wastu.artha.ui.paymentRowAmount
 import net.wastu.artha.ui.formatTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -571,11 +572,11 @@ fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlig
     val credit = transaction.direction == Direction.CREDIT
     val reversed = transaction.isReversal || transaction.description.contains("(Reversed)", ignoreCase = true)
     val status = when {
-        reversed -> "Reversed"
+        reversed -> if (credit) "Incoming reversal" else "Reversed"
         transaction.description.startsWith("Pocket Transfer:", ignoreCase = true) -> "Transfer"
         else -> null
     }
-    val amount = if (reversed) "Rp0" else "${if (credit) "+" else "−"}${formatMoney(transaction.money)}"
+    val amount = paymentRowAmount(transaction)
     val payloadValues by produceState(initialValue = emptyList<String>(), transaction.rawPayload, highlightQuery.isNotBlank()) {
         value = if (highlightQuery.isBlank()) emptyList() else withContext(Dispatchers.Default) { payloadTextValues(transaction.rawPayload) }
     }

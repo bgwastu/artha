@@ -279,7 +279,7 @@ private fun TransactionDetailsBody(
                         DetailBadge("QRIS", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer)
                     }
                     if (isReversal) {
-                        DetailBadge("Reversed", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+                        DetailBadge(if (credit) "Reversal" else "Reversed", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
                     }
                     if (record.cardLast4 != null) {
                         DetailBadge(
@@ -709,7 +709,7 @@ internal fun transactionAccountingLabel(transaction: UnifiedTransaction): String
     if (BudgetAnalyzer.isSpending(transaction)) return "Included in spending"
     val payload = try { JSONObject(transaction.rawPayload) } catch (_: JSONException) { null }
     return when {
-        transaction.isReversal || transaction.description.contains("(Reversed)", ignoreCase = true) -> "Reversed"
+        transaction.isReversal || transaction.description.contains("(Reversed)", ignoreCase = true) -> if (transaction.direction == Direction.CREDIT) "Incoming reversal" else "Reversed"
         transaction.direction == Direction.CREDIT -> "Incoming"
         transaction.money.currencyCode != "IDR" -> "Outside IDR spending"
         payload?.optBoolean("isWalletFunding") == true -> "Wallet funding"

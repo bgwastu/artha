@@ -17,6 +17,7 @@ import net.wastu.artha.R
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.ui.formatMoney
+import net.wastu.artha.ui.paymentRowAmount
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -173,12 +174,8 @@ internal fun buildTransactionItemView(
     val isCredit = tx.direction == Direction.CREDIT
     views.setTextViewText(R.id.widget_item_subtitle, dateStr)
 
-    val isZero = tx.isReversal || tx.money.amountMinor == 0L
-    val amountText = if (isZero) {
-        "Rp0"
-    } else {
-        "${if (isCredit) "+" else "−"}${formatMoney(tx.money)}"
-    }
+    val isZero = !isCredit && (tx.isReversal || tx.description.contains("(Reversed)", ignoreCase = true))
+    val amountText = paymentRowAmount(tx)
     val amountColor = when {
         isZero -> WidgetPalette.supporting
         isCredit -> WidgetPalette.income
