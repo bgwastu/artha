@@ -4,8 +4,48 @@ import java.time.Instant
 import net.wastu.artha.core.model.*
 import org.junit.Assert.*
 import org.junit.Test
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancelAndJoin
 
 class AiCategorizationTest {
+    @Test fun temporaryCategoryFailureRetriesOnceAndPreservesSuccessfulResult() = runTest {
+        var calls = 0
+        val result = AiCategorization.requestWithRetry {
+            calls++
+            if (calls == 1) throw java.io.IOException("temporary")
+            mapOf("fixture" to CategorySuggestion("Groceries", "AI suggestion: Fixture"))
+        }
+        assertEquals(2, calls)
+        assertEquals("Groceries", result.getValue("fixture").category)
+        calls = 0
+        assertTrue(runCatching { AiCategorization.requestWithRetry<Unit> { calls++; throw AiHttpException(503) } }.isFailure)
+        assertEquals(2, calls)
+    }
+
+    @Test fun invalidAiResponsesRetryButCredentialsAndConfigurationDoNot() = runTest {
+        var calls = 0
+        assertTrue(runCatching { AiCategorization.requestWithRetry<Unit> { calls++; throw InvalidCategoryResponseException(IllegalArgumentException()) } }.isFailure)
+        assertEquals(2, calls)
+        for (failure in listOf(AiHttpException(401), AiHttpException(403), AiHttpException(400), IllegalArgumentException("configuration"))) {
+            calls = 0
+            assertTrue(runCatching { AiCategorization.requestWithRetry<Unit> { calls++; throw failure } }.isFailure)
+            assertEquals(1, calls)
+        }
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun canceledRetryNeverSendsAnotherCategoryRequest() = runTest {
+        var calls = 0
+        val job = launch { AiCategorization.requestWithRetry<Unit> { calls++; throw java.io.IOException("temporary") } }
+        runCurrent()
+        assertEquals(1, calls)
+        job.cancelAndJoin()
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, calls)
+    }
+
     private val payment = UnifiedTransaction(Provider.JAGO, "fixture", Direction.DEBIT, Money(10000), Instant.EPOCH, "Netflix restaurant tax taxi", "{}")
     private val snapshot = AnalysisSnapshot()
     private val batch get() = AiCategorization.nextBatch(listOf(payment), snapshot)

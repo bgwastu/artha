@@ -177,7 +177,7 @@ class ArthaViewModel(
                 if (failedBatch == batchId) return@collectLatest
                 _categoryAutomation.value = CategoryAutomationState.WORKING
                 try {
-                    val suggestions = categorize(config, input.snapshot, batch)
+                    val suggestions = AiCategorization.requestWithRetry { categorize(config, input.snapshot, batch) }
                     ensureActive()
                     val currentRows = _reconciledCache.value.associateBy { it.key }
                     val unchanged = batch.filter { candidate ->

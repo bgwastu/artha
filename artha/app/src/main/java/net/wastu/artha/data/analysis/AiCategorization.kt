@@ -5,6 +5,10 @@ import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.core.model.toLowerHex
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+
+internal class InvalidCategoryResponseException(cause: Exception) : IllegalStateException("AI returned invalid categories", cause)
 
 enum class CategoryAutomationState { NOT_CONFIGURED, WORKING, READY, ERROR }
 data class CategorySuggestion(val category: String, val reason: String)
@@ -42,7 +46,28 @@ object AiCategorization {
             snapshot.reasons[it.transaction.key]?.startsWith(REASON_PREFIX) != true }
         .take(32).toList()
 
-    fun parse(raw: String, candidates: List<CategoryCandidate>, allowedCategories: List<String>): Map<String, CategorySuggestion> {
+    internal suspend fun <T> requestWithRetry(request: suspend () -> T): T {
+        try { return request() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) {
+            val retryable = when (failure) {
+                is AiHttpException -> failure.status == 429 || failure.status in 500..599
+                is java.io.IOException, is InvalidCategoryResponseException -> true
+                else -> false
+            }
+            if (!retryable) throw failure
+        }
+        delay(1500)
+        return request()
+    }
+
+    fun parse(raw: String, candidates: List<CategoryCandidate>, allowedCategories: List<String>): Map<String, CategorySuggestion> = try {
+        parseResponse(raw, candidates, allowedCategories)
+    } catch (failure: org.json.JSONException) { throw InvalidCategoryResponseException(failure) }
+      catch (failure: IllegalArgumentException) { throw InvalidCategoryResponseException(failure) }
+      catch (failure: IllegalStateException) { throw InvalidCategoryResponseException(failure) }
+
+    private fun parseResponse(raw: String, candidates: List<CategoryCandidate>, allowedCategories: List<String>): Map<String, CategorySuggestion> {
         val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
         val response = JSONObject(cleaned).getJSONArray("classifications")
         require(response.length() == candidates.size) { "AI returned incomplete categories" }

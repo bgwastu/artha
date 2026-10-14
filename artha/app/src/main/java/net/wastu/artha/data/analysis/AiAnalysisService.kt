@@ -14,10 +14,37 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 data class MonthAnalysisResult(val monthlySummary: String)
+internal class AiHttpException(val status: Int) : java.io.IOException("AI service returned HTTP $status")
+internal class EmptyAiResponseException : IllegalStateException()
+
+internal fun aiConnectionFailure(error: Exception): String = when (error) {
+    is AiHttpException -> when (error.status) {
+        401, 403 -> "Check the API key"
+        400, 404 -> "Check the URL and model"
+        429 -> "Rate limited. Try again"
+        else -> "Provider unavailable. Try again"
+    }
+    is java.net.SocketTimeoutException -> "Connection timed out. Try again"
+    is java.io.IOException -> "Couldn’t connect. Try again"
+    is EmptyAiResponseException -> "The model returned no reply"
+    else -> "Test failed. Try again"
+}
+
+internal fun aiConfigValidation(config: AiConfig): String? = when {
+    config.baseUrl.isBlank() || config.apiKey.isBlank() || config.model.isBlank() -> "Enter the URL, API key and model"
+    runCatching { AiAnalysisService.endpoint(config.baseUrl) }.isFailure -> "Enter a valid provider URL"
+    else -> null
+}
 
 /** AI commentary consumes authoritative totals and cannot change ledger facts or categories. */
 object AiAnalysisService {
     private val disconnectScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Exercises generation with the draft configuration; no ledger, notes or settings are sent or saved. */
+    suspend fun testConnection(config: AiConfig) {
+        require(aiConfigValidation(config) == null)
+        if (call(config, "Reply only with OK.").isBlank()) throw EmptyAiResponseException()
+    }
 
     fun endpoint(baseUrl: String): String {
         val base = baseUrl.trim().trimEnd('/')
@@ -87,7 +114,7 @@ object AiAnalysisService {
                 connection.setRequestProperty("Content-Type", "application/json")
                 val body = JSONObject().put("model", config.model).put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
                 connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-                check(connection.responseCode in 200..299) { "AI service returned HTTP ${connection.responseCode}. Local insights remain available." }
+                if (connection.responseCode !in 200..299) throw AiHttpException(connection.responseCode)
                 val json = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
                     val response = StringBuilder()
                     val buffer = CharArray(8192)

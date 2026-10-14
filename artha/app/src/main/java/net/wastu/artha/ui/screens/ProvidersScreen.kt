@@ -49,6 +49,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,6 +65,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.data.analysis.AiConfig
 import net.wastu.artha.data.analysis.AiAnalysisService
+import net.wastu.artha.data.analysis.aiConfigValidation
+import net.wastu.artha.data.analysis.aiConnectionFailure
+import net.wastu.artha.ui.theme.incomeColor
 import net.wastu.artha.data.providers.AccountStatus
 import net.wastu.artha.data.providers.ProviderDiagnostic
 import net.wastu.artha.data.sync.CloudSyncStatus
@@ -567,29 +573,48 @@ fun AiConfigDialog(currentConfig: AiConfig, onDismiss: () -> Unit, onSave: (AiCo
     var apiKey by remember { mutableStateOf(currentConfig.apiKey) }
     var model by remember { mutableStateOf(currentConfig.model) }
     var validationError by remember { mutableStateOf<String?>(null) }
+    var testing by remember { mutableStateOf(false) }
+    var testResult by remember { mutableStateOf<String?>(null) }
+    var testSucceeded by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    fun draft() = currentConfig.copy(baseUrl = baseUrl.trim(), apiKey = apiKey.trim(), model = model.trim())
     AlertDialog(onDismissRequest = { if (!saving) onDismiss() },
         title = { Text("AI") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Automatically categorizes payments and writes summaries. Sends payment details and personal context to this provider", style = MaterialTheme.typography.bodyMedium)
-                OutlinedTextField(baseUrl, { baseUrl = it; validationError = null }, label = { Text("Endpoint URL") },
-                    singleLine = true, enabled = !saving, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(apiKey, { apiKey = it; validationError = null }, label = { Text("API key") },
-                    visualTransformation = PasswordVisualTransformation(), singleLine = true, enabled = !saving, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(model, { model = it; validationError = null }, label = { Text("Model") },
-                    singleLine = true, enabled = !saving, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(baseUrl, { baseUrl = it; validationError = null; testResult = null }, label = { Text("Endpoint URL") },
+                    singleLine = true, enabled = !saving && !testing, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(apiKey, { apiKey = it; validationError = null; testResult = null }, label = { Text("API key") },
+                    visualTransformation = PasswordVisualTransformation(), singleLine = true, enabled = !saving && !testing, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(model, { model = it; validationError = null; testResult = null }, label = { Text("Model") },
+                    singleLine = true, enabled = !saving && !testing, modifier = Modifier.fillMaxWidth())
+                OutlinedButton(enabled = !saving && !testing, onClick = {
+                    val config = draft()
+                    validationError = aiConfigValidation(config)
+                    testResult = null
+                    if (validationError == null) {
+                        testing = true
+                        scope.launch {
+                            try {
+                                AiAnalysisService.testConnection(config)
+                                testSucceeded = true; testResult = "Connected"
+                            } catch (cancelled: CancellationException) { throw cancelled }
+                            catch (failure: Exception) { testSucceeded = false; testResult = aiConnectionFailure(failure) }
+                            finally { testing = false }
+                        }
+                    }
+                }) { Text(if (testing) "Testing" else "Test connection") }
+                testResult?.let { Text(it, color = if (testSucceeded) incomeColor() else MaterialTheme.colorScheme.error,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
                 (validationError ?: error)?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
             }
         },
         confirmButton = {
-            FilledTonalButton(enabled = !saving, onClick = {
-                val endpointError = runCatching { AiAnalysisService.endpoint(baseUrl) }.exceptionOrNull()
-                validationError = when {
-                    baseUrl.isBlank() || model.isBlank() || apiKey.isBlank() -> "Enter the URL, API key and model"
-                    endpointError != null -> if (endpointError is IllegalArgumentException) endpointError.message else "Enter a valid provider URL"
-                    else -> null
-                }
-                if (validationError == null) onSave(currentConfig.copy(baseUrl = baseUrl.trim(), apiKey = apiKey.trim(), model = model.trim()))
+            FilledTonalButton(enabled = !saving && !testing, onClick = {
+                val config = draft()
+                validationError = aiConfigValidation(config)
+                if (validationError == null) onSave(config)
             }) { Text(if (saving) "Saving" else "Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !saving) { Text("Cancel") } })

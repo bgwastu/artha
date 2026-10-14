@@ -16,6 +16,58 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AiCommentaryTest {
+    @Test fun connectionTestUsesDraftModelAndSyntheticPromptOnly() = runBlocking {
+        var request: JSONObject? = null
+        val server = TestServer { json, socket ->
+            request = json
+            val response = """{"choices":[{"message":{"content":"OK"}}]}""".toByteArray()
+            socket.getOutputStream().apply {
+                write("HTTP/1.1 200 OK\r\nContent-Length: ${response.size}\r\nConnection: close\r\n\r\n".toByteArray()); write(response); flush()
+            }
+        }
+        val config = AiConfig("http://127.0.0.1:${server.port}", "fake-key", "draft-model")
+        try {
+            AiAnalysisService.testConnection(config)
+            assertEquals("draft-model", request!!.getString("model"))
+            assertEquals("Reply only with OK.", request!!.getJSONArray("messages").getJSONObject(0).getString("content"))
+            assertEquals("fake-key", config.apiKey)
+            assertFalse(request.toString().contains("fake-key"))
+        } finally { server.close() }
+    }
+
+    @Test fun connectionTestRejectsBlankModelReply() = runBlocking {
+        val server = TestServer { _, socket ->
+            val response = """{"choices":[{"message":{"content":" "}}]}""".toByteArray()
+            socket.getOutputStream().apply {
+                write("HTTP/1.1 200 OK\r\nContent-Length: ${response.size}\r\nConnection: close\r\n\r\n".toByteArray()); write(response); flush()
+            }
+        }
+        try {
+            val failure = runCatching { AiAnalysisService.testConnection(AiConfig("http://127.0.0.1:${server.port}", "fake", "fake")) }.exceptionOrNull()
+            assertTrue(failure is EmptyAiResponseException)
+            assertEquals("The model returned no reply", aiConnectionFailure(failure as Exception))
+        } finally { server.close() }
+    }
+
+    @Test fun connectionErrorsAreActionableAndNeverExposeProviderBodies() = runBlocking {
+        val server = TestServer { _, socket ->
+            val response = "private provider diagnostic".toByteArray()
+            socket.getOutputStream().apply {
+                write("HTTP/1.1 401 Unauthorized\r\nContent-Length: ${response.size}\r\nConnection: close\r\n\r\n".toByteArray()); write(response); flush()
+            }
+        }
+        try {
+            val failure = runCatching { AiAnalysisService.testConnection(AiConfig("http://127.0.0.1:${server.port}", "fake", "fake")) }.exceptionOrNull()
+            assertTrue(failure is AiHttpException)
+            assertEquals("Check the API key", aiConnectionFailure(failure as Exception))
+            assertEquals("Check the URL and model", aiConnectionFailure(AiHttpException(404)))
+            assertEquals("Rate limited. Try again", aiConnectionFailure(AiHttpException(429)))
+            assertEquals("Connection timed out. Try again", aiConnectionFailure(java.net.SocketTimeoutException("private")))
+            assertNotNull(aiConfigValidation(AiConfig("https://example.com", "", "model")))
+            assertNotNull(aiConfigValidation(AiConfig("http://remote.invalid", "fake", "model")))
+        } finally { server.close() }
+    }
+
     private class TestServer(handler: (JSONObject, Socket) -> Unit) {
         private val server = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))
         val port get() = server.localPort
