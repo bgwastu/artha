@@ -11,11 +11,13 @@ import java.time.ZoneId
 import java.time.format.DateTimeParseException
 import java.util.Base64
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import javax.xml.parsers.DocumentBuilderFactory
+import kotlinx.coroutines.CancellationException
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.Provider
@@ -63,24 +65,32 @@ internal object GojekProviderParser {
         return CacheEntry(url, kind, requireNotNull(status), headers["content-encoding"].orEmpty(), headers["okhttp-received-millis"]?.toLongOrNull() ?: 0)
     }
 
-    fun decodeBody(bytes: ByteArray, encoding: String): JSONObject {
+    fun decodeBody(bytes: ByteArray, encoding: String, checkpoint: () -> Unit = {}): JSONObject {
+        checkpoint()
         schema(bytes.size <= MAX_BODY_BYTES, "Gojek response exceeds the import size limit")
-        val input = when (encoding.trim().lowercase(Locale.ROOT)) {
-            "", "identity" -> if (bytes.size >= 2 && bytes[0] == 0x1f.toByte() && bytes[1] == 0x8b.toByte()) GZIPInputStream(bytes.inputStream()) else bytes.inputStream()
-            "gzip" -> GZIPInputStream(bytes.inputStream())
-            "br" -> BrotliInputStream(bytes.inputStream())
-            else -> throw ProviderReadException(AccountStatus.ERROR, "Gojek response has an unsupported content encoding")
+        return try {
+            val input = when (encoding.trim().lowercase(Locale.ROOT)) {
+                "", "identity" -> if (bytes.size >= 2 && bytes[0] == 0x1f.toByte() && bytes[1] == 0x8b.toByte()) GZIPInputStream(bytes.inputStream()) else bytes.inputStream()
+                "gzip" -> GZIPInputStream(bytes.inputStream())
+                "br" -> BrotliInputStream(bytes.inputStream())
+                else -> throw ProviderReadException(AccountStatus.ERROR, "Gojek response has an unsupported content encoding")
+            }
+            val text = readBounded(input, checkpoint).toString(Charsets.UTF_8)
+            checkpoint()
+            JSONObject(text).also { checkpoint() }
         }
-        return try { JSONObject(readBounded(input).toString(Charsets.UTF_8)) }
+        catch (cancelled: CancellationException) { throw cancelled }
         catch (e: ProviderReadException) { throw e }
         catch (_: Exception) { throw ProviderReadException(AccountStatus.ERROR, "Gojek response is missing or unrecognized") }
     }
 
-    fun readBounded(input: InputStream): ByteArray = input.use { stream ->
+    fun readBounded(input: InputStream, checkpoint: () -> Unit = {}): ByteArray = input.use { stream ->
         val result = ByteArrayOutputStream()
         val buffer = ByteArray(8192)
         while (true) {
+            checkpoint()
             val count = stream.read(buffer)
+            checkpoint()
             if (count < 0) break
             schema(result.size() + count <= MAX_BODY_BYTES, "Gojek response exceeds the import size limit")
             result.write(buffer, 0, count)
@@ -88,16 +98,26 @@ internal object GojekProviderParser {
         result.toByteArray()
     }
 
-    fun paymentPage(root: JSONObject): PaymentPage {
+    /** A trickling source cannot extend the response budget indefinitely between idle timeouts. */
+    fun remainingTimeoutMillis(deadlineNanos: Long, maxMillis: Int, nowNanos: Long = System.nanoTime()): Int {
+        val remaining = deadlineNanos - nowNanos
+        schema(remaining > 0, "GoPay history request exceeded the time limit; valid payments are retained")
+        return TimeUnit.NANOSECONDS.toMillis(remaining).coerceAtLeast(1).coerceAtMost(maxMillis.toLong()).toInt()
+    }
+
+    fun paymentPage(root: JSONObject, checkpoint: () -> Unit = {}): PaymentPage {
+        checkpoint()
         val data = responseData(root)
         val groups = data.optJSONArray("completed")
         schema(groups != null, "GoPay completed history schema changed")
         val items = mutableListOf<JSONObject>()
         var malformed = 0
         for (i in 0 until requireNotNull(groups).length()) {
+            checkpoint()
             val groupItems = groups.optJSONObject(i)?.optJSONArray("items")
             if (groupItems == null) { malformed++; continue }
             for (j in 0 until groupItems.length()) {
+                checkpoint()
                 if (items.size >= 2000) { malformed++; break }
                 val item = groupItems.optJSONObject(j)
                 if (item == null) malformed++ else items += item
@@ -133,6 +153,9 @@ internal object GojekProviderParser {
         val minor = try { BigDecimal(requireNotNull(value).toString()).movePointRight(2).longValueExact() }
         catch (_: Exception) { throw ProviderReadException(AccountStatus.ERROR, "GoPay payment amount is not exact or exceeds the supported range") }
         schema(minor > 0, "GoPay payment magnitude must be positive")
+        // Android JSON decimals use floating numbers; reject magnitudes where source cents may already be lost.
+        schema(value !is Double || (value.isFinite() && minor < (1L shl 53)), "GoPay floating payment amount exceeds exact minor-unit precision")
+        schema(value !is Float || (value.isFinite() && minor < (1L shl 24)), "GoPay floating payment amount exceeds exact minor-unit precision")
         val sourceTime = paymentTimestamp(requiredText(item, "order_timestamp"))
         // Room's event time is millisecond precision. Keep the source precision separately.
         val occurredAt = Instant.ofEpochMilli(sourceTime.toEpochMilli())
@@ -162,12 +185,14 @@ internal object GojekProviderParser {
     fun orderCards(root: JSONObject): List<NativeOrder> = orderPage(root).orders
 
     /** Non-order display widgets are expected; invalid order actions cannot discard valid neighbors. */
-    fun orderPage(root: JSONObject): OrderPage {
+    fun orderPage(root: JSONObject, checkpoint: () -> Unit = {}): OrderPage {
+        checkpoint()
         val cards = responseData(root).optJSONArray("cards")
         schema(cards != null, "Gojek order card schema changed")
         val orders = mutableListOf<NativeOrder>()
         var malformed = 0
         for (index in 0 until requireNotNull(cards).length()) {
+            checkpoint()
             if (index >= 2000) { malformed++; break }
             val card = cards.optJSONObject(index)
             if (card == null) { malformed++; continue }

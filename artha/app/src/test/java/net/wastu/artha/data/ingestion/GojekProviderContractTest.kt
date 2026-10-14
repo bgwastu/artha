@@ -1,11 +1,13 @@
 package net.wastu.artha.data.ingestion
 
 import java.io.ByteArrayOutputStream
+import java.io.ByteArrayInputStream
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.Base64
 import java.util.TimeZone
 import java.util.zip.GZIPOutputStream
+import kotlinx.coroutines.CancellationException
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.data.providers.AccountStatus
 import org.json.JSONArray
@@ -218,6 +220,70 @@ class GojekProviderContractTest {
         assertEquals(transaction.occurredAt, enriched.occurredAt)
         assertEquals(JSONObject(transaction.rawPayload).getString("paymentTimestamp"), payload.getString("paymentTimestamp"))
         assertTrue(enriched.isConfirmed)
+    }
+
+    @Test fun bodyReadStopsAtMonotonicDeadlineEvenWithContinuallyArrivingBytes() {
+        var elapsed = 0L
+        var reads = 0
+        var closed = false
+        val input = object : ByteArrayInputStream(ByteArray(32)) {
+            override fun read(bytes: ByteArray, offset: Int, length: Int): Int {
+                reads++
+                elapsed += 1_000_000
+                return super.read(bytes, offset, minOf(length, 1))
+            }
+            override fun close() { closed = true; super.close() }
+        }
+        val error = failure { GojekProviderParser.readBounded(input) {
+            GojekProviderParser.remainingTimeoutMillis(20_000_000, 15_000, elapsed)
+        } }
+        assertEquals(AccountStatus.ERROR, error.status)
+        assertTrue(reads < 32)
+        assertTrue(closed)
+        assertEquals(15_000, GojekProviderParser.remainingTimeoutMillis(20_000_000_000, 15_000, 0))
+        assertEquals(1, GojekProviderParser.remainingTimeoutMillis(20_000_000, 15_000, 19_500_000))
+    }
+
+    @Test fun cancellationDuringBodyConsumptionClosesStreamAndRemainsCancellation() {
+        val cancelled = CancellationException("Fictional canceled import")
+        var read = false
+        var closed = false
+        val input = object : ByteArrayInputStream(byteArrayOf(1, 2, 3)) {
+            override fun read(bytes: ByteArray, offset: Int, length: Int): Int {
+                read = true
+                return super.read(bytes, offset, length)
+            }
+            override fun close() { closed = true; super.close() }
+        }
+        try {
+            GojekProviderParser.readBounded(input) { if (read) throw cancelled }
+            fail("Expected cancellation")
+        } catch (error: CancellationException) { assertSame(cancelled, error) }
+        assertTrue(closed)
+        var checkpoints = 0
+        try {
+            GojekProviderParser.decodeBody(page(payment()).toString().toByteArray(), "") {
+                if (++checkpoints == 3) throw cancelled
+            }
+            fail("Expected decoder cancellation")
+        } catch (error: CancellationException) { assertSame(cancelled, error) }
+    }
+
+    @Test fun corruptCompressionAndJsonRemainTypedSchemaFailures() {
+        for (encoding in listOf("gzip", "br", "")) {
+            assertEquals(AccountStatus.ERROR, failure { GojekProviderParser.decodeBody(byteArrayOf(1, 2, 3), encoding) }.status)
+        }
+    }
+
+    @Test fun largeFloatingMoneyCannotClaimMinorUnitPrecisionButExactNumbersKeepTheirRange() {
+        for (amount in listOf((1L shl 53).toDouble(), 200_000f)) {
+            failure { GojekProviderParser.payment(payment().put("amount", JSONObject().put("value", amount).put("currency", "IDR"))) }
+        }
+        val exact = 1L shl 53
+        val row = requireNotNull(GojekProviderParser.payment(payment().put("amount", JSONObject().put("value", exact).put("currency", "IDR"))))
+        assertEquals(exact * 100, row.money.amountMinor)
+        val decimal = requireNotNull(GojekProviderParser.payment(payment().put("amount", JSONObject().put("value", BigDecimal("25000.01")).put("currency", "IDR"))))
+        assertEquals(2_500_001L, decimal.money.amountMinor)
     }
 
     @Test fun readsAndroidPreferencesAndDecryptsOnlyTheNativeSessionStorageContract() {

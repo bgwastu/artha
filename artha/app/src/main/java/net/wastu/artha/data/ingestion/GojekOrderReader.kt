@@ -21,6 +21,7 @@ internal class GojekOrderReader(private val files: RootFileReader) {
         val rows = ImportRows()
         val details = linkedMapOf<String, JSONObject>()
         val orders = mutableListOf<GojekProviderParser.NativeOrder>()
+        val checkActive = { coroutineContext.ensureActive() }
         var cachedPayments = false
         try {
             val base = "/data/data/com.gojek.app/cache/okhttp_cache"
@@ -38,10 +39,10 @@ internal class GojekOrderReader(private val files: RootFileReader) {
                 try {
                     val entry = GojekProviderParser.cacheEntry(requireNotNull(snapshot[path])) ?: continue
                     requireGojekSuccess(entry.status)
-                    val body = GojekProviderParser.decodeBody(requireNotNull(snapshot[path.removeSuffix(".0") + ".1"]), entry.encoding)
+                    val body = GojekProviderParser.decodeBody(requireNotNull(snapshot[path.removeSuffix(".0") + ".1"]), entry.encoding, checkActive)
                     when (entry.kind) {
                         GojekProviderParser.CacheKind.PAYMENTS -> {
-                            importPage(body, rows)
+                            importPage(body, rows, checkActive)
                             cachedPayments = true
                         }
                         GojekProviderParser.CacheKind.DETAILS -> {
@@ -49,7 +50,7 @@ internal class GojekOrderReader(private val files: RootFileReader) {
                             val id = detail.opt("order_id") as? String
                             if (!id.isNullOrBlank()) details.putIfAbsent(id, detail)
                         }
-                        GojekProviderParser.CacheKind.ORDERS -> importOrders(body, orders, rows)
+                        GojekProviderParser.CacheKind.ORDERS -> importOrders(body, orders, rows, checkActive)
                     }
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (e: ProviderReadException) { rows.issue(e) }
@@ -73,7 +74,7 @@ internal class GojekOrderReader(private val files: RootFileReader) {
                 coroutineContext.ensureActive()
                 val url = GojekProviderParser.historyCursor(next)
                 if (!visited.add(url)) { rows.issue("GoPay history repeated a pagination cursor"); break }
-                val page = importPage(request(url, headers), rows, preferLive = true)
+                val page = importPage(request(url, headers, started, checkActive), rows, checkActive, preferLive = true)
                 pages++
                 next = page.next
                 if (next == null && page.malformedRows == 0) historyComplete = true
@@ -83,7 +84,7 @@ internal class GojekOrderReader(private val files: RootFileReader) {
             }
             // Order cards enrich actual payments and never become inferred debits.
             if (!deadlineExceeded(started)) {
-                try { importOrders(request(GojekProviderParser.ORDERS_URL, headers), orders, rows, preferLive = true) }
+                try { importOrders(request(GojekProviderParser.ORDERS_URL, headers, started, checkActive), orders, rows, checkActive, preferLive = true) }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (e: ProviderReadException) { rows.issue(e) }
                 catch (_: Exception) { rows.issue("Gojek native order enrichment is unavailable") }
@@ -99,7 +100,7 @@ internal class GojekOrderReader(private val files: RootFileReader) {
                 reads++
                 try {
                     val escaped = URLEncoder.encode(id, "UTF-8").replace("+", "%20")
-                    details[id] = GojekProviderParser.detail(request("https://customer.gopayapi.com/v2/users/order-history/$escaped/details?country_code=ID", headers))
+                    details[id] = GojekProviderParser.detail(request("https://customer.gopayapi.com/v2/users/order-history/$escaped/details?country_code=ID", headers, started, checkActive))
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (e: ProviderReadException) { rows.issue(e) }
                 catch (_: Exception) { rows.issue("One GoPay payment detail is unavailable") }
@@ -121,17 +122,18 @@ internal class GojekOrderReader(private val files: RootFileReader) {
         rows.finish().sortedByDescending { it.occurredAt }
     }
 
-    private fun importOrders(body: JSONObject, orders: MutableList<GojekProviderParser.NativeOrder>, rows: ImportRows, preferLive: Boolean = false) {
-        val page = GojekProviderParser.orderPage(body)
+    private fun importOrders(body: JSONObject, orders: MutableList<GojekProviderParser.NativeOrder>, rows: ImportRows, checkActive: () -> Unit, preferLive: Boolean = false) {
+        val page = GojekProviderParser.orderPage(body, checkActive)
         if (page.malformedRows > 0) rows.issue(ProviderReadException(AccountStatus.ERROR, "Gojek history contains ${page.malformedRows} unrecognized order cards"))
         // Exact booking matching uses the first observation; live evidence supersedes cached metadata.
         if (preferLive) orders.addAll(0, page.orders) else orders.addAll(page.orders)
     }
 
-    private fun importPage(body: JSONObject, rows: ImportRows, preferLive: Boolean = false): GojekProviderParser.PaymentPage {
-        val page = GojekProviderParser.paymentPage(body)
+    private fun importPage(body: JSONObject, rows: ImportRows, checkActive: () -> Unit, preferLive: Boolean = false): GojekProviderParser.PaymentPage {
+        val page = GojekProviderParser.paymentPage(body, checkActive)
         if (page.malformedRows > 0) rows.issue(ProviderReadException(AccountStatus.ERROR, "GoPay history contains ${page.malformedRows} unrecognized rows or pagination fields"))
         for (item in page.items) {
+            checkActive()
             try {
                 val payment = GojekProviderParser.payment(item) ?: continue
                 val existing = rows.transactions.indexOfFirst { it.key == payment.key }
@@ -174,17 +176,30 @@ internal class GojekOrderReader(private val files: RootFileReader) {
         }
     }
 
-    private fun request(url: String, headers: Map<String, String>): JSONObject {
+    private fun request(url: String, headers: Map<String, String>, started: Long, checkActive: () -> Unit): JSONObject {
+        checkActive()
+        val now = System.nanoTime()
+        val remaining = TimeUnit.SECONDS.toNanos(60) - (now - started)
+        if (remaining <= 0) throw ProviderReadException(AccountStatus.ERROR, "GoPay history reached the import time limit; valid payments are retained")
+        val deadline = now + minOf(remaining, TimeUnit.SECONDS.toNanos(20))
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             instanceFollowRedirects = false
-            connectTimeout = 10_000; readTimeout = 15_000
+            connectTimeout = GojekProviderParser.remainingTimeoutMillis(deadline, 10_000)
+            readTimeout = GojekProviderParser.remainingTimeoutMillis(deadline, 15_000)
             headers.forEach { (name, value) -> setRequestProperty(name, value) }
         }
         try {
+            fun checkpoint() {
+                checkActive()
+                connection.readTimeout = GojekProviderParser.remainingTimeoutMillis(deadline, 15_000)
+            }
+            checkpoint()
             val code = connection.responseCode
+            checkpoint()
             requireGojekSuccess(code)
-            return GojekProviderParser.decodeBody(GojekProviderParser.readBounded(connection.inputStream), connection.contentEncoding.orEmpty())
+            val body = GojekProviderParser.readBounded(connection.inputStream, ::checkpoint)
+            return GojekProviderParser.decodeBody(body, connection.contentEncoding.orEmpty(), ::checkpoint)
         } finally { connection.disconnect() }
     }
 
