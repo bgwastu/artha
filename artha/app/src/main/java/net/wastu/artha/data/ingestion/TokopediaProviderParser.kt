@@ -2,6 +2,7 @@ package net.wastu.artha.data.ingestion
 
 import java.io.ByteArrayInputStream
 import java.io.DataInputStream
+import java.io.Reader
 import java.util.Base64
 import java.util.Locale
 import javax.xml.parsers.DocumentBuilderFactory
@@ -19,6 +20,7 @@ internal object TokopediaProviderParser {
     fun sessionToken(snapshot: ByteArray?): String {
         if (snapshot == null) throw ProviderReadException(AccountStatus.NEEDS_LOGIN,
             "Tokopedia session is missing. Open Tokopedia and log in.")
+        if (snapshot.size > 512_000) unsupportedSession()
         if (!snapshot.toString(Charsets.ISO_8859_1).contains("ACCESS_TOKEN_v2")) unsupportedSession()
         // The access token on the audited phone is a five-part JWE, not a decoded
         // JWT. Never use the opaque refresh token as an access token.
@@ -34,7 +36,8 @@ internal object TokopediaProviderParser {
     }
 
     fun sessionId(snapshot: ByteArray?): String {
-        if (snapshot == null || !snapshot.toString(Charsets.ISO_8859_1).contains("gcm_id_v2")) unsupportedSession()
+        if (snapshot == null || snapshot.size > 512_000 ||
+            !snapshot.toString(Charsets.ISO_8859_1).contains("gcm_id_v2")) unsupportedSession()
         val values = decryptedStrings(snapshot).filter { it.isNotBlank() }.distinct()
         if (values.size != 1 || values.single().any { it == '\r' || it == '\n' }) unsupportedSession()
         return values.single()
@@ -168,6 +171,24 @@ internal object TokopediaProviderParser {
             "Tokopedia login is unavailable. Open Tokopedia and log in again.")
         if (httpCode !in 200..299) throw ProviderReadException(AccountStatus.ERROR,
             "Tokopedia history request failed (HTTP $httpCode). Saved history is kept.")
+    }
+
+    fun response(reader: Reader, checkActive: () -> Unit): JSONObject {
+        val buffer = CharArray(8_192)
+        val text = StringBuilder()
+        while (true) {
+            checkActive()
+            val size = reader.read(buffer)
+            checkActive()
+            if (size < 0) break
+            if (text.length + size > 2_000_000) throw ProviderReadException(AccountStatus.ERROR,
+                "Tokopedia history response is too large. Saved history is kept.")
+            text.append(buffer, 0, size)
+        }
+        return try { JSONObject(text.toString()) } catch (_: org.json.JSONException) {
+            throw ProviderReadException(AccountStatus.ERROR,
+                "Tokopedia returned an unsupported history response. Saved history is kept.")
+        }
     }
 
     fun page(response: JSONObject): Page {

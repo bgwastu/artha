@@ -4,6 +4,7 @@ package net.wastu.artha.data.ingestion
 
 import java.net.HttpURLConnection
 import java.net.URL
+import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -24,7 +25,9 @@ internal class TokopediaOrderReader(private val files: RootFileReader) {
         var cursor: Any? = null
         repeat(MAX_PAGES) {
             coroutineContext.ensureActive()
-            val response = fetchPage(token, sessionId, cookies, TokopediaProviderParser.request(cursor))
+            val response = fetchPage(token, sessionId, cookies, TokopediaProviderParser.request(cursor)) {
+                coroutineContext.ensureActive()
+            }
             val page = TokopediaProviderParser.page(response)
             // Lynx cards are presentation data. Their displayed totals and creation
             // dates do not establish settled payments or refund credits.
@@ -40,7 +43,10 @@ internal class TokopediaOrderReader(private val files: RootFileReader) {
             "Tokopedia history reached its page limit. Saved history is kept.")
     }
 
-    private fun fetchPage(token: String, sessionId: String, cookies: String, body: JSONObject): JSONObject {
+    private fun fetchPage(
+        token: String, sessionId: String, cookies: String, body: JSONObject, checkActive: () -> Unit
+    ): JSONObject {
+        checkActive()
         val connection = URL(ENDPOINT).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "POST"
@@ -54,29 +60,24 @@ internal class TokopediaOrderReader(private val files: RootFileReader) {
             if (cookies.isNotBlank()) connection.setRequestProperty("Cookie", cookies)
             connection.setRequestProperty("Content-Type", "application/json")
             connection.setRequestProperty("User-Agent", "TokopediaPro/45.0.5 (Android; zh_CN) Cronet")
+            checkActive()
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            checkActive()
+            val status = connection.responseCode
+            checkActive()
             TokopediaProviderParser.requireResponse(
-                connection.responseCode,
+                status,
                 connection.getHeaderField("Tokopro-Toko-Login"),
                 connection.getHeaderField("Bdturing-Verify"),
                 connection.getHeaderField("X-Vc-Bdturing-Parameters"),
             )
-            val text = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
-                val buffer = CharArray(8_192)
-                val result = StringBuilder()
-                while (true) {
-                    val size = reader.read(buffer)
-                    if (size < 0) break
-                    if (result.length + size > MAX_RESPONSE_CHARS) throw ProviderReadException(AccountStatus.ERROR,
-                        "Tokopedia history response is too large. Saved history is kept.")
-                    result.append(buffer, 0, size)
-                }
-                result.toString()
+            return connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                TokopediaProviderParser.response(reader, checkActive)
             }
-            return try { JSONObject(text) } catch (_: org.json.JSONException) {
-                throw ProviderReadException(AccountStatus.ERROR,
-                    "Tokopedia returned an unsupported history response. Saved history is kept.")
-            }
+        } catch (_: IOException) {
+            checkActive()
+            throw ProviderReadException(AccountStatus.ERROR,
+                "Tokopedia history could not be read. Saved history is kept.")
         } finally {
             connection.disconnect()
         }
@@ -86,6 +87,5 @@ internal class TokopediaOrderReader(private val files: RootFileReader) {
         const val BASE = "/data/data/com.tokopedia.tkpd"
         const val ENDPOINT = "https://oec-api.tiktokv.com/api/v1/trade/bff/order_list/get"
         const val MAX_PAGES = 20
-        const val MAX_RESPONSE_CHARS = 2_000_000
     }
 }

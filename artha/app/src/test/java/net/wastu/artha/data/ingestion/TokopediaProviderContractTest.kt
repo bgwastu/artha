@@ -3,6 +3,9 @@ package net.wastu.artha.data.ingestion
 import java.util.Base64
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
+import java.io.Reader
+import java.io.StringReader
+import java.util.concurrent.CancellationException
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -94,6 +97,62 @@ class TokopediaProviderContractTest {
                 TokopediaProviderParser.requireVerifiedPayments(TokopediaProviderParser.page(response))
             }
         }
+    }
+
+    @Test fun cancellationBeforeAndDuringResponseReadIsPreserved() {
+        val cancelled = CancellationException("fictional cancellation")
+        var reads = 0
+        var closed = false
+        val reader = object : Reader() {
+            override fun read(buffer: CharArray, offset: Int, length: Int): Int {
+                reads++
+                buffer[offset] = '{'
+                return 1
+            }
+            override fun close() { closed = true }
+        }
+        assertSame(cancelled, assertThrows(CancellationException::class.java) {
+            TokopediaProviderParser.response(reader) { throw cancelled }
+        })
+        assertEquals(0, reads)
+        assertSame(cancelled, assertThrows(CancellationException::class.java) {
+            reader.use {
+                TokopediaProviderParser.response(it) { if (reads > 0) throw cancelled }
+            }
+        })
+        assertEquals(1, reads)
+        assertTrue(closed)
+    }
+
+    @Test fun responseSizeLimitAndInvalidJsonHavePrivateTypedDiagnostics() {
+        val prefix = "{\"fictional\":\""
+        val suffix = "\"}"
+        val atLimit = prefix + "x".repeat(2_000_000 - prefix.length - suffix.length) + suffix
+        assertEquals(2_000_000 - prefix.length - suffix.length,
+            TokopediaProviderParser.response(StringReader(atLimit)) {}.getString("fictional").length)
+        val tooLarge = assertThrows(ProviderReadException::class.java) {
+            TokopediaProviderParser.response(StringReader(atLimit + " ")) {}
+        }
+        assertEquals(AccountStatus.ERROR, tooLarge.status)
+        assertTrue(tooLarge.message!!.contains("too large"))
+        val invalid = assertThrows(ProviderReadException::class.java) {
+            TokopediaProviderParser.response(StringReader("fictional-private-response")) {}
+        }
+        assertEquals(AccountStatus.ERROR, invalid.status)
+        assertFalse(invalid.message!!.contains("fictional-private-response"))
+        val page = TokopediaProviderParser.page(TokopediaProviderParser.response(StringReader(envelope().toString())) {})
+        assertFalse(page.hasMore)
+        TokopediaProviderParser.requireVerifiedPayments(page)
+    }
+
+    @Test fun oversizedCredentialSnapshotsAreRejectedBeforeDecoding() {
+        val snapshot = ByteArray(512_001)
+        assertEquals(AccountStatus.ERROR, assertThrows(ProviderReadException::class.java) {
+            TokopediaProviderParser.sessionToken(snapshot)
+        }.status)
+        assertEquals(AccountStatus.ERROR, assertThrows(ProviderReadException::class.java) {
+            TokopediaProviderParser.sessionId(snapshot)
+        }.status)
     }
 
     private fun encrypted(value: String): String {
