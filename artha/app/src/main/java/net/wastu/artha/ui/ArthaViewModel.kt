@@ -158,8 +158,8 @@ class ArthaViewModel(
             var failedBatch: String? = null
             var previousConfig: AiConfig? = null
             var previousRetry = 0
-            combine(_reconciledCache, analysisSnapshot.map(AiCategorization::requestSnapshot).distinctUntilChanged(), _refreshing, categoryRetry) { rows, snapshot, importing, retry ->
-                CategoryInput(rows, snapshot, importing, retry)
+            combine(_reconciledCache, analysisSnapshot.map(AiCategorization::requestSnapshot).distinctUntilChanged(), categoryRetry) { rows, snapshot, retry ->
+                CategoryInput(rows, snapshot, retry)
             }.debounce(1000).collectLatest { input ->
                 val config = input.snapshot.aiConfig
                 if (config != previousConfig || input.retry != previousRetry) failedBatch = null
@@ -168,7 +168,6 @@ class ArthaViewModel(
                     _categoryAutomation.value = CategoryAutomationState.NOT_CONFIGURED
                     return@collectLatest
                 }
-                if (input.importing) return@collectLatest
                 val batch = withContext(computationDispatcher) { AiCategorization.nextBatch(input.rows, input.snapshot) }
                 if (batch.isEmpty()) {
                     _categoryAutomation.value = CategoryAutomationState.READY
@@ -194,7 +193,7 @@ class ArthaViewModel(
         }
     }
 
-    private data class CategoryInput(val rows: List<UnifiedTransaction>, val snapshot: AnalysisSnapshot, val importing: Boolean, val retry: Int)
+    private data class CategoryInput(val rows: List<UnifiedTransaction>, val snapshot: AnalysisSnapshot, val retry: Int)
     fun retryAutomaticCategories() { categoryRetry.update { it + 1 }; observeAutomaticCategories() }
 
     private fun visibleLedger(rows: List<UnifiedTransaction>, enabled: Set<Provider>, dates: Pair<Long?, Long?>?, category: String?): LedgerState.Ready {

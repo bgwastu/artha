@@ -259,7 +259,8 @@ class TransactionEditFeedbackTest {
             val state = MutableStateFlow<SpendingState>(SpendingState.Ready((0..32).map { payment().copy(providerTransactionId = if (it == 0) payment().providerTransactionId else "fixture-$it") }, emptyMap()))
             val called = CompletableDeferred<Unit>()
             var calls = 0
-            vm = ArthaViewModel(RootAccess { false }, { error("Uses fixture state") }, analysisStore = store,
+            vm = ArthaViewModel(RootAccess { true }, { error("Uses fixture state") }, analysisStore = store,
+                ingest = { CompletableDeferred<Unit>().await(); emptyMap() },
                 computationDispatcher = dispatcher, spendingState = state, categorize = { _, _, batch ->
                     calls++; if (calls == 2) called.complete(Unit)
                     batch.associate { it.transaction.key to CategorySuggestion("Uncategorized", "AI suggestion: Fixture") }
@@ -270,6 +271,7 @@ class TransactionEditFeedbackTest {
             advanceUntilIdle()
             assertEquals(2, calls)
             assertEquals(CategoryAutomationState.READY, vm.categoryAutomation.value)
+            assertTrue(vm.refreshing.value) // Saved payments are categorized while the provider is still blocked.
             store.setClassification(payment().key, "Manual", "", true)
             store.setUserNote(payment().key, "New context")
             advanceUntilIdle()
