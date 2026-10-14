@@ -16,6 +16,30 @@ internal object ShopeeProviderParser {
     data class MarketplacePage(val orders: JSONArray, val nextOffset: Int?, val paginationIssue: ProviderReadException? = null)
     data class FoodPage(val orders: JSONArray, val nextId: String?, val paginationIssue: ProviderReadException? = null)
 
+    fun allMarketplacePage(response: JSONObject): MarketplacePage {
+        // The current v2 endpoint returns {data: ...} without the legacy error field.
+        val body = if (response.has("error")) data(response, food = false)
+            else response.optJSONObject("data") ?: schema("all-orders response data")
+        var issue: ProviderReadException? = null
+        val offset = try {
+            integer(body, "next_offset").also { if (it !in -1L..Int.MAX_VALUE.toLong()) schema("all-orders cursor") }
+        } catch (error: ProviderReadException) { issue = error; null }
+        val source = body.optJSONArray("order_or_checkout_data")
+            ?: if (offset == -1L && (!body.has("order_or_checkout_data") || body.isNull("order_or_checkout_data"))) JSONArray()
+            else schema("all-orders list")
+        val orders = JSONArray()
+        for (index in 0 until source.length()) {
+            try {
+                val info = source.optJSONObject(index)?.optJSONObject("order_list_detail")?.optJSONObject("order_info")
+                    ?: schema("all-orders entry")
+                val id = integer(info, "order_id").toString().also(::validId)
+                // Discovery only. Quotes, checkout IDs and creation times cannot create payments.
+                orders.put(JSONObject().put("info_card", JSONObject().put("order_id", id.toLong())))
+            } catch (error: ProviderReadException) { if (issue == null) issue = error }
+        }
+        return MarketplacePage(orders, if (issue == null) offset?.toInt()?.takeIf { it >= 0 } else null, issue)
+    }
+
     fun marketplacePage(response: JSONObject): MarketplacePage {
         val data = data(response, food = false)
         val offset = try {

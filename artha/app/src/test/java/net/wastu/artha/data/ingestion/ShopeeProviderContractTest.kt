@@ -187,6 +187,55 @@ class ShopeeProviderContractTest {
         expectSchema { ShopeeProviderParser.foodRefund(ShopeeProviderParser.food(order)!!.transaction, refund()) }
     }
 
+    @Test fun allOrdersDiscoveryUsesOrderIdentityAndCursorWithoutPromotingQuotes() {
+        val info = JSONObject().put("order_id", 101).put("checkout_id", 999).put("total_price", 99_000_000).put("create_time", 1_600_000_000)
+        val body = JSONObject().put("next_offset", 40).put("order_or_checkout_data", JSONArray().put(
+            JSONObject().put("order_list_detail", JSONObject().put("order_info", info))))
+        val page = ShopeeProviderParser.allMarketplacePage(JSONObject().put("data", body))
+        assertEquals(40, page.nextOffset)
+        assertNull(page.paginationIssue)
+        assertEquals("101", ShopeeProviderParser.orderId(page.orders.getJSONObject(0), food = false))
+        val unpaid = marketplaceDetail()
+        unpaid.getJSONObject("info_card").put("amount_paid", 0)
+        unpaid.getJSONObject("processing_info").put("info_rows", JSONArray().put(time("label_odp_order_time", 1_600_000_000)))
+        assertNull(ShopeeProviderParser.marketplace("101", page.orders.getJSONObject(0), unpaid))
+        val paid = ShopeeProviderParser.marketplace("101", page.orders.getJSONObject(0), marketplaceDetail())!!.transaction
+        assertEquals(1_250_000L, paid.money.amountMinor)
+        assertEquals(Instant.ofEpochSecond(1_700_000_000), paid.occurredAt)
+    }
+
+    @Test fun allOrdersRetainsValidSiblingsButNeverTreatsCheckoutIdentityAsOrder() {
+        val valid = JSONObject().put("order_list_detail", JSONObject().put("order_info", JSONObject().put("order_id", 101)))
+        val body = JSONObject().put("next_offset", 20).put("order_or_checkout_data", JSONArray()
+            .put(JSONObject().put("checkout_list_detail", JSONObject().put("checkout_id", 101))).put(valid))
+        val page = ShopeeProviderParser.allMarketplacePage(JSONObject().put("data", body))
+        assertEquals(1, page.orders.length())
+        assertNull(page.nextOffset)
+        assertNotNull(page.paginationIssue)
+    }
+
+    @Test fun allOrdersTerminalAndAuthenticationEnvelopesStayDistinct() {
+        val terminal = ShopeeProviderParser.allMarketplacePage(JSONObject().put("data", JSONObject().put("next_offset", -1)))
+        assertEquals(0, terminal.orders.length())
+        assertNull(terminal.nextOffset)
+        assertNull(terminal.paginationIssue)
+        try {
+            ShopeeProviderParser.allMarketplacePage(JSONObject().put("error", 19).put("data", JSONObject().put("next_offset", -1)))
+            fail("Authentication failure is not empty history")
+        } catch (error: net.wastu.artha.data.ingestion.ProviderReadException) {
+            assertEquals(AccountStatus.NEEDS_LOGIN, error.status)
+        }
+    }
+
+    @Test fun allOrdersMalformedCursorKeepsVerifiedDiscoveryForLegacyFallback() {
+        val valid = JSONObject().put("order_list_detail", JSONObject().put("order_info", JSONObject().put("order_id", 101)))
+        val page = ShopeeProviderParser.allMarketplacePage(JSONObject().put("data", JSONObject()
+            .put("next_offset", "unknown").put("order_or_checkout_data", JSONArray().put(valid))))
+        assertEquals(1, page.orders.length())
+        assertNull(page.nextOffset)
+        assertNotNull(page.paginationIssue)
+    }
+
     @Test fun marketplaceUsesCursorEvenOnShortPageAndAcceptsObservedTerminalEnvelope() {
         val page = ShopeeProviderParser.marketplacePage(JSONObject().put("error", 0).put("data",
             JSONObject().put("details_list", JSONArray().put(marketplaceListing())).put("next_offset", 40)))

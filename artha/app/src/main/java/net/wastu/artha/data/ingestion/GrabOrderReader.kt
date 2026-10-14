@@ -110,12 +110,9 @@ internal class GrabOrderReader(
             rows.transactions += if (ride != null) GrabProviderParser.enrichCharge(charge, ride) else charge
         }
         rows.transactions += rideRows
-        try {
-            val (orders, next) = GrabProviderParser.foodPage(request(token,
-                "/api/passenger/v3/grabfood/orders/history?limit=20&offSet=0&sortBy=CreatedAt&excludeOngoing=1&disablePagination=false"))
-            if (orders.length() > 0 || next != null) rows.issue("GrabFood payment schema has no verified receipt sample; saved charges are retained")
-        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-        catch (error: Exception) { rows.issue(error) }
+        // Food history requires native location/context and has no verified payment
+        // receipt contract. Food wallet charges above still import normally; do not
+        // issue an unsupported discovery request or turn it into a payment failure.
         rows.finish().sortedByDescending { it.occurredAt }
     }
 

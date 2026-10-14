@@ -34,8 +34,29 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
         val rows = ImportRows()
         val budget = RequestBudget()
         val market = linkedMapOf<String, JSONObject>()
+        var allOrdersComplete = false
+        var allOffset = 0
+        for (page in 0 until MAX_MARKET_PAGES) {
+            coroutineContext.ensureActive()
+            val response = try {
+                ShopeeProviderParser.allMarketplacePage(request(cookies, MARKET_HOST,
+                    "/api/v4/order/get_all_order_and_checkout_list_v2?limit=20&offset=$allOffset", budget))
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { rows.issue(error); break }
+            collect(response.orders, food = false, market, rows)
+            response.paginationIssue?.let { rows.issue(it) }
+            if (response.paginationIssue != null) break
+            val next = response.nextOffset
+            if (next == null) { allOrdersComplete = true; break }
+            if (next <= allOffset || response.orders.length() == 0) {
+                rows.issue("All-orders cursor did not advance; history incomplete"); break
+            }
+            if (page == MAX_MARKET_PAGES - 1) rows.issue("All-orders page limit reached; older orders may be missing")
+            allOffset = next
+        }
         // Live lists: shipping, completed, cancelled, returns. Unpaid cancellations are checked in detail.
-        for (listType in listOf(8, 3, 4, 7)) {
+        // Keep the validated legacy lists as a fallback if the current all-tab contract is unavailable.
+        for (listType in if (allOrdersComplete) emptyList() else listOf(8, 3, 4, 7)) {
             var offset = 0
             for (page in 0 until MAX_MARKET_PAGES) {
                 coroutineContext.ensureActive()
