@@ -43,4 +43,13 @@ class LiveProviderIngestionTest {
         val gojekTx = reconciled.filter { it.provider == Provider.GOJEK }
         assertTrue("Expected Gojek transactions in ledger", gojekTx.isNotEmpty())
     }
+    @Test fun realShopeeHistoryIsIngested(): Unit = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<ArthaApplication>()
+        assertTrue("Artha must be granted root on the device", app.rootAccess.verify())
+        val result = app.ingestion.syncProvider(Provider.SHOPEE)
+        assertTrue(result.contains("saved") || result.contains("added"))
+        val all = app.ledger.observeTransactions().first()
+        val shopeeTx = all.filter { it.provider == Provider.SHOPEE }
+        assertTrue("Expected Shopee transactions in ledger", shopeeTx.isNotEmpty())
+    }
 }
