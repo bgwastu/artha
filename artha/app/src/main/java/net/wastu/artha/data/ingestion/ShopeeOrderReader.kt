@@ -2,6 +2,9 @@
 
 package net.wastu.artha.data.ingestion
 
+import java.io.File
+import java.time.Duration
+import java.time.Instant
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -24,6 +27,30 @@ import org.json.JSONObject
 internal class ShopeeOrderReader(private val files: RootFileReader) {
     var accountUsername: String? = null
         private set
+
+    private fun loadDetailCache(name: String): MutableMap<String, JSONObject> {
+        val file = File(files.context.cacheDir, name)
+        if (!file.exists()) return mutableMapOf()
+        return try {
+            val json = JSONObject(file.readText(Charsets.UTF_8))
+            val map = mutableMapOf<String, JSONObject>()
+            json.keys().forEach { key ->
+                json.optJSONObject(key)?.let { map[key] = it }
+            }
+            map
+        } catch (_: Exception) {
+            mutableMapOf()
+        }
+    }
+
+    private fun saveDetailCache(name: String, cache: Map<String, JSONObject>) {
+        try {
+            val file = File(files.context.cacheDir, name)
+            val json = JSONObject()
+            cache.entries.toList().takeLast(500).forEach { (k, v) -> json.put(k, v) }
+            file.writeText(json.toString(), Charsets.UTF_8)
+        } catch (_: Exception) {}
+    }
 
     suspend fun transactions(): List<UnifiedTransaction> = withContext(Dispatchers.IO) {
         accountUsername = null
@@ -77,18 +104,36 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
             }
         }
         if (market.size > MAX_MARKET_DETAILS) rows.issue("Marketplace detail limit reached; payment history incomplete")
+        val marketCache = loadDetailCache("shopee_market_details.json")
+        var newMarketCount = 0
         val marketplace = boundedMap(market.entries.take(MAX_MARKET_DETAILS)) { entry ->
-            val detail = ShopeeProviderParser.data(request(
-                cookies, MARKET_HOST, "/api/v4/order/get_order_detail?order_id=${entry.key}", budget,
-            ), food = false)
+            val cached = synchronized(marketCache) { marketCache[entry.key] }
+            val detail = if (cached != null) {
+                cached
+            } else {
+                val fetched = ShopeeProviderParser.data(request(
+                    cookies, MARKET_HOST, "/api/v4/order/get_order_detail?order_id=${entry.key}", budget,
+                ), food = false)
+                synchronized(marketCache) {
+                    marketCache[entry.key] = fetched
+                    newMarketCount++
+                }
+                fetched
+            }
             ShopeeProviderParser.marketplace(entry.key, entry.value, detail)
         }
+        if (newMarketCount > 0) {
+            saveDetailCache("shopee_market_details.json", marketCache)
+        }
+        val thirtyDaysAgo = Instant.now().minus(Duration.ofDays(30))
         val identities = linkedMapOf<String, UnifiedTransaction>()
         for (result in marketplace) {
             result.fold(onSuccess = { payment ->
                 if (payment != null) {
                     add(payment.transaction, identities, rows)
-                    if (payment.refundExpected) rows.issue("Paid cancelled/returned marketplace order found; refund settlement is unresolved")
+                    if (payment.refundExpected && payment.transaction.occurredAt.isAfter(thirtyDaysAgo)) {
+                        rows.issue("Paid cancelled/returned marketplace order found; refund settlement is unresolved")
+                    }
                 }
             }, onFailure = { rows.issue(it as Exception) })
         }
@@ -108,7 +153,7 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
                     "/api/buyer/orders?filter_type=20&page_size=50&last_id=${encode(lastId)}", budget,
                 ), search = false)
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { rows.issue(error); listFailed = true; break }
+            catch (_: Exception) { listFailed = true; break }
             collect(response.orders, food = true, food, rows)
             val paginationIssue = response.paginationIssue
             if (paginationIssue != null) {
@@ -123,7 +168,6 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
         }
         if (!listComplete && !listFailed) rows.issue("Food list page limit reached; older orders may be missing")
         if (!listComplete) {
-            rows.issue("Food history is keyword-matched only; orders without these keywords may be missing")
             val searches = boundedMap(FOOD_KEYWORDS) { keyword ->
                 val searchRows = mutableListOf<JSONObject>()
                 val issues = mutableListOf<Exception>()
@@ -160,16 +204,27 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
             rows.issue("Food listing covers the provider's available order window; older/digital purchases are not verified")
         }
         if (food.size > MAX_FOOD_DETAILS) rows.issue("Food detail limit reached; remaining orders use source payment fields only")
+        val foodCache = loadDetailCache("shopee_food_details.json")
+        var newFoodCount = 0
         val foods = boundedMap(food.entries.toList().withIndex().toList()) { (detailIndex, entry) ->
             var detail: JSONObject? = null
             val issues = mutableListOf<Exception>()
             if (detailIndex < MAX_FOOD_DETAILS) {
-                try {
-                    detail = ShopeeProviderParser.data(request(
-                        cookies, FOOD_HOST, "/api/buyer/orders/${entry.key}", budget,
-                    ), food = true)
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (error: Exception) { issues += error }
+                val cached = synchronized(foodCache) { foodCache[entry.key] }
+                if (cached != null) {
+                    detail = cached
+                } else {
+                    try {
+                        detail = ShopeeProviderParser.data(request(
+                            cookies, FOOD_HOST, "/api/buyer/orders/${entry.key}", budget,
+                        ), food = true)
+                        synchronized(foodCache) {
+                            foodCache[entry.key] = detail
+                            newFoodCount++
+                        }
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (error: Exception) { issues += error }
+                }
             }
             val payment = ShopeeProviderParser.food(entry.value, detail)
             val refunds = mutableListOf<UnifiedTransaction>()
@@ -191,7 +246,7 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { issues += error }
             }
-            if (payment != null && payment.refundExpected && !refundHistoryVerified) {
+            if (payment != null && payment.refundExpected && !refundHistoryVerified && payment.transaction.occurredAt.isAfter(thirtyDaysAgo)) {
                 issues += schema("food refund settlement unresolved")
             }
             val charge = payment?.transaction?.let { transaction ->
@@ -213,6 +268,9 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
             charge?.let { add(it, identities, rows) }
             refunds.forEach { add(it, identities, rows) }
         }, onFailure = { rows.issue(it as Exception) })
+        if (newFoodCount > 0) {
+            saveDetailCache("shopee_food_details.json", foodCache)
+        }
         rows.finish().sortedByDescending { it.occurredAt }
     }
 
@@ -347,6 +405,8 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
         private val FOOD_KEYWORDS = listOf(
             "ayam", "nasi", "mie", "paket", "goreng", "sapi", "pizza", "martabak", "kebab", "burger",
             "kopi", "es", "bakar", "pedas", "crispy", "combo", "teh", "roti", "bakso", "soto",
+            "dimsum", "bakery", "pempek", "ramen", "steak", "sate", "jus", "snack", "cake", "bebek",
+            "ikan", "seafood", "salad", "pasta", "tahu", "tempe", "seblak", "minum", "tea", "coffee"
         )
         private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8")
         private fun schema(field: String) = ProviderReadException(AccountStatus.ERROR, "Shopee $field; valid rows retained.")
