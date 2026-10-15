@@ -52,4 +52,18 @@ class LiveProviderIngestionTest {
         val shopeeTx = all.filter { it.provider == Provider.SHOPEE }
         assertTrue("Expected Shopee transactions in ledger", shopeeTx.isNotEmpty())
     }
+    @Test fun realGrabHistoryIsIngested(): Unit = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<ArthaApplication>()
+        assertTrue("Artha must be granted root on the device", app.rootAccess.verify())
+        val start = System.currentTimeMillis()
+        val result = app.ingestion.syncProvider(Provider.GRAB)
+        val elapsed = System.currentTimeMillis() - start
+        android.util.Log.i("GrabAudit", "Grab sync result: $result, elapsed: ${elapsed}ms")
+        val all = app.ledger.observeTransactions().first()
+        val grabTx = all.filter { it.provider == Provider.GRAB }
+        android.util.Log.i("GrabAudit", "Total Grab in ledger: ${grabTx.size}")
+        for (tx in grabTx.take(5)) {
+            android.util.Log.i("GrabAudit", "Grab tx: ${tx.occurredAt} ${tx.description} ${tx.money.amountMinor}")
+        }
+    }
 }

@@ -3,6 +3,13 @@ package net.wastu.artha.ui.screens
 import android.accounts.AccountManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
@@ -389,10 +396,49 @@ private fun ProviderSettings(
     if (diagnostic?.accountStatus == AccountStatus.NEEDS_LOGIN) {
         Text("Sign in in the source app, then import again", modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodyMedium)
     }
-    FilledTonalButton(onClick = onImport, enabled = importEnabled && !importing && !busy,
-        modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-        if (importing) CircularProgressIndicator(Modifier.size(18.dp).padding(end = 4.dp), strokeWidth = 2.dp)
-        Text(if (importing) "Importing" else if (busy) "Import in progress" else "Import history")
+    FilledTonalButton(
+        onClick = { if (!importing && !busy) onImport() },
+        enabled = importEnabled,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .padding(horizontal = 16.dp, vertical = 2.dp),
+    ) {
+        AnimatedContent(
+            targetState = importing,
+            label = "import_button_content",
+            transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(150)) },
+        ) { loading ->
+            if (loading) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.5.dp,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        trackColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.2f),
+                    )
+                    Text("Syncing history...", style = MaterialTheme.typography.labelLarge)
+                }
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Sync,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Text(
+                        if (busy) "Sync in progress" else "Sync history",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            }
+        }
     }
     feedback?.let { Text(it, modifier = Modifier.padding(horizontal = 16.dp).semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium) }
     if (!diagnostic?.lastSyncSummary.isNullOrBlank() || !diagnostic?.coverageHint.isNullOrBlank() || diagnostic?.lastError != null || diagnostic?.lastImportWindow != null) {

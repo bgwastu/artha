@@ -69,6 +69,8 @@ internal class GrabOrderReader(
             val history = request(token, "/api/passenger/v3/rides/bookings/list?bookingTypes=PAST")
             val rides = history.optJSONArray("rides") ?: throw ProviderReadException(net.wastu.artha.data.providers.AccountStatus.ERROR, "Grab ride list schema changed")
             val receiptIndices = GrabProviderParser.receiptIndices(rides)
+            val receiptCache = loadReceiptCache()
+            var newReceiptsCount = 0
             // Bound both active requests and coroutine allocation, even if the source
             // returns a large recent window. Canceled entries do not consume receipts.
             for (batchStart in 0 until rides.length() step 3) {
@@ -83,7 +85,17 @@ internal class GrabOrderReader(
                                 try {
                                     val id = ride.getString("bookingCode")
                                     require(id.matches(Regex("[A-Za-z0-9_-]+")))
-                                    receipt = request(token, "/api/passenger/v3/rides/history/$id")
+                                    val cached = synchronized(receiptCache) { receiptCache[id] }
+                                    receipt = if (cached != null) {
+                                        cached
+                                    } else {
+                                        val fetched = request(token, "/api/passenger/v3/rides/history/$id")
+                                        synchronized(receiptCache) {
+                                            receiptCache[id] = fetched
+                                            newReceiptsCount++
+                                        }
+                                        fetched
+                                    }
                                 } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                                 catch (error: Exception) { warning = error }
                             }
@@ -95,6 +107,9 @@ internal class GrabOrderReader(
                 for (result in results) result.fold(onSuccess = { (ride, warning) ->
                     ride?.let(rideRows::add); warning?.let(rows::issue)
                 }, onFailure = { rows.issue(it as Exception) })
+            }
+            if (newReceiptsCount > 0) {
+                saveReceiptCache(receiptCache)
             }
             // Recent ride enrichment has no cursor. Its scope belongs in coverage,
             // rather than making every otherwise successful payment import an error.
@@ -124,6 +139,26 @@ internal class GrabOrderReader(
         val installTime = installTimeOverride ?: files.packageFirstInstallTime("com.grabtaxi.passenger").takeIf { it > 0 }
             ?: error("Cannot verify Grab install time for the primary Android profile")
         return decryptSession(sessionId, salt, installTime, prefs["KEY_GENERATION_ID"], prefs["appsFlyerAppId"])
+    }
+
+    private fun loadReceiptCache(): MutableMap<String, JSONObject> {
+        val file = java.io.File(files.context.cacheDir, "grab_receipts_cache.json")
+        if (!file.exists()) return mutableMapOf()
+        return try {
+            val json = JSONObject(file.readText(Charsets.UTF_8))
+            val map = mutableMapOf<String, JSONObject>()
+            json.keys().forEach { key -> json.optJSONObject(key)?.let { map[key] = it } }
+            map
+        } catch (_: Exception) { mutableMapOf() }
+    }
+
+    private fun saveReceiptCache(cache: Map<String, JSONObject>) {
+        try {
+            val file = java.io.File(files.context.cacheDir, "grab_receipts_cache.json")
+            val json = JSONObject()
+            cache.entries.toList().takeLast(200).forEach { (k, v) -> json.put(k, v) }
+            file.writeText(json.toString(), Charsets.UTF_8)
+        } catch (_: Exception) {}
     }
 
     private suspend fun request(token: String, path: String): JSONObject {
