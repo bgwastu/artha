@@ -16,7 +16,7 @@ class ArthaApplication : Application() {
     val spending by lazy { net.wastu.artha.data.analysis.SpendingRepository(ledger, analysisStore, applicationScope) }
     val providerPreferences by lazy { net.wastu.artha.data.providers.ProviderPreferences(applicationContext) }
     val analysisStore by lazy { net.wastu.artha.data.analysis.AnalysisStore(applicationContext) }
-    val driveSyncManager by lazy { net.wastu.artha.data.sync.DriveSyncManager(applicationContext, { ledger }, analysisStore, rootAccess) }
+    val driveSyncManager by lazy { net.wastu.artha.data.sync.DriveSyncManager(applicationContext, { ledger }, analysisStore, rootAccess, applicationScope) }
     val ingestion by lazy {
         val files = net.wastu.artha.data.ingestion.RootFileReader(applicationContext)
         val reader = net.wastu.artha.data.ingestion.JagoTransactionReader(files)
@@ -29,4 +29,10 @@ class ArthaApplication : Application() {
         IngestionCoordinator(rootAccess, { ledger }, adapters, reader::invalidate, preferences = providerPreferences)
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        if (driveSyncManager.syncState.value.isEnabled) {
+            driveSyncManager.triggerAutoBackup()
+        }
+    }
 }

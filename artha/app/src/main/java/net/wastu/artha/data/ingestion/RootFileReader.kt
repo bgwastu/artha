@@ -107,4 +107,20 @@ class RootFileReader(internal val context: Context) {
             false
         }
     }
+    suspend fun executeCommandWithOutput(command: String): List<String>? = withContext(Dispatchers.IO) {
+        check(Process.myUserHandle() == UserHandle.getUserHandleForUid(0)) { "Provider imports currently support the primary Android profile only." }
+        coroutineContext.ensureActive()
+        try {
+            Shell.Builder.create().setContext(context).setTimeout(15).build("su", "-M", "-c", "/system/bin/sh").use { shell ->
+                if (!shell.isRoot) return@use null
+                val output = mutableListOf<String>()
+                val result = shell.newJob().to(output).add(command).exec()
+                if (result.isSuccess) output else null
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+    }
 }
