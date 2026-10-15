@@ -63,7 +63,7 @@ class IngestionCoordinatorTest {
     fun unsupportedProviderDoesNotPretendToIngest() = runTest {
         val coordinator = IngestionCoordinator(RootAccess { true }, { opened = true; ledger })
         try {
-            coordinator.ingest(Provider.TOKOPEDIA)
+            coordinator.ingest(Provider.GRAB)
             error("Expected an unimplemented adapter to be rejected")
         } catch (_: IllegalArgumentException) {
             assertFalse(opened)

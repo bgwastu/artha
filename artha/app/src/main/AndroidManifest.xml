@@ -6,7 +6,6 @@
         <package android:name="com.gojek.app" />
         <package android:name="com.shopee.id" />
         <package android:name="com.grabtaxi.passenger" />
-        <package android:name="com.tokopedia.tkpd" />
     </queries>
     <application
         android:name=".ArthaApplication"

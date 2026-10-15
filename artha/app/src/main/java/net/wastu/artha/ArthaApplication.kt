@@ -23,7 +23,6 @@ class ArthaApplication : Application() {
         val adapters = listOf(
             net.wastu.artha.data.ingestion.JagoProviderAdapter(reader),
             net.wastu.artha.data.ingestion.ShopeeProviderAdapter(files),
-            net.wastu.artha.data.ingestion.TokopediaProviderAdapter(files),
             net.wastu.artha.data.ingestion.GojekProviderAdapter(files),
             net.wastu.artha.data.ingestion.GrabProviderAdapter(files),
         )

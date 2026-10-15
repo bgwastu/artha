@@ -204,11 +204,6 @@ class ShopeeProviderAdapter(private val files: RootFileReader) : ProviderAdapter
     override suspend fun ingest(): List<UnifiedTransaction> = reader.transactions()
 }
 
-class TokopediaProviderAdapter(private val files: RootFileReader) : ProviderAdapter {
-    override val coverageHint = Provider.TOKOPEDIA.historyCoverageHint
-    override val provider = Provider.TOKOPEDIA
-    override suspend fun ingest(): List<UnifiedTransaction> = TokopediaOrderReader(files).transactions()
-}
 
 class GojekProviderAdapter(private val files: RootFileReader) : ProviderAdapter {
     override val coverageHint = Provider.GOJEK.historyCoverageHint

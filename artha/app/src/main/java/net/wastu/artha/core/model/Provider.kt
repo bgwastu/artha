@@ -11,5 +11,4 @@ enum class Provider(
     GOJEK("Gojek", R.drawable.ic_provider_gojek),
     SHOPEE("Shopee", R.drawable.ic_provider_shopee),
     GRAB("Grab", R.drawable.ic_provider_grab),
-    TOKOPEDIA("Tokopedia", R.drawable.ic_provider_tokopedia),
 }

@@ -62,7 +62,6 @@ fun providerPackageName(provider: Provider): String? = when (provider) {
     Provider.JAGO -> "com.jago.digitalBanking"
     Provider.GOJEK -> "com.gojek.app"
     Provider.SHOPEE -> "com.shopee.id"
-    Provider.TOKOPEDIA -> "com.tokopedia.tkpd"
     Provider.GRAB -> "com.grabtaxi.passenger"
 }
 

@@ -335,7 +335,7 @@ object LedgerReconciler {
             }
         } else {
             val primaryRole = when (primary.provider) {
-                Provider.SHOPEE, Provider.TOKOPEDIA -> "Marketplace Order"
+                Provider.SHOPEE -> "Marketplace Order"
                 Provider.GOJEK, Provider.GRAB -> "Trip / Ride"
                 else -> "Transaction"
             }
@@ -437,7 +437,6 @@ object LedgerReconciler {
         val text = "${jagoTx.description} ${jagoTx.rawPayload}".lowercase(Locale.ROOT)
         return when (targetProvider) {
             Provider.SHOPEE -> "shopee" in text
-            Provider.TOKOPEDIA -> listOf("tokopedia", "tkpd", "toped").any { it in text }
             Provider.GOJEK -> listOf("gojek", "goride", "gocar", "gofood", "gopay", "gobills").any { it in text }
             Provider.GRAB -> listOf("grab", "ovo").any { it in text }
             Provider.JAGO -> false
