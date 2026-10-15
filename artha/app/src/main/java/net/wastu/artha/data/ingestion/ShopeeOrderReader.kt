@@ -271,6 +271,38 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
         if (newFoodCount > 0) {
             saveDetailCache("shopee_food_details.json", foodCache)
         }
+
+        val digital = linkedMapOf<String, JSONObject>()
+        var lastCreateTime: Long? = null
+        for (page in 0 until MAX_DIGITAL_PAGES) {
+            coroutineContext.ensureActive()
+            val query = if (lastCreateTime != null) "order_status=0&page=${page + 1}&page_size=20&last_create_time=$lastCreateTime"
+                        else "order_status=0&page=${page + 1}&page_size=20"
+            val response = try {
+                ShopeeProviderParser.data(request(
+                    cookies, MARKET_HOST, "/digital-product/api/order/v2/list?$query", budget
+                ), food = false)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { break }
+
+            val list = response.optJSONArray("list") ?: break
+            if (list.length() == 0) break
+            for (i in 0 until list.length()) {
+                val item = list.optJSONObject(i) ?: continue
+                val orderId = item.optString("order_id").ifBlank { item.optString("orderId") }
+                if (orderId.isNotBlank()) digital[orderId] = item
+            }
+            val nextTime = response.optLong("last_create_time")
+            if (nextTime <= 0L || nextTime == lastCreateTime) break
+            lastCreateTime = nextTime
+        }
+        for ((_, item) in digital) {
+            try {
+                val payment = ShopeeProviderParser.digitalProduct(item)
+                if (payment != null) add(payment.transaction, identities, rows)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (e: Exception) { rows.issue(e) }
+        }
         rows.finish().sortedByDescending { it.occurredAt }
     }
 
@@ -402,6 +434,7 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
         private const val MAX_FOOD_PAGES = 20
         private const val MAX_SEARCH_PAGES = 4
         private const val MAX_FOOD_DETAILS = 150
+        private const val MAX_DIGITAL_PAGES = 5
         private val FOOD_KEYWORDS = listOf(
             "ayam", "nasi", "mie", "paket", "goreng", "sapi", "pizza", "martabak", "kebab", "burger",
             "kopi", "es", "bakar", "pedas", "crispy", "combo", "teh", "roti", "bakso", "soto",

@@ -232,6 +232,49 @@ internal object ShopeeProviderParser {
             isReversal = true, isConfirmed = true,
         )
     }
+    fun digitalProduct(order: JSONObject, detail: JSONObject? = null): Payment? {
+        val id = (order.optString("order_id").ifBlank { order.optString("orderId") }).also(::validId)
+        val source = detail ?: order
+        val rawAmount = long(source.opt("total_amount"))
+            ?: long(source.opt("amount"))
+            ?: long(source.opt("final_amount"))
+            ?: return null
+        if (rawAmount <= 0L) return null
+        val time = long(source.opt("paid_time"))?.takeIf { it > 0 }
+            ?: long(source.opt("create_time"))?.takeIf { it > 0 }
+            ?: return null
+        val name = source.optString("item_name")
+            .ifBlank { source.optString("product_name") }
+            .ifBlank { source.optString("title") }
+            .ifBlank { "Shopee Digital Purchase" }
+        val status = source.optInt("order_status", source.optInt("status", -1))
+        val cancelled = status == 4 || source.optBoolean("cancelled", false)
+        val items = JSONArray().put(JSONObject().put("name", name).put("price", "Rp${BigDecimal.valueOf(rawAmount, 5).stripTrailingZeros().toPlainString()}"))
+        val raw = receipt("shopee-digital-api", "Shopee Digital", name, items)
+            .put("orderId", id)
+            .put("sourceAmountPaid", rawAmount)
+            .put("grossPaidAmountMinor", money(rawAmount).amountMinor)
+            .put("paymentDetailVerified", detail != null)
+            .put("paymentEvidence", "settled-order-payment")
+            .put("paymentStatus", "COMPLETED")
+            .put("paymentDirection", "DEBIT")
+            .put("paymentAmountMinor", money(rawAmount).amountMinor)
+            .put("paymentCurrency", "IDR")
+            .put("paymentTimestamp", seconds(time).toString())
+            .put("cancelled", cancelled)
+            .put("refundState", if (cancelled) "unresolved" else "not_observed")
+        return Payment(UnifiedTransaction(
+            provider = Provider.SHOPEE,
+            providerTransactionId = "shopee:digital:$id",
+            direction = Direction.DEBIT,
+            money = money(rawAmount),
+            occurredAt = seconds(time),
+            description = name,
+            rawPayload = raw.toString(),
+            isConfirmed = true,
+        ), cancelled)
+    }
+
 
     private fun marketplaceItems(cards: JSONArray): JSONArray = JSONArray().apply {
         for (i in 0 until cards.length()) {

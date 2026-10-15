@@ -25,6 +25,23 @@ class ShopeeProviderContractTest {
         assertEquals("Rp6250", item.getString("price"))
         assertEquals(2, item.getInt("qty"))
     }
+    @Test fun digitalProductUsesPaidAmountAndPaymentTime() {
+        val order = JSONObject("""{
+            "order_id": "909192",
+            "item_name": "Paket Data Telkomsel 50GB",
+            "total_amount": 10000000000,
+            "create_time": 1700000000,
+            "order_status": 3
+        }""")
+        val payment = ShopeeProviderParser.digitalProduct(order)!!
+        assertEquals("shopee:digital:909192", payment.transaction.providerTransactionId)
+        assertEquals(100_000_00L, payment.transaction.money.amountMinor)
+        assertEquals(Instant.ofEpochSecond(1_700_000_000L), payment.transaction.occurredAt)
+        assertEquals("Paket Data Telkomsel 50GB", payment.transaction.description)
+        assertEquals(Direction.DEBIT, payment.transaction.direction)
+        assertTrue(payment.transaction.isConfirmed)
+        assertFalse(payment.refundExpected)
+    }
 
     @Test fun paidCancellationRetainsGrossChargeAndReportsUnresolvedRefund() {
         val detail = marketplaceDetail().put("list_type", 4)
