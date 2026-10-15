@@ -112,11 +112,24 @@ object LedgerReconciler {
             evidence(o).origin == "jago-linked-local-hive" && (o.providerTransactionId.substringAfter(":") to o.money) in bankIdentities
         }
         val bankIndex = bank.map(::evidence).groupBy { it.tx.money.currencyCode to it.tx.money.amountMinor }
-        val choices = orders.associate { o -> o.key to bankIndex[o.money.currencyCode to o.money.amountMinor].orEmpty().filter { e ->
-            val b = e.tx
-            o.direction == b.direction && close(o, b, 7 * 86400L) && isMatchingProvider(b, paymentProvider(o)) &&
-                compatibleAccount(o, b) && !e.funding
-        }.map { it.tx } }
+        val choices = orders.associate { o ->
+            val orderEv = evidence(o)
+            val orderId = orderEv.order.ifBlank { o.providerTransactionId.removePrefix("gopay:") }
+            val candidates = bankIndex[o.money.currencyCode to o.money.amountMinor].orEmpty().filter { e ->
+                val b = e.tx
+                o.direction == b.direction && close(o, b, 7 * 86400L) && isMatchingProvider(b, paymentProvider(o)) &&
+                    compatibleAccount(o, b) && !e.funding
+            }
+            val exactRefMatch = if (orderId.isNotBlank()) {
+                candidates.filter { e ->
+                    val jagoF6 = e.payload.optJSONObject("fields")?.optString("f6").orEmpty()
+                    val jagoF18 = e.payload.optJSONObject("fields")?.optString("f18").orEmpty()
+                    val refs = listOf(e.reference, jagoF6, jagoF18).map { it.removeSuffix("-1").trim() }.filter { it.isNotBlank() }
+                    orderId in refs || o.providerTransactionId in refs
+                }
+            } else emptyList()
+            o.key to (if (exactRefMatch.isNotEmpty()) exactRefMatch else candidates).map { it.tx }
+        }
         val reverseCount = choices.values.flatten().groupingBy { it.key }.eachCount()
         val matched = mutableSetOf<String>()
         val enriched = orders.map { o ->

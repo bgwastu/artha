@@ -197,14 +197,19 @@ internal class GojekOrderReader(private val files: RootFileReader) {
             checkpoint()
             val code = connection.responseCode
             checkpoint()
-            requireGojekSuccess(code)
+            requireGojekSuccess(code, connection)
             val body = GojekProviderParser.readBounded(connection.inputStream, ::checkpoint)
             return GojekProviderParser.decodeBody(body, connection.contentEncoding.orEmpty(), ::checkpoint)
         } finally { connection.disconnect() }
     }
 
-    private fun requireGojekSuccess(code: Int) {
-        if (code == 401 || code == 403) requireHttpSuccess(code, "Gojek")
+    private fun requireGojekSuccess(code: Int, connection: HttpURLConnection? = null) {
+        val auth = connection?.getHeaderField("www-authenticate").orEmpty()
+        val isInvalidToken = code == 400 && (auth.contains("invalid-token", ignoreCase = true) || auth.contains("realm=gojek", ignoreCase = true))
+        if (code == 401 || isInvalidToken) {
+            throw ProviderReadException(AccountStatus.NEEDS_LOGIN, "Gojek session expired. Open Gojek to refresh your session.")
+        }
+        if (code == 403) requireHttpSuccess(code, "Gojek")
         if (code !in 200..299) throw ProviderReadException(AccountStatus.ERROR, "Gojek history request failed (HTTP $code); valid cached payments are retained")
     }
 

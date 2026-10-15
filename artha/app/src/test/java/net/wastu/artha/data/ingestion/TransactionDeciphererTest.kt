@@ -58,4 +58,40 @@ class TransactionDeciphererTest {
         val tax = TransactionDecipherer.decipher("TXD99", "", "Tax on Interest", "", Direction.DEBIT)
         assertEquals("Tax on Interest", tax.title)
     }
+
+    @Test
+    fun gopayGenericAndRidePaymentsAreIdentified() {
+        val genericDebit = TransactionDecipherer.decipher(
+            code = "GPD05",
+            merchantOrCounterpart = "",
+            description = "GoPay",
+            notes = "004 - Gopay - Generic Jago payment",
+            direction = Direction.DEBIT,
+        )
+        assertEquals("GoPay Payment", genericDebit.title)
+        assertEquals("GoPay", genericDebit.paymentMethod)
+        assertFalse(genericDebit.isQris)
+
+        val rideDebit = TransactionDecipherer.decipher(
+            code = "GPD01",
+            merchantOrCounterpart = "",
+            description = "Gopay",
+            notes = "004 - GO-RIDE\nNyore Coffee & Space #RB-3239991-87956168",
+            direction = Direction.DEBIT,
+        )
+        assertEquals("GoRide: Nyore Coffee & Space", rideDebit.title)
+        assertEquals("GoPay", rideDebit.paymentMethod)
+        assertFalse(rideDebit.isQris)
+
+        val refundCredit = TransactionDecipherer.decipher(
+            code = "GPC02",
+            merchantOrCounterpart = "",
+            description = "Transaction Refund",
+            notes = "",
+            direction = Direction.CREDIT,
+        )
+        assertEquals("GoPay Refund", refundCredit.title)
+        assertEquals("GoPay", refundCredit.paymentMethod)
+        assertFalse(refundCredit.isQris)
+    }
 }

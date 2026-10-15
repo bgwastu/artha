@@ -173,4 +173,37 @@ class LedgerReconcilerTest {
         assertEquals("SeIndonesia (Sei Sapi Dan Ayam) - [FS] #B2G2", fused.description)
         assertTrue(fused.rawPayload.contains("groupedTransactions"))
     }
+
+    @Test
+    fun gopayOrderAndJagoDebitAreFusedWithReferenceMatching() {
+        val gopayOrder = UnifiedTransaction(
+            provider = Provider.GOJEK,
+            providerTransactionId = "gopay:0320261015013200cLFRf1Yw0yID",
+            direction = Direction.DEBIT,
+            money = Money(41_100_00L),
+            occurredAt = Instant.parse("2026-10-15T01:32:00Z"),
+            description = "Indomaret",
+            rawPayload = """{"origin":"gopay-order-history","orderNumber":"0320261015013200cLFRf1Yw0yID","isQris":true}""",
+            isQris = true,
+        )
+        val jagoDebit = UnifiedTransaction(
+            provider = Provider.JAGO,
+            providerTransactionId = "jago:261015-FB7X-ZECLX7",
+            direction = Direction.DEBIT,
+            money = Money(41_100_00L),
+            occurredAt = Instant.parse("2026-10-15T01:32:22Z"),
+            description = "GoPay Payment",
+            rawPayload = """{"code":"GPD05","fields":{"f6":"0320261015013200cLFRf1Yw0yID-1","f17":"GoPay"},"pocketName":"Main Pocket"}""",
+            pocket = Pocket("102670254190", "Main Pocket"),
+        )
+
+        val result = LedgerReconciler.reconcileLedger(listOf(gopayOrder, jagoDebit))
+        assertEquals(1, result.size)
+        val fused = result.first()
+        assertEquals(Provider.GOJEK, fused.provider)
+        assertEquals("Indomaret", fused.description)
+        assertTrue(fused.isQris)
+        assertEquals("Main Pocket", fused.pocket?.name)
+        assertTrue(fused.rawPayload.contains("groupedTransactions"))
+    }
 }

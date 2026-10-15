@@ -64,7 +64,31 @@ object TransactionDecipherer {
             )
         }
 
-        // 4. Term Deposits, Pockets, Cash, Taxes & Interest
+        // 4. GoPay Payments via Linked Jago Pocket
+        if (c in setOf("GPD01", "GPD05", "GPC02") || (d.equals("GoPay", ignoreCase = true) && n.contains("Gopay", ignoreCase = true))) {
+            val title = when {
+                c == "GPC02" || d.contains("Refund", ignoreCase = true) -> "GoPay Refund"
+                n.contains("Tip", ignoreCase = true) -> "GoPay Tip"
+                n.contains("GO-RIDE", ignoreCase = true) -> {
+                    val dest = n.lines().getOrNull(1)?.replace(Regex("#.*$"), "")?.trim()?.takeIf { it.isNotBlank() }
+                    if (dest != null) "GoRide: ${titleCase(dest)}" else "GoRide"
+                }
+                n.contains("GO-CAR", ignoreCase = true) -> {
+                    val dest = n.lines().getOrNull(1)?.replace(Regex("#.*$"), "")?.trim()?.takeIf { it.isNotBlank() }
+                    if (dest != null) "GoCar: ${titleCase(dest)}" else "GoCar"
+                }
+                d.isNotBlank() && !d.equals("GoPay", ignoreCase = true) -> titleCase(d)
+                m.isNotBlank() && !m.equals("GoPay", ignoreCase = true) -> titleCase(m)
+                else -> "GoPay Payment"
+            }
+            return Deciphered(
+                title = title,
+                isQris = false,
+                paymentMethod = "GoPay",
+            )
+        }
+
+        // 5. Term Deposits, Pockets, Cash, Taxes & Interest
         if (c in setOf("TDD02", "TDC08", "TDC03")) {
             return Deciphered("Term Deposit", isQris = false, paymentMethod = "Savings")
         }
@@ -82,7 +106,7 @@ object TransactionDecipherer {
             return Deciphered("Interest Earned", isQris = false, paymentMethod = "Interest")
         }
 
-        // 5. General Fallback
+        // 6. General Fallback
         val fallback = when {
             d.isNotBlank() -> titleCase(d)
             m.isNotBlank() -> titleCase(m)
