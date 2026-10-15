@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Category
 import net.wastu.artha.ui.ArthaViewModel
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
@@ -129,6 +130,8 @@ fun HomeScreen(
     }
 
     val latestTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyList<UnifiedTransaction>()) }
+    val diagnostics by viewModel?.providerDiagnostics?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap()) }
+    val importEnabled by viewModel?.importEnabled?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(Provider.entries.toSet()) }
     val selected = latestTransactions.firstOrNull { it.key == selectedKey } ?: selectedFallback?.takeIf { it.key == selectedKey }
     val closeDetails = { selectedKey = null; selectedFallback = null }
     val detailsState = selected?.let { rememberTransactionDetailsState(it.key) }
@@ -227,25 +230,46 @@ fun HomeScreen(
                         androidx.compose.material3.TextButton(onClick = onRefresh, modifier = Modifier.padding(horizontal = 16.dp)) {
                             Text("Root unavailable. Retry imports.")
                         }
+                    if (destination == Destination.TRANSACTIONS && !showSearch) {
+                        SyncStatusBanner(
+                            syncingProvider = syncingProvider,
+                            refreshing = refreshing,
+                            diagnostics = diagnostics,
+                            importEnabled = importEnabled,
+                            transactions = latestTransactions,
+                            onSyncProvider = { viewModel?.syncProvider(it) },
+                            onSyncAll = onRefresh,
+                            onOpenApp = { pkg ->
+                                val intent = context.packageManager.getLaunchIntentForPackage(pkg)
+                                if (intent != null) context.startActivity(intent)
+                            },
+                        )
+                    }
                     }
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
                     saveableStateHolder.SaveableStateProvider(destination.name) {
                         when (destination) {
                             Destination.TRANSACTIONS -> Row(Modifier.fillMaxSize()) {
                             Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
-                            LedgerScreen(
-                                state = ledgerState,
-                                enabledProviders = enabledProviders,
-                                onTransaction = { selectedKey = it.key; selectedFallback = it },
-                                onRetry = onRetryLedger,
-                                onImportHistory = { destination = Destination.SETTINGS },
-                                onRestoreBackup = { openBackup = true; destination = Destination.SETTINGS },
-                                showFilter = showFilter,
-                                onDismissFilter = { showFilter = false },
-                                viewModel = viewModel,
-                                filters = transactionFilters,
-                                onFiltersChanged = { transactionFilters = it },
-                            )
+                                PullToRefreshBox(
+                                    isRefreshing = refreshing,
+                                    onRefresh = onRefresh,
+                                    modifier = Modifier.fillMaxSize(),
+                                ) {
+                                    LedgerScreen(
+                                        state = ledgerState,
+                                        enabledProviders = enabledProviders,
+                                        onTransaction = { selectedKey = it.key; selectedFallback = it },
+                                        onRetry = onRetryLedger,
+                                        onImportHistory = { destination = Destination.SETTINGS },
+                                        onRestoreBackup = { openBackup = true; destination = Destination.SETTINGS },
+                                        showFilter = showFilter,
+                                        onDismissFilter = { showFilter = false },
+                                        viewModel = viewModel,
+                                        filters = transactionFilters,
+                                        onFiltersChanged = { transactionFilters = it },
+                                    )
+                                }
                             }
                             if (showDetailsPane && selected != null) {
                                 Box(Modifier.weight(1f).fillMaxHeight()) {
