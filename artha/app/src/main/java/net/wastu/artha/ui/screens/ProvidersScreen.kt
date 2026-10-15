@@ -329,10 +329,13 @@ private fun SettingsLink(title: String, summary: String?, icon: androidx.compose
 private fun SettingsDetailSheet(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().imePadding()) {
-            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Close settings") }
-            }
+            Text(
+                title,
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 8.dp)
+            )
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
                 content()
             }
@@ -367,8 +370,17 @@ private fun ProviderSettings(
     onEnabled: (Boolean) -> Unit, onImportEnabled: (Boolean) -> Unit, onImport: () -> Unit,
     busy: Boolean = false, feedback: String? = null,
 ) {
-    SettingsSwitch("Import new history", importEnabled, onImportEnabled, sourceName = sourceName)
-    SettingsSwitch("Show in Transactions", enabled, onEnabled, sourceName = sourceName)
+    val isEnabled = enabled && importEnabled
+    SettingsSwitch(
+        title = "Enabled",
+        checked = isEnabled,
+        onChange = { checked ->
+            onEnabled(checked)
+            onImportEnabled(checked)
+        },
+        summary = if (isEnabled) "Active and syncing transactions" else "Disabled",
+        sourceName = sourceName
+    )
     ListItem(headlineContent = { Text("Saved transactions") }, trailingContent = { Text(count.toString()) })
     diagnostic?.accountIdentifier?.let { ListItem(headlineContent = { Text("Account") }, supportingContent = { Text(it) }) }
     val status = providerSummary(diagnostic, count, importEnabled, importing)
