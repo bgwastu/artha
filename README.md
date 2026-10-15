@@ -18,8 +18,7 @@ Artha helps people in Indonesia understand their spending on rooted Android phon
 ## Providers
 
 - **Bank Jago:** Reads and decrypts transaction history cached by the Jago app using root access.
-- **Shopee & ShopeeFood:** Uses the app's saved session cookies to fetch order history and match Jago payments.
-- **Tokopedia:** Uses the app's saved login session to fetch order history and match Jago payments.
+- **Shopee (Marketplace, Food & Digital Products):** Uses the app's saved session cookies to fetch order history and match Jago payments.
 - **Gojek & GoPay:** Imports locally saved Gojek orders and payments identified in Jago history.
 - **Grab:** Decrypts the app's local session to fetch ride routes, GrabFood orders, and GrabPay history directly.
 
