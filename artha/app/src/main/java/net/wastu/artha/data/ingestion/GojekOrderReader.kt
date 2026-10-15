@@ -11,13 +11,17 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.providers.AccountStatus
 import org.json.JSONObject
 
 /** Read-only native source snapshots and GETs; no handmade exports or session refresh. */
 internal class GojekOrderReader(private val files: RootFileReader) {
-    suspend fun transactions(): List<UnifiedTransaction> = withContext(Dispatchers.IO) {
+    suspend fun transactions(interactive: Boolean = false): List<UnifiedTransaction> = withContext(Dispatchers.IO) {
+        if (interactive) {
+            triggerHistoryRefresh()
+        }
         val rows = ImportRows()
         val details = linkedMapOf<String, JSONObject>()
         val orders = mutableListOf<GojekProviderParser.NativeOrder>()
@@ -211,6 +215,18 @@ internal class GojekOrderReader(private val files: RootFileReader) {
         }
         if (code == 403) requireHttpSuccess(code, "Gojek")
         if (code !in 200..299) throw ProviderReadException(AccountStatus.ERROR, "Gojek history request failed (HTTP $code); valid cached payments are retained")
+    }
+
+    private suspend fun triggerHistoryRefresh() {
+        try {
+            files.executeCommand("am start -a android.intent.action.VIEW -d 'gojek://gopay/history' -p com.gojek.app")
+            delay(1500L)
+            files.executeCommand("am start -n ${files.context.packageName}/.MainActivity")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Headless refresh is best-effort; proceed with reading local cache
+        }
     }
 
     private fun deadlineExceeded(started: Long): Boolean = System.nanoTime() - started >= TimeUnit.SECONDS.toNanos(60)

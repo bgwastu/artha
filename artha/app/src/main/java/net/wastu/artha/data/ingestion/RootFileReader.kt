@@ -9,6 +9,7 @@ import com.topjohnwu.superuser.Shell
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import net.wastu.artha.data.providers.AccountStatus
@@ -89,6 +90,21 @@ class RootFileReader(internal val context: Context) {
             check(result.isSuccess) { "Provider cache missing. Open its app to populate history." }
             coroutineContext.ensureActive()
             result.out
+        }
+    }
+
+    suspend fun executeCommand(command: String): Boolean = withContext(Dispatchers.IO) {
+        check(Process.myUserHandle() == UserHandle.getUserHandleForUid(0)) { "Provider imports currently support the primary Android profile only." }
+        coroutineContext.ensureActive()
+        try {
+            Shell.Builder.create().setContext(context).setTimeout(10).build("su", "-M", "-c", "/system/bin/sh").use { shell ->
+                if (!shell.isRoot) return@use false
+                shell.newJob().add(command).exec().isSuccess
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
         }
     }
 }

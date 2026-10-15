@@ -213,7 +213,8 @@ class TokopediaProviderAdapter(private val files: RootFileReader) : ProviderAdap
 class GojekProviderAdapter(private val files: RootFileReader) : ProviderAdapter {
     override val coverageHint = Provider.GOJEK.historyCoverageHint
     override val provider = Provider.GOJEK
-    override suspend fun ingest(): List<UnifiedTransaction> = GojekOrderReader(files).transactions()
+    override suspend fun ingest(): List<UnifiedTransaction> = GojekOrderReader(files).transactions(interactive = false)
+    override suspend fun ingestInteractive(): List<UnifiedTransaction> = GojekOrderReader(files).transactions(interactive = true)
 }
 
 class GrabProviderAdapter(private val files: RootFileReader) : ProviderAdapter {

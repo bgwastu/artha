@@ -19,6 +19,7 @@ interface ProviderAdapter {
     val coverageHint: String? get() = null
     val accountIdentifier: String? get() = null
     suspend fun ingest(): List<UnifiedTransaction>
+    suspend fun ingestInteractive(): List<UnifiedTransaction> = ingest()
 }
 
 class IngestionCoordinator(
@@ -53,7 +54,7 @@ class IngestionCoordinator(
     suspend fun syncProvider(provider: Provider): String = mutex.withLock {
         check(rootAccess.verify()) { "Root access unavailable" }
         beforeBatch()
-        try { _syncingProvider.value = provider; importAndRecord(provider) }
+        try { _syncingProvider.value = provider; importAndRecord(provider, interactive = true) }
         finally { _syncingProvider.value = null; beforeBatch() }
     }
 
@@ -64,10 +65,12 @@ class IngestionCoordinator(
 
     private data class ImportResult(val result: AppendResult, val warning: String?, val window: ProviderImportWindow)
 
-    private suspend fun readAndAppend(provider: Provider): ImportResult {
+    private suspend fun readAndAppend(provider: Provider, interactive: Boolean = false): ImportResult {
         val adapter = requireNotNull(adaptersByProvider[provider]) { "Provider ingestion is not implemented yet." }
         var warning: String? = null
-        val transactions = try { adapter.ingest() } catch (partial: PartialImportException) {
+        val transactions = try {
+            if (interactive) adapter.ingestInteractive() else adapter.ingest()
+        } catch (partial: PartialImportException) {
             if (partial.transactions.isEmpty()) throw partial
             warning = partial.message?.takeIf { it.isNotBlank() } ?: "Some history could not be imported"; partial.transactions
         }
@@ -78,8 +81,8 @@ class IngestionCoordinator(
         return ImportResult(ledger().appendProviderImport(transactions), warning, window)
     }
 
-    private suspend fun importAndRecord(provider: Provider): String = try {
-        val (result, warning, window) = readAndAppend(provider)
+    private suspend fun importAndRecord(provider: Provider, interactive: Boolean = false): String = try {
+        val (result, warning, window) = readAndAppend(provider, interactive)
         val summary = "${result.inserted} added, ${result.duplicates} already saved" +
             if (result.evidenceUpdates > 0) ", ${result.evidenceUpdates} details updated" else ""
         preferences?.recordSyncSuccess(provider, summary,
