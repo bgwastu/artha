@@ -1,3 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="launcher_background">#173E36</color>
+    <color name="widget_background">#F7FAF5</color>
+    <color name="widget_background_stroke">#DFE5DD</color>
+    <color name="widget_text_primary">#18211B</color>
+    <color name="widget_text_secondary">#506353</color>
+    <color name="widget_amount_incoming">#1B5E20</color>
+    <color name="widget_amount_outgoing">#18211B</color>
+    <color name="widget_amount_supporting">#717A72</color>
+    <color name="widget_pill_background">#EBF0E9</color>
 </resources>

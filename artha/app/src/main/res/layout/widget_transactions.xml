@@ -1,15 +1,58 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    android:id="@+id/widget_transactions_root" android:layout_width="match_parent" android:layout_height="match_parent"
-    android:background="@drawable/bg_widget_analysis" android:orientation="vertical" android:padding="14dp"
+    android:id="@+id/widget_transactions_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_widget_analysis"
+    android:orientation="vertical"
+    android:padding="16dp"
     tools:ignore="HardcodedText">
-    <LinearLayout android:id="@+id/widget_transactions_header" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="48dp" android:orientation="vertical">
-    <TextView android:id="@+id/widget_transactions_title" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="Recent payments" android:textSize="14sp" android:textColor="#F1F0F4" android:textStyle="bold" />
-    <TextView android:id="@+id/widget_transactions_status" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="Loading saved payments" android:textSize="12sp" android:textColor="#C4C6CF"  />
-</LinearLayout>
-    <ListView android:id="@+id/widget_transactions_list" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:cacheColorHint="@android:color/transparent" android:divider="@null" android:scrollbars="none" android:visibility="gone" />
-    <TextView android:id="@+id/widget_transactions_empty" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#C4C6CF" android:textSize="13sp" android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/widget_transactions_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="40dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/widget_transactions_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Recent payments"
+            android:textColor="@color/widget_text_primary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_transactions_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="Loading saved payments"
+            android:textColor="@color/widget_text_secondary"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <ListView
+        android:id="@+id/widget_transactions_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="8dp"
+        android:layout_weight="1"
+        android:cacheColorHint="@android:color/transparent"
+        android:divider="@null"
+        android:scrollbars="none"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/widget_transactions_empty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:textColor="@color/widget_text_secondary"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
 </LinearLayout>

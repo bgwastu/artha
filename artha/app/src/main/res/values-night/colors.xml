@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="widget_background">#171D17</color>
+    <color name="widget_background_stroke">#30372F</color>
+    <color name="widget_text_primary">#DEE5DB</color>
+    <color name="widget_text_secondary">#A0ACA1</color>
+    <color name="widget_amount_incoming">#81C784</color>
+    <color name="widget_amount_outgoing">#DEE5DB</color>
+    <color name="widget_amount_supporting">#8B958B</color>
+    <color name="widget_pill_background">#212821</color>
+</resources>

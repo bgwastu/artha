@@ -168,15 +168,18 @@ internal fun buildTransactionItemView(
     val timeStr = tx.occurredAt.atZone(zone).format(timeFormatter)
     val dateStr = "${widgetDayLabel(localDate)}, $timeStr"
     val isCredit = tx.direction == Direction.CREDIT
-    views.setTextViewText(R.id.widget_item_subtitle, timeStr)
+    val pocketName = tx.pocket?.name
+    val subtitle = listOfNotNull(tx.provider.displayName, pocketName, timeStr).joinToString(" • ")
+    views.setTextViewText(R.id.widget_item_subtitle, subtitle)
 
     val isZero = !isCredit && (tx.isReversal || tx.description.contains("(Reversed)", ignoreCase = true))
     val amountText = paymentRowAmount(tx)
-    val amountColor = when {
-        isZero -> WidgetPalette.supporting
-        isCredit -> WidgetPalette.income
-        else -> WidgetPalette.expense
+    val amountColorRes = when {
+        isZero -> R.color.widget_amount_supporting
+        isCredit -> R.color.widget_amount_incoming
+        else -> R.color.widget_amount_outgoing
     }
+    val amountColor = androidx.core.content.ContextCompat.getColor(context, amountColorRes)
     views.setTextViewText(R.id.widget_item_amount, amountText)
     views.setTextColor(R.id.widget_item_amount, amountColor)
 
