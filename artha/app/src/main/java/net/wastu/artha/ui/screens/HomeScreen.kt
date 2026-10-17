@@ -17,6 +17,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.padding
@@ -129,8 +131,6 @@ fun HomeScreen(
     }
 
     val latestTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyList<UnifiedTransaction>()) }
-    val diagnostics by viewModel?.providerDiagnostics?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap()) }
-    val importEnabled by viewModel?.importEnabled?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(Provider.entries.toSet()) }
     val selected = latestTransactions.firstOrNull { it.key == selectedKey } ?: selectedFallback?.takeIf { it.key == selectedKey }
     val closeDetails = { selectedKey = null; selectedFallback = null }
     val detailsState = selected?.let { rememberTransactionDetailsState(it.key) }
@@ -230,19 +230,11 @@ fun HomeScreen(
                             Text("Root unavailable. Retry imports.")
                         }
                     }
-                    if (destination == Destination.TRANSACTIONS && !showSearch) {
-                        SyncStatusBanner(
-                            syncingProvider = syncingProvider,
-                            refreshing = refreshing,
-                            diagnostics = diagnostics,
-                            importEnabled = importEnabled,
-                            transactions = latestTransactions,
-                            onSyncProvider = { viewModel?.syncProvider(it) },
-                            onSyncAll = onRefresh,
-                            onOpenApp = { pkg ->
-                                val intent = context.packageManager.getLaunchIntentForPackage(pkg)
-                                if (intent != null) context.startActivity(intent)
-                            },
+                    if (refreshing) {
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth().height(3.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant,
                         )
                     }
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
@@ -264,7 +256,7 @@ fun HomeScreen(
                                     onFiltersChanged = { transactionFilters = it },
                                 )
                             }
-                            if (showDetailsPane && selected != null) {
+                            if (showDetailsPane) {
                                 Box(Modifier.weight(1f).fillMaxHeight()) {
                                     if (detailsState != null) TransactionDetailsContent(selected, viewModel, onClose = closeDetails, state = detailsState)
                                 }
