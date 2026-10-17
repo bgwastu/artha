@@ -5,11 +5,20 @@ import net.wastu.artha.core.root.LibsuRootAccess
 import net.wastu.artha.data.ingestion.IngestionCoordinator
 import net.wastu.artha.data.ledger.LedgerDatabase
 import net.wastu.artha.data.ledger.RoomLedgerRepository
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
+import net.wastu.artha.core.model.Provider
+import net.wastu.artha.data.analysis.SpendingState
+import net.wastu.artha.data.sync.BackgroundSyncScheduler
+import net.wastu.artha.ui.widget.AnalysisWidgetProvider
+import net.wastu.artha.ui.widget.TransactionsWidgetProvider
 
 class ArthaApplication : Application() {
     val rootAccess by lazy { LibsuRootAccess(applicationContext) }
 
-    private val applicationScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+    val applicationScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
     // Stored history is readable independently of root; imports still require root.
     private val database by lazy { LedgerDatabase.create(applicationContext) }
     val ledger by lazy { RoomLedgerRepository(database.transactions()) }
@@ -29,10 +38,48 @@ class ArthaApplication : Application() {
         IngestionCoordinator(rootAccess, { ledger }, adapters, reader::invalidate, preferences = providerPreferences)
     }
 
+    fun syncInBackground(provider: Provider? = null, force: Boolean = false): kotlinx.coroutines.Job =
+        applicationScope.launch {
+            try {
+                if (!rootAccess.verify()) return@launch
+                val result = if (provider != null) {
+                    mapOf(provider to ingestion.syncProvider(provider))
+                } else {
+                    ingestion.ingestAll(force = force)
+                }
+                if (result.isNotEmpty() && driveSyncManager.syncState.value.isEnabled) {
+                    driveSyncManager.triggerAutoBackup()
+                }
+                AnalysisWidgetProvider.triggerUpdate(this@ArthaApplication)
+                TransactionsWidgetProvider.triggerUpdate(this@ArthaApplication)
+            } catch (_: Exception) {
+            }
+        }
+
+    fun syncInBackgroundIfStale() {
+        val anyStale = providerPreferences.importEnabled.value.any { providerPreferences.isStale(it) }
+        if (anyStale) {
+            syncInBackground(force = false)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
+        BackgroundSyncScheduler.schedule(this)
         if (driveSyncManager.syncState.value.isEnabled) {
             driveSyncManager.triggerAutoBackup()
+        }
+        applicationScope.launch {
+            spending.state
+                .filterIsInstance<SpendingState.Ready>()
+                .distinctUntilChangedBy { ready ->
+                    ready.transactions.size to (ready.transactions.firstOrNull()?.key ?: "")
+                }
+                .drop(1)
+                .collect {
+                    AnalysisWidgetProvider.triggerUpdate(this@ArthaApplication)
+                    TransactionsWidgetProvider.triggerUpdate(this@ArthaApplication)
+                }
         }
     }
 }

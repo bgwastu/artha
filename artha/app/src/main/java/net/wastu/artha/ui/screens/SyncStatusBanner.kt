@@ -6,6 +6,14 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -200,6 +208,16 @@ fun SyncStatusBanner(
 
 @Composable
 private fun SyncingProgressCard(syncingProvider: Provider?) {
+    val transition = rememberInfiniteTransition(label = "SyncingBanner")
+    val rotation by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "SyncingBannerRotation",
+    )
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -215,11 +233,13 @@ private fun SyncingProgressCard(syncingProvider: Provider?) {
             Icon(
                 Icons.Default.Sync,
                 contentDescription = null,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier
+                    .size(20.dp)
+                    .graphicsLayer { rotationZ = rotation },
                 tint = MaterialTheme.colorScheme.primary,
             )
             Text(
-                text = syncingProvider?.let { "Syncing ${it.displayName}..." } ?: "Syncing accounts...",
+                text = syncingProvider?.let { "Syncing ${it.displayName} in background..." } ?: "Syncing accounts in background...",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onSurface,

@@ -39,7 +39,12 @@ class MainActivity : ComponentActivity() {
                                     net.wastu.artha.ui.widget.TransactionsWidgetProvider.triggerUpdate(application)
                                 }
                             },
-                            ingestStale = { application.ingestion.ingestAll(force = false) },
+                            ingestStale = {
+                                application.ingestion.ingestAll(force = false).also {
+                                    net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(application)
+                                    net.wastu.artha.ui.widget.TransactionsWidgetProvider.triggerUpdate(application)
+                                }
+                            },
                             syncSingle = {
                                 application.ingestion.syncProvider(it).also {
                                     net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(application)

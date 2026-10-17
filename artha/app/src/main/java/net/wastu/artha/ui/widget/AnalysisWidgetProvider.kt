@@ -27,6 +27,7 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
             val ids = appWidgetManager.getAppWidgetIds(ComponentName(context, AnalysisWidgetProvider::class.java))
             if (ids.isNotEmpty()) {
                 updateWidgets(context, appWidgetManager, ids)
+                (context.applicationContext as? net.wastu.artha.ArthaApplication)?.syncInBackgroundIfStale()
             }
         }
     }
@@ -37,6 +38,7 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
         }
         if (targetIds.isNotEmpty()) {
             updateWidgets(context, appWidgetManager, targetIds)
+            (context.applicationContext as? net.wastu.artha.ArthaApplication)?.syncInBackgroundIfStale()
         }
     }
 
@@ -67,8 +69,7 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
                 val views = RemoteViews(context.packageName, R.layout.widget_analysis)
                 views.setTextViewText(R.id.widget_status, widgetFreshness(previous, System.currentTimeMillis(), updating = !failed, failed = failed))
                 views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
-                if (previous == null) appWidgetManager.updateAppWidget(id, views)
-                else appWidgetManager.partiallyUpdateAppWidget(id, views)
+                appWidgetManager.partiallyUpdateAppWidget(id, views)
             }
         }
         status()

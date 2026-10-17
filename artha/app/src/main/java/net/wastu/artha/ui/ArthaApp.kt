@@ -17,7 +17,6 @@ fun ArthaApp(model: ArthaViewModel) {
     val providerCounts by model.providerCounts.collectAsStateWithLifecycle()
 
     LifecycleEventEffect(Lifecycle.Event.ON_START) { model.enterForeground() }
-    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { model.stopForegroundImports() }
 
     Surface {
         HomeScreen(

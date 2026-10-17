@@ -14,7 +14,7 @@ internal object WidgetRefresh {
     fun schedule(key: String, pending: BroadcastReceiver.PendingResult?, onFailure: () -> Unit = {}, update: suspend () -> Unit) {
         jobs.remove(key)?.cancel()
         val job = scope.launch(start = CoroutineStart.LAZY) {
-            try { delay(150); withTimeout(8_000) { update() } }
+            try { withTimeout(8_000) { update() } }
             catch (_: TimeoutCancellationException) { onFailure() }
             catch (cancelled: CancellationException) { /* Keep last valid widget contents. */ }
             catch (_: Exception) { onFailure() }
@@ -29,10 +29,13 @@ internal object WidgetRefresh {
     }
 }
 
-internal suspend fun widgetSpending(context: Context): SpendingState.Ready = withTimeout(8_000) {
+internal suspend fun widgetSpending(context: Context): SpendingState.Ready {
     val app = context.applicationContext as ArthaApplication
-    val state = app.spending.state.first { it != SpendingState.Loading }
-    state as? SpendingState.Ready ?: error("Stored spending projection unavailable")
+    app.spending.lastReady.value?.let { return it }
+    return withTimeout(8_000) {
+        val state = app.spending.state.first { it != SpendingState.Loading }
+        state as? SpendingState.Ready ?: error("Stored spending projection unavailable")
+    }
 }
 
 internal object WidgetUpdatedAt {

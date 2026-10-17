@@ -31,6 +31,7 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
             val ids = appWidgetManager.getAppWidgetIds(ComponentName(context, TransactionsWidgetProvider::class.java))
             if (ids.isNotEmpty()) {
                 updateWidgets(context, appWidgetManager, ids)
+                (context.applicationContext as? net.wastu.artha.ArthaApplication)?.syncInBackgroundIfStale()
             }
         }
     }
@@ -41,6 +42,7 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
         }
         if (targetIds.isNotEmpty()) {
             updateWidgets(context, appWidgetManager, targetIds)
+            (context.applicationContext as? net.wastu.artha.ArthaApplication)?.syncInBackgroundIfStale()
         }
     }
 
@@ -85,8 +87,7 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
                 val views = RemoteViews(context.packageName, R.layout.widget_transactions)
                 views.setTextViewText(R.id.widget_transactions_status, widgetFreshness(previous, System.currentTimeMillis(), updating = !failed, failed = failed))
                 views.setOnClickPendingIntent(R.id.widget_transactions_header, openAppIntent)
-                if (previous == null) appWidgetManager.updateAppWidget(id, views)
-                else appWidgetManager.partiallyUpdateAppWidget(id, views)
+                appWidgetManager.partiallyUpdateAppWidget(id, views)
             }
         }
         status()
@@ -121,9 +122,9 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
                         @Suppress("DEPRECATION")
                         views.setRemoteAdapter(R.id.widget_transactions_list, serviceIntent)
                         appWidgetManager.updateAppWidget(appWidgetId, views)
-                        @Suppress("DEPRECATION")
-                        appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.widget_transactions_list)
                     }
+                    @Suppress("DEPRECATION")
+                    appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.widget_transactions_list)
                     WidgetUpdatedAt.save(context, appWidgetId, updatedAt)
                 }
         }
