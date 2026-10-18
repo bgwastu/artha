@@ -72,10 +72,10 @@ class WidgetPresentationTest {
     }
 
     @Test fun optionalAnalysisDetailsRequireRoomAtTheCurrentTextScale() {
-        assertFalse(showAnalysisDetails(180, 110, 1f))
-        assertTrue(showAnalysisDetails(320, 400, 1f))
-        assertFalse(showAnalysisDetails(320, 400, 1.5f))
-        assertFalse(showAnalysisDetails(320, 400, 2f))
-        assertTrue(showAnalysisDetails(500, 600, 2f))
+        assertFalse(showAnalysisDetails(100, 70, 1f))
+        assertTrue(showAnalysisDetails(180, 110, 1f))
+        assertFalse(showAnalysisDetails(180, 110, 1.5f))
+        assertFalse(showAnalysisDetails(180, 110, 2f))
+        assertTrue(showAnalysisDetails(320, 400, 2f))
     }
 }

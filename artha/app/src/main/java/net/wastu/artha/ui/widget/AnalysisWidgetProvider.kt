@@ -81,8 +81,11 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
             for (id in appWidgetIds) {
                 val options = appWidgetManager.getAppWidgetOptions(id)
                 val fontScale = context.resources.configuration.fontScale
-                val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 180)
-                val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110)
+                val isLandscape = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+                val width = if (isLandscape) options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 180)
+                    else options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 180)
+                val height = if (isLandscape) options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110)
+                    else options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110))
                 val detailed = showAnalysisDetails(width, height, fontScale)
                 val views = RemoteViews(context.packageName, R.layout.widget_analysis)
                 val monthTitle = month.format(DateTimeFormatter.ofPattern(if (width < 240 * fontScale) "MMM yyyy" else "MMMM yyyy", Locale.US))

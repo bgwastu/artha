@@ -40,7 +40,7 @@ internal fun widgetDayLabel(day: java.time.LocalDate, today: java.time.LocalDate
 }
 
 internal fun showAnalysisDetails(widthDp: Int, heightDp: Int, fontScale: Float): Boolean =
-    widthDp >= 240 * fontScale && heightDp >= 240 * fontScale
+    widthDp >= 130 * fontScale && heightDp >= 90 * fontScale
 
 internal fun widgetFreshness(updatedAt: Long?, now: Long, updating: Boolean = false, failed: Boolean = false): String {
     if (updatedAt == null) return when {
