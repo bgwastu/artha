@@ -17,6 +17,12 @@ import net.wastu.artha.ui.formatMoney
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import android.os.Build
+import android.net.Uri
+import android.widget.RemoteViewsService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import net.wastu.artha.data.analysis.CategorySpending
 
 class AnalysisWidgetProvider : AppWidgetProvider() {
 
@@ -96,21 +102,42 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
                 // The current month is incomplete. Compare amounts with an explicitly full prior month.
                 views.setViewVisibility(R.id.widget_delta_text, if (amounts.previous == null) View.GONE else View.VISIBLE)
                 views.setTextViewText(R.id.widget_delta_text, amounts.previous?.let { "Last month $it" }.orEmpty())
-                val topCats = analysis.categories.take(3)
-                views.setViewVisibility(R.id.widget_categories_container, if (topCats.isEmpty()) View.GONE else View.VISIBLE)
-                views.setViewVisibility(R.id.widget_empty_text, if (topCats.isEmpty() && detailed) View.VISIBLE else View.GONE)
+                val categories = analysis.categories
+                views.setViewVisibility(R.id.widget_categories_list, if (categories.isEmpty()) View.GONE else View.VISIBLE)
+                views.setViewVisibility(R.id.widget_empty_text, if (categories.isEmpty() && detailed) View.VISIBLE else View.GONE)
                 views.setTextViewText(R.id.widget_empty_text, "No spending this month")
-                val rowIds = listOf(R.id.widget_row_cat1, R.id.widget_row_cat2, R.id.widget_row_cat3)
-                val nameIds = listOf(R.id.widget_cat1_name, R.id.widget_cat2_name, R.id.widget_cat3_name)
-                val amtIds = listOf(R.id.widget_cat1_amount, R.id.widget_cat2_amount, R.id.widget_cat3_amount)
-                for (i in 0..2) {
-                    val cat = topCats.getOrNull(i)
-                    views.setViewVisibility(rowIds[i], if (cat == null) View.GONE else View.VISIBLE)
-                    if (cat != null) {
-                        views.setTextViewText(nameIds[i], cat.category)
-                        views.setTextViewText(amtIds[i], formatMoney(Money(cat.amountMinor)))
+
+                val openAnalysisTemplate = PendingIntent.getActivity(
+                    context,
+                    102,
+                    Intent(context, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        putExtra("extra_destination", "ANALYSIS")
+                    },
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+                    } else {
+                        PendingIntent.FLAG_UPDATE_CURRENT
+                    },
+                )
+                views.setPendingIntentTemplate(R.id.widget_categories_list, openAnalysisTemplate)
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val builder = RemoteViews.RemoteCollectionItems.Builder().setViewTypeCount(1).setHasStableIds(true)
+                    for ((index, cat) in categories.withIndex()) {
+                        builder.addItem(index.toLong(), buildCategoryRowView(context, cat))
                     }
+                    views.setRemoteAdapter(R.id.widget_categories_list, builder.build())
+                } else {
+                    val serviceIntent = Intent(context, AnalysisWidgetService::class.java).apply {
+                        putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+                        data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
+                    }
+                    @Suppress("DEPRECATION")
+                    views.setRemoteAdapter(R.id.widget_categories_list, serviceIntent)
                 }
+                @Suppress("DEPRECATION")
+                appWidgetManager.notifyAppWidgetViewDataChanged(id, R.id.widget_categories_list)
                 views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
                 appWidgetManager.updateAppWidget(id, views)
                 WidgetUpdatedAt.save(context, id, updatedAt)
@@ -129,4 +156,56 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
             TransactionsWidgetProvider.triggerUpdate(context)
         }
     }
+}
+
+internal fun buildCategoryRowView(context: Context, cat: CategorySpending): RemoteViews {
+    val rowView = RemoteViews(context.packageName, R.layout.widget_category_item)
+    rowView.setTextViewText(R.id.widget_category_name, cat.category)
+    rowView.setTextViewText(R.id.widget_category_amount, formatMoney(Money(cat.amountMinor)))
+    val fillInIntent = Intent().apply { putExtra("extra_destination", "ANALYSIS") }
+    rowView.setOnClickFillInIntent(R.id.widget_category_item_root, fillInIntent)
+    return rowView
+}
+
+class AnalysisWidgetService : RemoteViewsService() {
+    override fun onGetViewFactory(intent: Intent): RemoteViewsFactory {
+        return AnalysisRemoteViewsFactory(applicationContext)
+    }
+}
+
+private class AnalysisRemoteViewsFactory(
+    private val context: Context,
+) : RemoteViewsService.RemoteViewsFactory {
+    private var categories: List<CategorySpending> = emptyList()
+
+    override fun onCreate() {}
+
+    override fun onDataSetChanged() {
+        runBlocking(Dispatchers.IO) {
+            try {
+                val month = YearMonth.now(net.wastu.artha.core.model.AccountingTime.clock)
+                val analysis = BudgetAnalyzer.analyzeMonth(month, widgetSpending(context).transactions)
+                categories = analysis.categories
+            } catch (_: Exception) {}
+        }
+    }
+
+    override fun onDestroy() {
+        categories = emptyList()
+    }
+
+    override fun getCount(): Int = categories.size
+
+    override fun getViewAt(position: Int): RemoteViews? {
+        val cat = categories.getOrNull(position) ?: return null
+        return buildCategoryRowView(context, cat)
+    }
+
+    override fun getLoadingView(): RemoteViews? = null
+
+    override fun getViewTypeCount(): Int = 1
+
+    override fun getItemId(position: Int): Long = position.toLong()
+
+    override fun hasStableIds(): Boolean = true
 }
