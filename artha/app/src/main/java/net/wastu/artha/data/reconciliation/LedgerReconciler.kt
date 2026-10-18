@@ -55,8 +55,15 @@ object LedgerReconciler {
             tx.provider == Provider.GRAB && origin == "grab-wallet-api" &&
             (settled && payload.optString("paymentEvidence") == "settled-charge-history" || legacyGrabCharge && tx.direction == Direction.DEBIT)
         val funding = payload.optBoolean("isWalletFunding") || payload.optBoolean("isPocketTransfer") || internal ||
-            (tx.provider == Provider.JAGO && code in setOf("OTD10", "TFD70") &&
-                listOf("gopay", "ovo", "shopeepay", "top up", "topup").any { it in merchant }) ||
+            (tx.provider == Provider.JAGO && (
+                code in setOf("WTD02", "WTD03", "WTD06", "WTD-AJ-EWALLET") ||
+                payload.optJSONObject("fields")?.optString("f16")?.contains("C058") == true ||
+                payload.optJSONObject("fields")?.optJSONObject("f16")?.optString("code") == "C058" ||
+                ((code in setOf("OTD10", "TFD70") || code.startsWith("WTD")) &&
+                    listOf("gopay", "ovo", "shopeepay", "dana", "linkaja", "dnid", "top up", "topup").any {
+                        it in merchant || it in tx.description.lowercase(Locale.ROOT)
+                    })
+            )) ||
             origin == "grab-wallet-api" && listOf("top up", "topup").any { it in tx.description.lowercase(Locale.ROOT) }
     }
     private fun evidence(t: UnifiedTransaction) = Evidence(t, runCatching { JSONObject(t.rawPayload) }.getOrDefault(JSONObject()))

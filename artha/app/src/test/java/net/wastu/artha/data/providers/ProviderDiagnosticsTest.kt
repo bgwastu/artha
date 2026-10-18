@@ -126,6 +126,17 @@ class ProviderDiagnosticsTest {
         return IngestionCoordinator(RootAccess { true }, { ledger }, listOf(adapter), preferences = preferences) to ledger
     }
 
+    @Test fun obsoleteTokopediaPreferencesArePurged() {
+        val fixture = PreferencesFixture()
+        fixture.values["TOKOPEDIA_status"] = "ERROR"
+        fixture.values["TOKOPEDIA_last_sync_ms"] = 123456L
+        fixture.values["JAGO_status"] = "CONNECTED"
+        ProviderPreferences(fixture.context)
+        assertFalse(fixture.values.containsKey("TOKOPEDIA_status"))
+        assertFalse(fixture.values.containsKey("TOKOPEDIA_last_sync_ms"))
+        assertTrue(fixture.values.containsKey("JAGO_status"))
+    }
+
     private class FixtureLedger : LedgerRepository {
         var rows = emptyList<UnifiedTransaction>()
         override fun observeTransactions() = flowOf(rows)
@@ -139,6 +150,7 @@ class ProviderDiagnosticsTest {
         val values = mutableMapOf<String, Any>()
         private val preferences = proxy<SharedPreferences> { name, args -> when (name) {
             "getString", "getLong", "getBoolean" -> values[args[0]] ?: args[1]
+            "getAll" -> values
             "edit" -> editor()
             else -> error("Unexpected preference call: $name")
         } }

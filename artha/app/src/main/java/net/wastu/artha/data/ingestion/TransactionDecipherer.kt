@@ -87,8 +87,35 @@ object TransactionDecipherer {
                 paymentMethod = "GoPay",
             )
         }
+        // 5. E-Wallet Top-ups (ShopeePay, OVO, DANA, GoPay, LinkAja)
+        val isEWalletTopUp = c in setOf("WTD02", "WTD03", "WTD06", "WTD-AJ-EWALLET") ||
+            (c.startsWith("WTD") && listOf("gopay", "ovo", "shopeepay", "dana", "linkaja", "dnid").any {
+                it in m.lowercase(Locale.ROOT) || it in d.lowercase(Locale.ROOT) || it in n.lowercase(Locale.ROOT)
+            })
+        if (isEWalletTopUp) {
+            val wallet = when {
+                listOf("ovo").any { it in m.lowercase(Locale.ROOT) || it in d.lowercase(Locale.ROOT) || it in n.lowercase(Locale.ROOT) } -> "OVO"
+                listOf("shopeepay", "shopee").any { it in m.lowercase(Locale.ROOT) || it in d.lowercase(Locale.ROOT) } -> "ShopeePay"
+                listOf("dana", "dnid").any { it in m.lowercase(Locale.ROOT) || it in d.lowercase(Locale.ROOT) } -> "DANA"
+                listOf("gopay", "gojek").any { it in m.lowercase(Locale.ROOT) || it in d.lowercase(Locale.ROOT) } -> "GoPay"
+                listOf("linkaja").any { it in m.lowercase(Locale.ROOT) || it in d.lowercase(Locale.ROOT) } -> "LinkAja"
+                m.isNotBlank() -> titleCase(m)
+                d.isNotBlank() -> titleCase(d)
+                else -> "E-Wallet"
+            }
+            val title = if (d.startsWith("Top up", ignoreCase = true) || d.startsWith("Topup", ignoreCase = true)) {
+                titleCase(d)
+            } else {
+                "Top Up $wallet"
+            }
+            return Deciphered(
+                title = title,
+                isQris = false,
+                paymentMethod = "Top Up",
+            )
+        }
 
-        // 5. Term Deposits, Pockets, Cash, Taxes & Interest
+        // 6. Term Deposits, Pockets, Cash, Taxes & Interest
         if (c in setOf("TDD02", "TDC08", "TDC03")) {
             return Deciphered("Term Deposit", isQris = false, paymentMethod = "Savings")
         }
@@ -106,7 +133,7 @@ object TransactionDecipherer {
             return Deciphered("Interest Earned", isQris = false, paymentMethod = "Interest")
         }
 
-        // 6. General Fallback
+        // 7. General Fallback
         val fallback = when {
             d.isNotBlank() -> titleCase(d)
             m.isNotBlank() -> titleCase(m)

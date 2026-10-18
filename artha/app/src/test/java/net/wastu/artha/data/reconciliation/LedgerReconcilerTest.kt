@@ -206,4 +206,21 @@ class LedgerReconcilerTest {
         assertEquals("Main Pocket", fused.pocket?.name)
         assertTrue(fused.rawPayload.contains("groupedTransactions"))
     }
+
+    @Test
+    fun jagoEWalletTopUpsAreIdentifiedAsWalletFunding() {
+        val topUp = UnifiedTransaction(
+            provider = Provider.JAGO,
+            providerTransactionId = "jago:topup-1",
+            direction = Direction.DEBIT,
+            money = Money(100_000_00L),
+            occurredAt = Instant.parse("2026-10-15T01:32:22Z"),
+            description = "Top Up OVO",
+            rawPayload = """{"code":"WTD-AJ-EWALLET","counterpart":"OVO","fields":{"f16":"{\"code\":\"C058\",\"en\":\"Top up\"}"}}""",
+        )
+        val reconciled = LedgerReconciler.reconcileLedger(listOf(topUp))
+        assertEquals(1, reconciled.size)
+        val payload = org.json.JSONObject(reconciled.first().rawPayload)
+        assertTrue(payload.getBoolean("isWalletFunding"))
+    }
 }

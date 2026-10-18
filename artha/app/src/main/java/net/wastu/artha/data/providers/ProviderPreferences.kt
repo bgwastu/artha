@@ -37,6 +37,17 @@ data class ProviderImportWindow(val paymentCount: Int, val earliestMillis: Long?
 
 class ProviderPreferences(context: Context) {
     private val preferences = context.getSharedPreferences("provider_visibility", Context.MODE_PRIVATE)
+
+    init {
+        val obsoleteKeys = preferences.all.keys.filter { it.startsWith("TOKOPEDIA") }
+        if (obsoleteKeys.isNotEmpty()) {
+            preferences.edit {
+                for (key in obsoleteKeys) {
+                    remove(key)
+                }
+            }
+        }
+    }
     private val _enabled = MutableStateFlow(Provider.entries.filter { preferences.getBoolean(it.name, true) }.toSet())
     val enabled = _enabled.asStateFlow()
     private val _importEnabled = MutableStateFlow(Provider.entries.filter { preferences.getBoolean("${it.name}_import", true) }.toSet())

@@ -94,4 +94,38 @@ class TransactionDeciphererTest {
         assertEquals("GoPay", refundCredit.paymentMethod)
         assertFalse(refundCredit.isQris)
     }
+
+    @Test
+    fun jagoEWalletTopUpsAreProperlyDeciphered() {
+        val ovo = TransactionDecipherer.decipher(
+            code = "WTD-AJ-EWALLET",
+            merchantOrCounterpart = "OVO",
+            description = "OVO 082117168239",
+            notes = "grab",
+            direction = Direction.DEBIT,
+        )
+        assertEquals("Top Up OVO", ovo.title)
+        assertEquals("Top Up", ovo.paymentMethod)
+        assertFalse(ovo.isQris)
+
+        val shopee = TransactionDecipherer.decipher(
+            code = "WTD02",
+            merchantOrCounterpart = "ShopeePay",
+            description = "wastu._",
+            notes = "",
+            direction = Direction.DEBIT,
+        )
+        assertEquals("Top Up ShopeePay", shopee.title)
+        assertEquals("Top Up", shopee.paymentMethod)
+
+        val dana = TransactionDecipherer.decipher(
+            code = "WTD06",
+            merchantOrCounterpart = "Dnid Tarxxx",
+            description = "Dnid Tarxxx",
+            notes = "",
+            direction = Direction.DEBIT,
+        )
+        assertEquals("Top Up DANA", dana.title)
+        assertEquals("Top Up", dana.paymentMethod)
+    }
 }

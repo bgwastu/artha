@@ -474,7 +474,7 @@ private fun TransactionList(
     val groupedByDay by produceState<Map<LocalDate, List<UnifiedTransaction>>>(emptyMap(), transactions) {
         value = withContext(Dispatchers.Default) {
             val zone = net.wastu.artha.core.model.AccountingTime.zone
-            transactions.groupBy { LocalDate.ofInstant(it.occurredAt, zone) }
+            transactions.groupBy { it.occurredAt.atZone(zone).toLocalDate() }
         }
     }
 
