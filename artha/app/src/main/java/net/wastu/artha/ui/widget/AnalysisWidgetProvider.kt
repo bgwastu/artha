@@ -92,7 +92,7 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
                 views.setViewVisibility(R.id.widget_details, if (detailed) View.VISIBLE else View.GONE)
                 // The current month is incomplete. Compare amounts with an explicitly full prior month.
                 views.setViewVisibility(R.id.widget_delta_text, if (amounts.previous == null) View.GONE else View.VISIBLE)
-                views.setTextViewText(R.id.widget_delta_text, amounts.previous?.let { "Previous full month $it" }.orEmpty())
+                views.setTextViewText(R.id.widget_delta_text, amounts.previous?.let { "Last month $it" }.orEmpty())
                 val topCats = analysis.categories.take(3)
                 views.setViewVisibility(R.id.widget_categories_container, if (topCats.isEmpty()) View.GONE else View.VISIBLE)
                 views.setViewVisibility(R.id.widget_empty_text, if (topCats.isEmpty() && detailed) View.VISIBLE else View.GONE)

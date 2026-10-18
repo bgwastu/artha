@@ -6,51 +6,52 @@
     android:layout_height="match_parent"
     android:background="@drawable/bg_widget_analysis"
     android:orientation="vertical"
-    android:padding="16dp"
+    android:padding="12dp"
     tools:ignore="HardcodedText">
 
-    <TextView
-        android:id="@+id/widget_month_title"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text=""
-        android:textColor="@color/widget_text_primary"
-        android:textSize="15sp"
-        android:textStyle="bold" />
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
 
-    <TextView
-        android:id="@+id/widget_payment_scope"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:text="Spending to date"
-        android:textColor="@color/widget_text_secondary"
-        android:textSize="12sp" />
+        <TextView
+            android:id="@+id/widget_month_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="@color/widget_text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="Loading"
+            android:textColor="@color/widget_text_secondary"
+            android:textSize="11sp" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/widget_total_amount"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:text=""
+        android:layout_marginTop="4dp"
         android:textColor="@color/widget_text_primary"
-        android:textSize="24sp"
+        android:textSize="22sp"
         android:textStyle="bold" />
-
-    <TextView
-        android:id="@+id/widget_status"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:text="Loading saved payments"
-        android:textColor="@color/widget_text_secondary"
-        android:textSize="12sp" />
 
     <LinearLayout
         android:id="@+id/widget_details"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="2dp"
         android:orientation="vertical"
         android:visibility="gone">
 
@@ -58,7 +59,8 @@
             android:id="@+id/widget_delta_text"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text=""
+            android:ellipsize="end"
+            android:maxLines="1"
             android:textColor="@color/widget_text_secondary"
             android:textSize="12sp" />
 
@@ -66,14 +68,15 @@
             android:id="@+id/widget_categories_container"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
+            android:layout_marginTop="6dp"
             android:orientation="vertical">
 
             <LinearLayout
                 android:id="@+id/widget_row_cat1"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="3dp"
+                android:gravity="center_vertical"
                 android:orientation="horizontal">
 
                 <TextView
@@ -81,7 +84,8 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text=""
+                    android:ellipsize="end"
+                    android:maxLines="1"
                     android:textColor="@color/widget_text_secondary"
                     android:textSize="12sp" />
 
@@ -89,7 +93,7 @@
                     android:id="@+id/widget_cat1_amount"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text=""
+                    android:layout_marginStart="8dp"
                     android:textColor="@color/widget_text_primary"
                     android:textSize="12sp"
                     android:textStyle="bold" />
@@ -99,7 +103,8 @@
                 android:id="@+id/widget_row_cat2"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="3dp"
+                android:gravity="center_vertical"
                 android:orientation="horizontal">
 
                 <TextView
@@ -107,7 +112,8 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text=""
+                    android:ellipsize="end"
+                    android:maxLines="1"
                     android:textColor="@color/widget_text_secondary"
                     android:textSize="12sp" />
 
@@ -115,7 +121,7 @@
                     android:id="@+id/widget_cat2_amount"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text=""
+                    android:layout_marginStart="8dp"
                     android:textColor="@color/widget_text_primary"
                     android:textSize="12sp"
                     android:textStyle="bold" />
@@ -125,7 +131,8 @@
                 android:id="@+id/widget_row_cat3"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="3dp"
+                android:gravity="center_vertical"
                 android:orientation="horizontal">
 
                 <TextView
@@ -133,7 +140,8 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text=""
+                    android:ellipsize="end"
+                    android:maxLines="1"
                     android:textColor="@color/widget_text_secondary"
                     android:textSize="12sp" />
 
@@ -141,7 +149,7 @@
                     android:id="@+id/widget_cat3_amount"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text=""
+                    android:layout_marginStart="8dp"
                     android:textColor="@color/widget_text_primary"
                     android:textSize="12sp"
                     android:textStyle="bold" />
@@ -153,8 +161,7 @@
         android:id="@+id/widget_empty_text"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text=""
+        android:layout_marginTop="6dp"
         android:textColor="@color/widget_text_secondary"
         android:textSize="12sp"
         android:visibility="gone" />
