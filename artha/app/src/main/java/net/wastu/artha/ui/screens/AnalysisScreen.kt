@@ -142,12 +142,18 @@ fun AnalysisScreen(
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("Analysis is turned off", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Enable it in Settings to see categories and monthly insights.",
+                "Analysis is turned off",
+                style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "Enable it in Settings to see categories and monthly insights",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
             TextButton(onClick = { viewModel.setTargetDestination("SETTINGS") }, modifier = Modifier.padding(top = 12.dp)) {
                 Text("Open Settings")

@@ -193,7 +193,7 @@ fun ProvidersScreen(
                 val filled = config != null && config.baseUrl.isNotBlank() && config.apiKey.isNotBlank() && config.model.isNotBlank()
                 val summary = when {
                     !enabled -> "Off"
-                    !filled -> "On · not configured"
+                    !filled -> "On - not configured"
                     else -> "On"
                 }
                 SettingsLink("Analysis", summary, Icons.Default.SettingsSuggest) {
@@ -205,7 +205,7 @@ fun ProvidersScreen(
             item {
                 SettingsLink(
                     "Export transactions",
-                    if (exporting) "Exporting…" else null,
+                    if (exporting) "Exporting..." else null,
                     Icons.Default.FileDownload,
                 ) {
                     if (exporting) return@SettingsLink
@@ -215,7 +215,7 @@ fun ProvidersScreen(
             item {
                 SettingsLink(
                     "Import transactions",
-                    if (importingFile) "Importing…" else null,
+                    if (importingFile) "Importing..." else null,
                     Icons.Default.FileUpload,
                 ) {
                     if (importingFile) return@SettingsLink

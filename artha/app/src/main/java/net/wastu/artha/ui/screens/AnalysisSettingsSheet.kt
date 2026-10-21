@@ -100,7 +100,7 @@ fun AnalysisSettingsSheet(
             }
             if (!analysisEnabled) {
                 Text(
-                    "Turn on to use categories, AI labeling, and monthly insights.",
+                    "Turn on to use categories, AI labeling, and monthly insights",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 16.dp),
