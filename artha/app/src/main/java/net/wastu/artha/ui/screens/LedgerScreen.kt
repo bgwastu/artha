@@ -83,6 +83,7 @@ import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.ui.LedgerState
 import net.wastu.artha.ui.formatMoney
 import net.wastu.artha.ui.paymentRowAmount
+import net.wastu.artha.ui.transactionHumanLine
 import net.wastu.artha.ui.formatTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -172,7 +173,6 @@ fun LedgerScreen(
     onTransaction: (UnifiedTransaction) -> Unit,
     onRetry: () -> Unit,
     onImportHistory: (() -> Unit)? = null,
-    onRestoreBackup: (() -> Unit)? = null,
     showFilter: Boolean = false,
     onDismissFilter: () -> Unit = {},
     viewModel: ArthaViewModel? = null,
@@ -209,7 +209,6 @@ fun LedgerScreen(
             activeFilters = active, onClearFilters = ::clearAll,
             emptyTitle = if (active.isNotEmpty()) "No matching transactions" else "No saved payments",
             onImportHistory = if (active.isEmpty()) onImportHistory else null,
-            onRestoreBackup = if (active.isEmpty()) onRestoreBackup else null,
         )
     }
     if (showFilter) {
@@ -352,6 +351,7 @@ fun SearchTransactionsScreen(
             transactions.map { transaction ->
                 ensureActive()
                 SearchEntry(transaction, listOf(
+                    transactionHumanLine(transaction),
                     transaction.description,
                     transaction.provider.displayName,
                     transaction.cardLast4.orEmpty(),
@@ -459,7 +459,6 @@ private fun TransactionList(
     emptyTitle: String? = null,
     resultCount: Int? = null,
     onImportHistory: (() -> Unit)? = null,
-    onRestoreBackup: (() -> Unit)? = null,
 ) {
     val listState = rememberLazyListState()
     var previousResetKey by rememberSaveable { mutableStateOf(resetKey?.toString()) }
@@ -515,7 +514,6 @@ private fun TransactionList(
                 )
                 FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.Center) {
                     onImportHistory?.let { action -> TextButton(onClick = action) { Text("Import history") } }
-                    onRestoreBackup?.let { action -> TextButton(onClick = action) { Text("Restore backup") } }
                 }
             }
         }
@@ -627,6 +625,7 @@ fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlig
         transaction.description.startsWith("Pocket Transfer:", ignoreCase = true) -> "Transfer"
         else -> null
     }
+    val title = transactionHumanLine(transaction)
     val amount = paymentRowAmount(transaction)
     val amountColor = when {
         !credit && reversed -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -638,7 +637,7 @@ fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlig
     }
     val snippet = remember(transaction, highlightQuery, payloadValues) {
         if (highlightQuery.isBlank()) null else (payloadValues + transaction.provider.displayName + transaction.cardLast4.orEmpty())
-            .firstOrNull { it.contains(highlightQuery, true) && !transaction.description.contains(it, true) }
+            .firstOrNull { it.contains(highlightQuery, true) && !title.contains(it, true) }
     }
     val fontScale = LocalDensity.current.fontScale
     Surface(onClick = onClick, color = MaterialTheme.colorScheme.surface, modifier = Modifier.semantics { stateDescription = status ?: if (credit) "Incoming payment" else "Outgoing payment" }) {
@@ -650,14 +649,14 @@ fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlig
                     val stackAmount = fontScale >= 1.3f || maxWidth < 300.dp || amount.length > 16
                     if (stackAmount) {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            HighlightedText(transaction.description, highlightQuery, MaterialTheme.typography.bodyLarge,
+                            HighlightedText(title, highlightQuery, MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Medium, maxLines = 2)
                             HighlightedText(amount, highlightQuery, MaterialTheme.typography.titleSmall,
                                 color = amountColor,
                                 fontWeight = FontWeight.SemiBold, maxLines = Int.MAX_VALUE)
                         }
                     } else Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        HighlightedText(transaction.description, highlightQuery, MaterialTheme.typography.bodyLarge,
+                        HighlightedText(title, highlightQuery, MaterialTheme.typography.bodyLarge,
                             modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium, maxLines = 2)
                         HighlightedText(amount, highlightQuery, MaterialTheme.typography.titleSmall,
                                 color = amountColor, fontWeight = FontWeight.SemiBold)

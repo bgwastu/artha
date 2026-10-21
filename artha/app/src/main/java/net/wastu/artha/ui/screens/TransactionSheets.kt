@@ -75,6 +75,7 @@ import net.wastu.artha.ui.categoryIconFor
 import net.wastu.artha.ui.formatDate
 import net.wastu.artha.ui.formatMoney
 import net.wastu.artha.ui.paymentRowAmount
+import net.wastu.artha.ui.transactionHumanLine
 import net.wastu.artha.ui.originalPaymentMoney
 import net.wastu.artha.ui.theme.expenseColor
 import net.wastu.artha.ui.theme.incomeColor
@@ -217,6 +218,11 @@ private fun TransactionDetailsBody(
     val showOrder = items != null && items.length() > 0
     val credit = record.direction == Direction.CREDIT
     val isReversal = record.isReversal || record.description.contains("(Reversed)", ignoreCase = true)
+    val humanTitle = remember(record.key, record.description, record.rawPayload) { transactionHumanLine(record) }
+    val shopLabel = payload?.detailText("shopName") ?: payload?.detailText("restaurantName")
+    val showShopInItems = showOrder && shopLabel != null && !humanTitle.startsWith(shopLabel, ignoreCase = true)
+    val paymentLabel = payload?.detailText("sourcePaymentMethod") ?: payload?.detailText("paymentMethod")
+    val showCounterpart = counterpart != null && !humanTitle.contains(counterpart, ignoreCase = true)
 
     if (state.editor == "category") {
         val selectCategory: (String) -> Unit = { category ->
@@ -282,7 +288,7 @@ private fun TransactionDetailsBody(
                 transactionAccountingLabel(record)?.let { Text(it, style = MaterialTheme.typography.labelLarge) }
                 if (!credit && isReversal) DetailRow("Original charge", formatMoney(originalPaymentMoney(record)))
                 state.savedFeedback?.let { SaveFeedback(it, false) }
-                Text(record.description.trim(), style = MaterialTheme.typography.titleLarge)
+                Text(humanTitle, style = MaterialTheme.typography.titleLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     DetailBadge(
                         record.provider.displayName,
@@ -409,8 +415,8 @@ private fun TransactionDetailsBody(
 
                 if (showOrder) {
                     DetailCard("Items") {
-                        (payload?.detailText("shopName") ?: payload?.detailText("restaurantName"))?.let {
-                            Text(it, style = MaterialTheme.typography.titleSmall)
+                        if (showShopInItems) {
+                            Text(shopLabel.orEmpty(), style = MaterialTheme.typography.titleSmall)
                         }
                         for (index in 0 until (items?.length() ?: 0)) {
                             val item = items?.optJSONObject(index) ?: continue
@@ -435,8 +441,8 @@ private fun TransactionDetailsBody(
                     }
                 }
 
-                payload?.detailText("paymentMethod")?.let { DetailRow("Payment method", it) }
-                counterpart?.let { DetailRow("Counterpart", it) }
+                paymentLabel?.let { DetailRow("Payment method", it) }
+                if (showCounterpart) counterpart?.let { DetailRow("Counterpart", it) }
                 record.pocket?.let { DetailRow("Pocket", it.name) }
                 if (notes != null && !showOrder) DetailRow("Source note", notes)
 

@@ -14,6 +14,23 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TransactionPresentationTest {
+    @Test fun humanLineUsesAsciiDashAndCollapsesDuplicateSegments() {
+        val shopee = transaction("food").copy(
+            provider = Provider.SHOPEE,
+            description = "Mondja · Nasi Goreng (+1 more)",
+            rawPayload = """{"shopName":"Mondja","items":[{"name":"Nasi Goreng"},{"name":"Es Teh"}]}""",
+        )
+        assertEquals("Mondja - Nasi Goreng (+1 more)", transactionHumanLine(shopee))
+        val ride = transaction("ride").copy(
+            provider = Provider.GRAB,
+            description = "GrabCar: Senayan to Kuningan",
+            rawPayload = """{"serviceTier":"GrabCar","pickupLocation":"Senayan","dropoffLocation":"Kuningan"}""",
+        )
+        assertEquals("GrabCar - Senayan to Kuningan", transactionHumanLine(ride))
+        val reversed = transaction("rev").copy(description = "Warung Sari (Reversed)")
+        assertEquals("Warung Sari", transactionHumanLine(reversed))
+    }
+
     @org.junit.Test fun reversedPaymentShowsZeroButOriginalChargeRemainsAvailable() {
         val tx = net.wastu.artha.core.model.UnifiedTransaction(net.wastu.artha.core.model.Provider.JAGO, "fixture",
             net.wastu.artha.core.model.Direction.DEBIT, net.wastu.artha.core.model.Money(125000),

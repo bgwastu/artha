@@ -17,6 +17,7 @@ import net.wastu.artha.R
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.ui.paymentRowAmount
+import net.wastu.artha.ui.transactionHumanLine
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -156,10 +157,11 @@ internal fun buildTransactionItemView(
     val views = RemoteViews(context.packageName, R.layout.widget_transaction_item)
 
     views.setImageViewResource(R.id.widget_item_icon, tx.provider.iconRes)
-    val title = if (tx.isQris && !tx.description.contains("QRIS", ignoreCase = true)) {
-        "[QRIS] ${tx.description}"
+    val line = transactionHumanLine(tx)
+    val title = if (tx.isQris && !line.contains("QRIS", ignoreCase = true)) {
+        "[QRIS] $line"
     } else {
-        tx.description
+        line
     }
     views.setTextViewText(R.id.widget_item_description, title)
 
