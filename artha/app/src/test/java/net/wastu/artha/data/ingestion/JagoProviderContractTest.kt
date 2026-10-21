@@ -51,6 +51,23 @@ class JagoProviderContractTest {
         assertEquals(SOURCE_INSTANT, row.occurredAt)
     }
 
+    @Test fun unserializableHiveFieldMapKeepsBankRowWithoutFieldsPayload() {
+        val row = parse(fields().apply { put("f50", byteArrayOf(1, 2, 3)) }).single()
+        assertEquals("jago:fictional-bank-01:$SOURCE_DATE", row.providerTransactionId)
+        assertEquals(2_500_000L, row.money.amountMinor)
+        val payload = JSONObject(row.rawPayload)
+        assertEquals("jago-local-hive", payload.getString("origin"))
+        assertEquals("Fictional note", payload.getString("notes"))
+        assertFalse(payload.has("fields"))
+    }
+
+    @Test fun malformedRowSummaryIncludesFirstFailureClassAndMessage() {
+        val partial = partial { parse(fields(), fields().apply { put("f10", "UNKNOWN") }) }
+        assertEquals(1, partial.transactions.size)
+        assertTrue(partial.message.orEmpty().contains("1 malformed bank rows"))
+        assertTrue(partial.message.orEmpty().contains("IllegalArgumentException"))
+    }
+
     @Test fun malformedFirstObservationCannotShadowTheValidDuplicate() {
         val malformed = fields().apply { put("f3", BigDecimal("25.001")) }
         val partial = partial { parse(malformed, fields(), fields()) }
@@ -87,6 +104,12 @@ class JagoProviderContractTest {
             assertEquals(1, partial.transactions.size)
             assertEquals(2_500_000L, partial.transactions.single().money.amountMinor)
         }
+    }
+
+    @Test fun hiveIdrMinorUnitScaleIsExplicitNotJvmCurrency() {
+        assertEquals(2, JagoHiveMinorUnits.minorUnitScale("IDR"))
+        assertNull(JagoHiveMinorUnits.minorUnitScale("JPY"))
+        assertEquals(2_500_000L, parse(fields().apply { put("f41", "IDR") }).single().money.amountMinor)
     }
 
     @Test fun currencyUsesTheRowFirstAndOnlyAnExplicitPocketFallback() {

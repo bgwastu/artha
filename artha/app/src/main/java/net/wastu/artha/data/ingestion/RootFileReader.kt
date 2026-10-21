@@ -82,6 +82,20 @@ class RootFileReader(internal val context: Context) {
         } finally { directory.deleteRecursively() }
     }
 
+    suspend fun lastModifiedMillis(path: String): Long? = withContext(Dispatchers.IO) {
+        validate(path)
+        Shell.Builder.create().setContext(context).setTimeout(10).build("su", "-M", "-c", "/system/bin/sh").use { shell ->
+            if (!shell.isRoot) return@withContext null
+            val output = mutableListOf<String>()
+            val result = shell.newJob().to(output).add("if [ -f '$path' ]; then stat -c %Y '$path'; else echo MISSING; fi").exec()
+            if (!result.isSuccess) return@withContext null
+            when (val line = output.firstOrNull()?.trim()) {
+                null, "", "MISSING" -> null
+                else -> line.toLongOrNull()?.times(1000L)
+            }
+        }
+    }
+
     suspend fun list(dir: String): List<String> = withContext(Dispatchers.IO) {
         validate(dir)
         Shell.Builder.create().setContext(context).setTimeout(15).build("su", "-M", "-c", "/system/bin/sh").use { shell ->
