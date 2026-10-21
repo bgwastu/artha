@@ -109,6 +109,21 @@ class GojekProviderContractTest {
         assertTrue(GojekProviderParser.enrich(row, detail, emptyList()).isQris)
     }
 
+    @Test fun qrisDetailEnrichmentAddsMerchantPaymentDetailsAndTitle() {
+        val row = requireNotNull(GojekProviderParser.payment(payment().put("service_type", "COLLECT").put("description", "GoPay Payment")))
+        assertTrue(GojekProviderParser.shouldFetchPaymentDetail(row))
+        val detail = payment().put("detail_view_items", JSONArray()
+            .put(JSONObject().put("title", "Merchant name").put("value", "Kopi Kenangan"))
+            .put(JSONObject().put("title", "Payment method").put("value", "QRIS")))
+        val enriched = GojekProviderParser.enrich(row, detail, emptyList())
+        assertEquals("QRIS Kopi Kenangan", enriched.description)
+        assertTrue(enriched.isQris)
+        val payload = JSONObject(enriched.rawPayload)
+        assertEquals("Kopi Kenangan", payload.getString("merchantName"))
+        assertEquals("QRIS", payload.getString("paymentMethod"))
+        assertEquals(2, payload.getJSONArray("detailViewItems").length())
+    }
+
     @Test fun groupedPaginationPreservesValidRowsBesideMalformedGroupsAndEntries() {
         val data = JSONObject().put("in_progress", JSONArray().put(payment().put("status", "PENDING")))
             .put("completed", JSONArray().put(JSONObject().put("items", JSONArray().put(payment()).put("broken")))

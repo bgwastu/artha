@@ -214,8 +214,10 @@ private fun TransactionDetailsBody(
     val counterpart = payload?.detailText("counterpart")
     val items = payload?.optJSONArray("items")
     val grouped = payload?.optJSONArray("groupedTransactions")
+    val detailViewItems = payload?.optJSONArray("detailViewItems")
     val showRoute = !pickup.isNullOrBlank() && !dropoff.isNullOrBlank()
     val showOrder = items != null && items.length() > 0
+    val showGoPayDetails = detailViewItems != null && detailViewItems.length() > 0 && !showRoute && !showOrder
     val credit = record.direction == Direction.CREDIT
     val isReversal = record.isReversal || record.description.contains("(Reversed)", ignoreCase = true)
     val humanTitle = remember(record.key, record.description, record.rawPayload) { transactionHumanLine(record) }
@@ -436,6 +438,21 @@ private fun TransactionDetailsBody(
                                     Text("Order Note", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text(it, style = MaterialTheme.typography.bodyMedium)
                                 }
+                            }
+                        }
+                    }
+                }
+
+                if (showGoPayDetails) {
+                    DetailCard("Payment details") {
+                        for (index in 0 until detailViewItems!!.length()) {
+                            val row = detailViewItems.optJSONObject(index) ?: continue
+                            val label = row.detailText("title") ?: row.detailText("label")
+                            val value = row.detailText("value") ?: continue
+                            if (label != null) {
+                                DetailRow(label, value)
+                            } else {
+                                Text(value, style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }

@@ -15,6 +15,15 @@ internal fun transactionHumanLine(transaction: UnifiedTransaction): String {
 }
 
 private fun lineFromPayload(payload: JSONObject): String? {
+    val merchant = payload.optString("merchantName").ifBlank { payload.optString("counterpart") }
+    if (merchant.isNotBlank()) {
+        return if (payload.optBoolean("isQris") && !merchant.contains("QRIS", ignoreCase = true)) {
+            "QRIS$HUMAN_LINE_SEP$merchant"
+        } else {
+            merchant
+        }
+    }
+    payload.optString("orderDisplayDescription").trim().takeIf { it.isNotBlank() }?.let { return it }
     val shop = payload.optString("shopName").ifBlank { payload.optString("restaurantName") }
     val items = payload.optJSONArray("items")
     if (shop.isNotBlank() || (items?.length() ?: 0) > 0) {

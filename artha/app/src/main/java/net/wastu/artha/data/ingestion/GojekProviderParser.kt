@@ -30,6 +30,9 @@ import org.json.JSONObject
 /** Contracts verified against Gojek's native cache and installed Retrofit/session classes. */
 internal object GojekProviderParser {
     const val HISTORY_URL = "https://customer.gopayapi.com/v2/users/order-history?country_code=ID"
+    private val DETAIL_FETCH_SERVICES = setOf(
+        "GORIDE", "GOCAR", "GOFOOD", "GOSEND", "GOBLUEBIRD", "COLLECT", "GOPAY_MERCHANT", "MERCHANT_PAYMENT",
+    )
     const val ORDERS_URL = "https://api.gojekapi.com/orderbff/v1/customer/card/history?limit=20"
     const val MAX_BODY_BYTES = 4 * 1024 * 1024
 
@@ -264,6 +267,14 @@ internal object GojekProviderParser {
         }
     }
 
+    fun shouldFetchPaymentDetail(transaction: UnifiedTransaction): Boolean {
+        val payload = runCatching { JSONObject(transaction.rawPayload) }.getOrNull()
+        val service = payload?.optString("serviceTier").orEmpty()
+        if (transaction.isQris || service in DETAIL_FETCH_SERVICES) return true
+        val description = transaction.description.trim()
+        return description.isBlank() || description.equals("GoPay Payment", ignoreCase = true)
+    }
+
     /** Details may enrich an existing payment only after its financial fields agree exactly. */
     fun enrich(transaction: UnifiedTransaction, detail: JSONObject, orders: List<NativeOrder>): UnifiedTransaction {
         val checked = payment(JSONObject(detail.toString()).put("description", transaction.description))
@@ -284,7 +295,75 @@ internal object GojekProviderParser {
             value.equals("QRIS", true) || value.equals("Pembayaran QRIS", true)
         }
         payload.put("isQris", qris)
-        return transaction.copy(rawPayload = payload.toString(), isQris = qris)
+        mergeDetailViewItems(payload, values, matches.isEmpty())
+        val merchant = payload.optString("merchantName").takeIf { it.isNotBlank() }
+        val display = payload.optString("orderDisplayDescription").takeIf { it.isNotBlank() }
+        val description = when {
+            merchant != null -> gopayDisplayDescription(transaction, merchant, qris)
+            display != null && transaction.description.equals("GoPay Payment", ignoreCase = true) -> display
+            else -> transaction.description
+        }
+        return transaction.copy(description = description, rawPayload = payload.toString(), isQris = qris)
+    }
+
+    private fun gopayDisplayDescription(transaction: UnifiedTransaction, merchant: String, qris: Boolean): String {
+        val trimmed = merchant.trim()
+        if (!qris) return trimmed
+        return if (trimmed.contains("QRIS", ignoreCase = true)) trimmed else "QRIS $trimmed"
+    }
+
+    internal fun mergeDetailViewItems(payload: JSONObject, items: JSONArray, includeMerchant: Boolean) {
+        val copied = JSONArray()
+        for (index in 0 until items.length()) {
+            items.optJSONObject(index)?.let { copied.put(JSONObject(it.toString())) }
+        }
+        if (copied.length() > 0) payload.put("detailViewItems", copied)
+        detailValue(items, "payment method", "metode pembayaran", "payment method")?.let { method ->
+            val current = payload.optString("paymentMethod")
+            if (current.isBlank() || current.equals("GoPay", ignoreCase = true)) payload.put("paymentMethod", method)
+        }
+        if (!includeMerchant) return
+        merchantFromDetailItems(items)?.let { merchant ->
+            payload.put("merchantName", merchant)
+            if (payload.optString("counterpart").isBlank()) payload.put("counterpart", merchant)
+        }
+    }
+
+    private fun merchantFromDetailItems(items: JSONArray): String? {
+        for (index in 0 until items.length()) {
+            val row = items.optJSONObject(index) ?: continue
+            val title = row.optString("title").ifBlank { row.optString("label") }.trim()
+            val value = row.optString("value").trim()
+            if (value.isBlank() || isDetailNoise(value)) continue
+            if (title.contains("merchant", true) || title.contains("toko", true) ||
+                title.contains("nama", true) || title.contains("store", true)) {
+                return value
+            }
+        }
+        for (index in 0 until items.length()) {
+            val value = items.optJSONObject(index)?.optString("value")?.trim().orEmpty()
+            if (value.isNotBlank() && !isDetailNoise(value)) return value
+        }
+        return null
+    }
+
+    private fun detailValue(items: JSONArray, vararg titleHints: String): String? {
+        for (index in 0 until items.length()) {
+            val row = items.optJSONObject(index) ?: continue
+            val title = row.optString("title").ifBlank { row.optString("label") }.trim()
+            if (titleHints.none { hint -> title.contains(hint, ignoreCase = true) }) continue
+            val value = row.optString("value").trim()
+            if (value.isNotBlank()) return value
+        }
+        return null
+    }
+
+    private fun isDetailNoise(value: String): Boolean {
+        val normalized = value.trim()
+        if (normalized.equals("QRIS", true) || normalized.equals("Pembayaran QRIS", true)) return true
+        if (normalized.equals("GoPay", true) || normalized.equals("GOPAY", true)) return true
+        if (normalized.equals("COMPLETED", true) || normalized.equals("SUCCESS", true)) return true
+        return false
     }
 
     fun preferences(bytes: ByteArray): Map<String, String> {
