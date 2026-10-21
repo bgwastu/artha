@@ -86,6 +86,21 @@ class GrabProviderContractTest {
         failed { GrabProviderParser.receiptIndices(rides, limit = -1) }
     }
 
+    @Test fun rateLimitRetryDelayHonorsRetryAfterHeader() {
+        assertEquals(60L, GrabOrderReader.rateLimitRetryDelaySeconds("120"))
+        assertEquals(5L, GrabOrderReader.rateLimitRetryDelaySeconds(null))
+        assertEquals(1L, GrabOrderReader.rateLimitRetryDelaySeconds("0"))
+    }
+
+    @Test fun http429MapsToRateLimitedWithOptionalRetryAfter() {
+        val withoutRetry = assertThrows(ProviderReadException::class.java) { requireHttpSuccess(429, "Grab") }
+        assertEquals(net.wastu.artha.data.providers.AccountStatus.RATE_LIMITED, withoutRetry.status)
+        assertTrue(withoutRetry.message!!.contains("429"))
+        val withRetry = assertThrows(ProviderReadException::class.java) { requireHttpSuccess(429, "Grab", "120") }
+        assertEquals(net.wastu.artha.data.providers.AccountStatus.RATE_LIMITED, withRetry.status)
+        assertTrue(withRetry.message!!.contains("120"))
+    }
+
     @Test fun tricklingResponseCannotResetTheTotalRequestDeadline() = runBlocking {
         var now = 0L
         var reads = 0

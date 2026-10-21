@@ -20,6 +20,7 @@ import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 import javax.xml.parsers.DocumentBuilderFactory
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -36,6 +37,8 @@ internal class GrabOrderReader(
     private val files: RootFileReader,
     private val installTimeOverride: Long? = null,
 ) {
+    private var receiptParallelism = 3
+
     suspend fun transactions(): List<UnifiedTransaction> = withContext(Dispatchers.IO) {
         val token = readSessionToken()
         val rows = ImportRows()
@@ -73,10 +76,11 @@ internal class GrabOrderReader(
             var newReceiptsCount = 0
             // Bound both active requests and coroutine allocation, even if the source
             // returns a large recent window. Canceled entries do not consume receipts.
-            for (batchStart in 0 until rides.length() step 3) {
+            val batchSize = receiptParallelism.coerceIn(1, 3)
+            for (batchStart in 0 until rides.length() step batchSize) {
                 coroutineContext.ensureActive()
                 val results = kotlinx.coroutines.coroutineScope {
-                    (batchStart until minOf(batchStart + 3, rides.length())).map { index -> async {
+                    (batchStart until minOf(batchStart + batchSize, rides.length())).map { index -> async {
                         try {
                             val ride = rides.getJSONObject(index)
                             var receipt: JSONObject? = null
@@ -161,7 +165,7 @@ internal class GrabOrderReader(
         } catch (_: Exception) {}
     }
 
-    private suspend fun request(token: String, path: String): JSONObject {
+    private suspend fun request(token: String, path: String, allowRateLimitRetry: Boolean = true): JSONObject {
         kotlin.coroutines.coroutineContext.ensureActive()
         require(path.startsWith("/api/passenger/") && !path.contains(".."))
         val deadlineNanos = System.nanoTime() + 20_000_000_000L
@@ -173,7 +177,15 @@ internal class GrabOrderReader(
             setRequestProperty("X-Grab-id-ServiceId", "PASSENGER"); setRequestProperty("Accept", "application/json")
         }
         try {
-            requireHttpSuccess(connection.responseCode, "Grab")
+            val code = connection.responseCode
+            if (code == 429 && allowRateLimitRetry) {
+                receiptParallelism = 1
+                val retryAfter = rateLimitRetryDelaySeconds(connection.getHeaderField("Retry-After"))
+                delay(retryAfter * 1_000L)
+                connection.disconnect()
+                return request(token, path, allowRateLimitRetry = false)
+            }
+            requireHttpSuccess(code, "Grab", connection.getHeaderField("Retry-After"))
             val bytes = connection.inputStream.use { input ->
                 readResponse(input, deadlineNanos, prepareRead = { connection.readTimeout = it })
             }
@@ -182,6 +194,9 @@ internal class GrabOrderReader(
     }
 
     companion object {
+        internal fun rateLimitRetryDelaySeconds(retryAfterHeader: String?): Long =
+            retryAfterHeader?.trim()?.toLongOrNull()?.coerceIn(1L, 60L) ?: 5L
+
         internal suspend fun readResponse(
             input: InputStream,
             deadlineNanos: Long,

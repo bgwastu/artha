@@ -12,6 +12,7 @@ enum class AccountStatus {
     CONNECTED,
     NEEDS_LOGIN,
     APP_NOT_INSTALLED,
+    RATE_LIMITED,
     ERROR,
 }
 
@@ -96,7 +97,11 @@ class ProviderPreferences(context: Context) {
     fun isStale(provider: Provider, now: Long = System.currentTimeMillis()): Boolean {
         val state = diagnostics.value[provider] ?: return true
         val last = state.lastAttemptEpochMillis ?: return true
-        val window = if (state.accountStatus in setOf(AccountStatus.ERROR, AccountStatus.NEEDS_LOGIN, AccountStatus.APP_NOT_INSTALLED)) 5 * 60_000 else 15 * 60_000
+        val window = when (state.accountStatus) {
+            AccountStatus.RATE_LIMITED -> 30 * 60_000
+            AccountStatus.ERROR, AccountStatus.NEEDS_LOGIN, AccountStatus.APP_NOT_INSTALLED -> 5 * 60_000
+            else -> 15 * 60_000
+        }
         return now < last || now - last >= window
     }
 

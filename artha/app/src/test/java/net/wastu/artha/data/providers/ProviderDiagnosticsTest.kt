@@ -126,6 +126,21 @@ class ProviderDiagnosticsTest {
         return IngestionCoordinator(RootAccess { true }, { ledger }, listOf(adapter), preferences = preferences) to ledger
     }
 
+    @Test fun rateLimitedProviderUsesThirtyMinuteAutomaticBackoff() {
+        val fixture = PreferencesFixture()
+        val attemptedAt = 1_000_000L
+        fixture.values["GRAB_last_attempt_ms"] = attemptedAt
+        fixture.values["GRAB_status"] = AccountStatus.RATE_LIMITED.name
+        fixture.values["GRAB_last_error"] = "Grab rate-limited (HTTP 429)."
+        val preferences = ProviderPreferences(fixture.context)
+        assertFalse(preferences.isStale(Provider.GRAB, attemptedAt + 29 * 60_000))
+        assertTrue(preferences.isStale(Provider.GRAB, attemptedAt + 30 * 60_000))
+        fixture.values["GRAB_status"] = AccountStatus.ERROR.name
+        val errorState = ProviderPreferences(fixture.context)
+        assertFalse(errorState.isStale(Provider.GRAB, attemptedAt + 4 * 60_000))
+        assertTrue(errorState.isStale(Provider.GRAB, attemptedAt + 5 * 60_000))
+    }
+
     @Test fun obsoleteTokopediaPreferencesArePurged() {
         val fixture = PreferencesFixture()
         fixture.values["TOKOPEDIA_status"] = "ERROR"
