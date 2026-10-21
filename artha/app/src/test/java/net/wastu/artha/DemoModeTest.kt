@@ -87,7 +87,6 @@ class DemoModeTest {
             assertEquals(samplePayments(), model.allTransactions.value)
             assertFalse(model.analysisSnapshot.value.monthlySummaries["2026-10:research"].isNullOrBlank())
             assertNull(model.analysisStore)
-            assertNull(model.driveSyncManager)
             assertEquals("", model.analysisSnapshot.value.aiConfig.apiKey)
         } finally {
             store.clear()

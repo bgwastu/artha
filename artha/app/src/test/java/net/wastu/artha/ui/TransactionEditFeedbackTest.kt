@@ -23,7 +23,7 @@ import kotlinx.coroutines.test.setMain
 import net.wastu.artha.core.model.*
 import net.wastu.artha.core.root.RootAccess
 import net.wastu.artha.data.analysis.*
-import net.wastu.artha.data.sync.SyncMerger
+import net.wastu.artha.data.analysis.AnalysisSyncMerger
 import net.wastu.artha.ui.screens.linkedRecordsExplanation
 import net.wastu.artha.ui.screens.linkedSourceRole
 import net.wastu.artha.ui.screens.transactionAccountingLabel
@@ -126,7 +126,7 @@ class TransactionEditFeedbackTest {
             manualCategories = setOf(tx.key), updatedAt = mapOf("cat:${tx.key}" to 20, "note:${tx.key}" to 20),
         )
         val automated = TransactionMetadata.applyAutomatic(chosen, mapOf(tx.key to ("Dining Out" to "Suggestion")), 30)
-        val restored = SyncMerger.mergeAnalysis(automated, AnalysisSnapshot(
+        val restored = AnalysisSyncMerger.mergeAnalysis(automated, AnalysisSnapshot(
             categories = mapOf(tx.key to "Older category"), userNotes = mapOf(tx.key to "Older note"),
             updatedAt = mapOf("cat:${tx.key}" to 10, "note:${tx.key}" to 10),
         ))

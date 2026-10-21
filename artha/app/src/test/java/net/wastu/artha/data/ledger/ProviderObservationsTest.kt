@@ -3,7 +3,6 @@ package net.wastu.artha.data.ledger
 import java.time.Instant
 import net.wastu.artha.core.model.*
 import net.wastu.artha.data.analysis.*
-import net.wastu.artha.data.sync.*
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -66,15 +65,10 @@ class ProviderObservationsTest {
         assertEquals(mapOf(Provider.SHOPEE to 1), result.providerCounts)
     }
 
-    @Test fun backupVersionTwoRetainsRevisionsAndVersionOneRemainsReadable() {
+    @Test fun observationRevisionsResolveToCorrectedLedgerView() {
         val records = listOf(old) + ProviderObservations.capture(listOf(old), listOf(corrected), 1000)
-        val bundle = SyncBundle(analysis = AnalysisSnapshot(), transactions = records)
-        val restored = SyncBundleSerializer.fromJsonBytes(SyncBundleSerializer.toJsonBytes(bundle))
-        assertEquals(2, restored.version)
-        assertEquals(listOf(corrected), ProviderObservations.resolve(restored.transactions))
-        assertEquals(records, restored.transactions)
-        failed { SyncBundleSerializer.fromJsonBytes(SyncBundleSerializer.toJsonBytes(bundle.copy(version = 1))) }
-        assertEquals(listOf(old), SyncBundleSerializer.fromJsonBytes(SyncBundleSerializer.toJsonBytes(bundle.copy(version = 1, transactions = listOf(old)))).transactions)
-        assertTrue(SyncMerger.findMissingTransactionsToAppend(records, restored.transactions).isEmpty())
+        assertEquals(listOf(corrected), ProviderObservations.resolve(records))
+        assertEquals(2, records.size)
+        assertTrue(AnalysisSyncMerger.findMissingTransactionsToAppend(records, records).isEmpty())
     }
 }

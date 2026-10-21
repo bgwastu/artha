@@ -2,7 +2,6 @@ package net.wastu.artha.data.analysis
 
 import java.time.Instant
 import net.wastu.artha.core.model.*
-import net.wastu.artha.data.sync.SyncMerger
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -46,8 +45,8 @@ class TransactionMetadataTest {
     @Test fun resetTombstonesBeatOldCloudClassificationsAndTimestampTiesConverge() {
         val deleted = AnalysisSnapshot(updatedAt = mapOf("cat:12" to 20))
         val old = AnalysisSnapshot(categories = mapOf("12" to "Shopping"), updatedAt = mapOf("cat:12" to 10))
-        assertTrue(SyncMerger.mergeAnalysis(deleted, old).categories.isEmpty())
+        assertTrue(AnalysisSyncMerger.mergeAnalysis(deleted, old).categories.isEmpty())
         val other = old.copy(categories = mapOf("12" to "Dining Out"))
-        assertEquals(SyncMerger.mergeAnalysis(old, other), SyncMerger.mergeAnalysis(other, old))
+        assertEquals(AnalysisSyncMerger.mergeAnalysis(old, other), AnalysisSyncMerger.mergeAnalysis(other, old))
     }
 }

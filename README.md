@@ -13,7 +13,6 @@ Artha helps people in Indonesia understand their spending on rooted Android phon
 - **Search and filters:** Find transactions by keyword, provider, or date range.
 - **Demo mode:** Explore multi-year fictional payments and example AI analysis from Settings, without changing personal history.
 - **Homescreen widgets:** Check recent transactions and monthly spending without opening the app.
-- **Encrypted backup:** Back up through Google Drive and explicitly restore missing history, encrypted on-device.
 
 ## Providers
 

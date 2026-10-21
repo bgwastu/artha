@@ -100,7 +100,6 @@ fun HomeScreen(
     var showKnowledgeEditor by rememberSaveable { mutableStateOf(false) }
     var selectedKey by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedFallback by remember { mutableStateOf<UnifiedTransaction?>(null) }
-    var openBackup by rememberSaveable { mutableStateOf(false) }
     val snackbarHost = remember { androidx.compose.material3.SnackbarHostState() }
     val importFeedback by viewModel?.importFeedback?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val automaticImport by viewModel?.automaticImportActive?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
@@ -248,7 +247,6 @@ fun HomeScreen(
                                     onTransaction = { selectedKey = it.key; selectedFallback = it },
                                     onRetry = onRetryLedger,
                                     onImportHistory = { destination = Destination.SETTINGS },
-                                    onRestoreBackup = { openBackup = true; destination = Destination.SETTINGS },
                                     showFilter = showFilter,
                                     onDismissFilter = { showFilter = false },
                                     viewModel = viewModel,
@@ -283,8 +281,6 @@ fun HomeScreen(
                                     Switch(checked = true, onCheckedChange = { if (!it) onExitDemo() })
                                 }
                             } else ProvidersScreen(
-                                openBackup = openBackup,
-                                onBackupOpened = { openBackup = false },
                                 enabled = enabledProviders,
                                 syncingProvider = syncingProvider,
                                 providerCounts = providerCounts,

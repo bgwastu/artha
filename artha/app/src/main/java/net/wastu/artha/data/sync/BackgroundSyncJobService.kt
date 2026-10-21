@@ -25,10 +25,7 @@ class BackgroundSyncJobService : JobService() {
         scope.launch {
             try {
                 if (app.rootAccess.verify()) {
-                    val result = app.ingestion.ingestAll(force = false)
-                    if (result.isNotEmpty() && app.driveSyncManager.syncState.value.isEnabled) {
-                        app.driveSyncManager.triggerAutoBackup()
-                    }
+                    app.ingestion.ingestAll(force = false)
                     AnalysisWidgetProvider.triggerUpdate(app)
                     TransactionsWidgetProvider.triggerUpdate(app)
                 }

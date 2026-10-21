@@ -11,8 +11,6 @@ import net.wastu.artha.core.root.*
 import net.wastu.artha.data.analysis.*
 import net.wastu.artha.data.ledger.LedgerRepository
 import net.wastu.artha.data.providers.ProviderPreferences
-import net.wastu.artha.data.sync.DriveSyncManager
-
 sealed interface LedgerState {
     data object Loading : LedgerState
     data class Ready(val transactions: List<UnifiedTransaction>) : LedgerState
@@ -32,7 +30,6 @@ class ArthaViewModel(
     private val preferences: ProviderPreferences? = null,
     val syncingProvider: StateFlow<Provider?> = MutableStateFlow<Provider?>(null).asStateFlow(),
     val analysisStore: AnalysisStore? = null,
-    val driveSyncManager: DriveSyncManager? = null,
     private val computationDispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val spendingState: StateFlow<SpendingState>? = null,
     private val retrySpending: (() -> Unit)? = null,
@@ -90,7 +87,6 @@ class ArthaViewModel(
     val enabledProviders = preferences?.enabled ?: MutableStateFlow(Provider.entries.toSet()).asStateFlow()
     val importEnabled = preferences?.importEnabled ?: MutableStateFlow(Provider.entries.toSet()).asStateFlow()
     val providerDiagnostics = preferences?.diagnostics ?: MutableStateFlow(emptyMap<Provider, net.wastu.artha.data.providers.ProviderDiagnostic>()).asStateFlow()
-    val driveSyncState = driveSyncManager?.syncState ?: MutableStateFlow(net.wastu.artha.data.sync.DriveSyncState()).asStateFlow()
     private var observerJob: Job? = null
     private var ingestionJob: Job? = null
     private var categorizationJob: Job? = null
@@ -99,12 +95,6 @@ class ArthaViewModel(
     fun setTargetDestination(dest: String?) { _targetDestination.value = dest }
     fun setProviderEnabled(provider: Provider, enabled: Boolean) { preferences?.setEnabled(provider, enabled) }
     fun setImportEnabled(provider: Provider, enabled: Boolean) { preferences?.setImportEnabled(provider, enabled) }
-    fun setDriveSyncEnabled(enabled: Boolean) { driveSyncManager?.setEnabled(enabled) }
-    fun setDriveAccountEmail(email: String?) { driveSyncManager?.setAccountEmail(email) }
-    fun setDriveEncryptionPassword(password: String) { viewModelScope.launch(Dispatchers.IO) { driveSyncManager?.setEncryptionPassword(password) } }
-    fun syncDriveNow() { viewModelScope.launch { driveSyncManager?.syncNow() } }
-    fun restoreDriveBackup() { viewModelScope.launch { driveSyncManager?.restoreNow() } }
-
     fun enterForeground() {
         observeSavedLedger()
         automaticRefresh()
@@ -261,7 +251,6 @@ class ArthaViewModel(
                     }
                     _importFeedback.value = ImportFeedback(++importSequence, provider, message, result.isEmpty() || failed == result.size)
                 }
-                if (result.isNotEmpty() && driveSyncState.value.isEnabled) driveSyncManager?.syncNow()
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (e: Exception) {
                 _ingestionStatus.value = _ingestionStatus.value + ((provider ?: Provider.JAGO) to (e.message ?: "Import unavailable"))

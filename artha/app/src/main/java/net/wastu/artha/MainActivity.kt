@@ -54,7 +54,6 @@ class MainActivity : ComponentActivity() {
                             preferences = application.providerPreferences,
                             syncingProvider = application.ingestion.syncingProvider,
                             analysisStore = application.analysisStore,
-                            driveSyncManager = application.driveSyncManager,
                             spendingState = application.spending.state,
                             retrySpending = application.spending::retry,
                         ).also {

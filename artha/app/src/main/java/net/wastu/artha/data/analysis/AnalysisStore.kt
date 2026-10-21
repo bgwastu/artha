@@ -317,18 +317,6 @@ class AnalysisStore(context: Context) {
         )
     }
 
-
-
-    @Synchronized
-    fun restoreSnapshot(remote: AnalysisSnapshot) {
-        val local = _snapshot.value
-        val merged = net.wastu.artha.data.sync.SyncMerger.mergeAnalysis(local, remote)
-        applyMergedSnapshot(merged.copy(aiConfig = local.aiConfig,
-            categories = merged.categories + local.categories.filterKeys { it in local.manualCategories },
-            reasons = merged.reasons + local.reasons.filterKeys { it in local.manualCategories },
-            manualCategories = merged.manualCategories + local.manualCategories))
-    }
-
     @Synchronized
     fun applyMergedSnapshot(merged: AnalysisSnapshot) {
         // Classification request fingerprints are a local cache, not backup content.

@@ -25,7 +25,6 @@ class ArthaApplication : Application() {
     val spending by lazy { net.wastu.artha.data.analysis.SpendingRepository(ledger, analysisStore, applicationScope) }
     val providerPreferences by lazy { net.wastu.artha.data.providers.ProviderPreferences(applicationContext) }
     val analysisStore by lazy { net.wastu.artha.data.analysis.AnalysisStore(applicationContext) }
-    val driveSyncManager by lazy { net.wastu.artha.data.sync.DriveSyncManager(applicationContext, { ledger }, analysisStore, rootAccess, applicationScope) }
     val ingestion by lazy {
         val files = net.wastu.artha.data.ingestion.RootFileReader(applicationContext)
         val reader = net.wastu.artha.data.ingestion.JagoTransactionReader(files)
@@ -47,9 +46,6 @@ class ArthaApplication : Application() {
                 } else {
                     ingestion.ingestAll(force = force)
                 }
-                if (result.isNotEmpty() && driveSyncManager.syncState.value.isEnabled) {
-                    driveSyncManager.triggerAutoBackup()
-                }
                 AnalysisWidgetProvider.triggerUpdate(this@ArthaApplication)
                 TransactionsWidgetProvider.triggerUpdate(this@ArthaApplication)
             } catch (_: Exception) {
@@ -66,9 +62,6 @@ class ArthaApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         BackgroundSyncScheduler.schedule(this)
-        if (driveSyncManager.syncState.value.isEnabled) {
-            driveSyncManager.triggerAutoBackup()
-        }
         applicationScope.launch {
             spending.state
                 .filterIsInstance<SpendingState.Ready>()
