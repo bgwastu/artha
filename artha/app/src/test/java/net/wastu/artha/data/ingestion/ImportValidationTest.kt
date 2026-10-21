@@ -52,6 +52,13 @@ class ImportValidationTest {
         assertEquals(1, assertThrows(PartialImportException::class.java) { rows.finish() }.transactions.size)
     }
 
+    @Test fun rateLimitedFailureSurvivesEndpointErrorCollection() {
+        val rows = ImportRows()
+        rows.issue(ProviderReadException(net.wastu.artha.data.providers.AccountStatus.RATE_LIMITED, "Grab rate-limited (HTTP 429)."))
+        assertEquals(net.wastu.artha.data.providers.AccountStatus.RATE_LIMITED,
+            assertThrows(ProviderReadException::class.java) { rows.finish() }.status)
+    }
+
     @Test fun coordinatorAppendsPartialValidHistoryWithoutReportingCompleteSuccess() = runTest {
         var saved = emptyList<UnifiedTransaction>()
         val ledger = object : LedgerRepository {
