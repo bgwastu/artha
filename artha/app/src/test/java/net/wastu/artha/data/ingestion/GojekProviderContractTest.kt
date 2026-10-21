@@ -9,6 +9,9 @@ import java.util.TimeZone
 import java.util.zip.GZIPOutputStream
 import kotlinx.coroutines.CancellationException
 import net.wastu.artha.core.model.Direction
+import net.wastu.artha.core.model.Money
+import net.wastu.artha.core.model.Provider
+import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.providers.AccountStatus
 import org.json.JSONArray
 import org.json.JSONObject
@@ -284,6 +287,62 @@ class GojekProviderContractTest {
         assertEquals(exact * 100, row.money.amountMinor)
         val decimal = requireNotNull(GojekProviderParser.payment(payment().put("amount", JSONObject().put("value", BigDecimal("25000.01")).put("currency", "IDR"))))
         assertEquals(2_500_001L, decimal.money.amountMinor)
+    }
+
+    @Test fun http400InvalidTokenBodyRequiresLoginWithoutAuthenticateHeader() {
+        val error = requireNotNull(requireGojekHttpFailure(400, "", """{"errors":[{"code":"invalid-token"}]}"""))
+        assertEquals(AccountStatus.NEEDS_LOGIN, error.status)
+        assertEquals(GOJEK_NEEDS_LOGIN_MESSAGE, error.message)
+    }
+
+    @Test fun http400WwwAuthenticateInvalidTokenRequiresLogin() {
+        val error = requireNotNull(requireGojekHttpFailure(
+            400,
+            """Bearer realm=gojek, error=invalid-token, error_description="Invalid Token"""",
+            """{"success":false,"errors":[{"code":"GoPay-1000"}]}""",
+        ))
+        assertEquals(AccountStatus.NEEDS_LOGIN, error.status)
+    }
+
+    @Test fun http400GoPayGenericBodyWithoutAuthenticateHeaderIsListUnavailable() {
+        val body = """{"success":false,"error":{"code":"1000","description":"Internal server error"},
+            "errors":[{"code":"GoPay-1000","message":"Don't worry, we're fixing this."}]}"""
+        val error = requireNotNull(requireGojekHttpFailure(400, "", body))
+        assertEquals(AccountStatus.ERROR, error.status)
+        assertEquals(GOJEK_HISTORY_LIST_UNAVAILABLE_MESSAGE, error.message)
+    }
+
+    @Test fun http403InvalidTokenBodyRequiresLogin() {
+        val error = requireNotNull(requireGojekHttpFailure(403, "", """{"errors":[{"code":"invalid_token"}]}"""))
+        assertEquals(AccountStatus.NEEDS_LOGIN, error.status)
+        assertEquals(GOJEK_NEEDS_LOGIN_MESSAGE, error.message)
+    }
+
+    @Test fun jagoLinkedDebitBuildsGopayOrderForBankFusion() {
+        val jago = UnifiedTransaction(
+            provider = Provider.JAGO,
+            providerTransactionId = "jago:261015-FB7X-ZECLX7",
+            direction = Direction.DEBIT,
+            money = Money(41_100_00L),
+            occurredAt = Instant.parse("2026-10-15T01:32:22Z"),
+            description = "GoPay Payment",
+            rawPayload = """{"code":"GPD05","counterpart":"Indomaret","fields":{"f6":"0320261015013200cLFRf1Yw0yID-1","f17":"GoPay"}}""",
+        )
+        val row = GojekProviderParser.paymentFromJagoLinkedDebit(jago, "0320261015013200cLFRf1Yw0yID")
+        assertEquals("gopay:0320261015013200cLFRf1Yw0yID", row.providerTransactionId)
+        assertEquals("Indomaret", row.description)
+        val payload = JSONObject(row.rawPayload)
+        assertEquals("jago-linked-order-reference", payload.getString("paymentEvidence"))
+        assertEquals("0320261015013200cLFRf1Yw0yID", payload.getString("orderNumber"))
+    }
+
+    @Test fun cachedPaymentsFinishPartialWhenLiveSessionIsInvalid() {
+        val rows = ImportRows()
+        rows.readRow { requireNotNull(GojekProviderParser.payment(payment())) }
+        rows.issue(ProviderReadException(AccountStatus.NEEDS_LOGIN, GOJEK_NEEDS_LOGIN_MESSAGE))
+        val partial = assertThrows(PartialImportException::class.java) { rows.finish() }
+        assertEquals(1, partial.transactions.size)
+        assertTrue(partial.message!!.contains(GOJEK_NEEDS_LOGIN_MESSAGE))
     }
 
     @Test fun readsAndroidPreferencesAndDecryptsOnlyTheNativeSessionStorageContract() {

@@ -4,6 +4,7 @@ package net.wastu.artha.data.ingestion
 import android.os.Build
 import androidx.core.content.pm.PackageInfoCompat
 import java.net.HttpURLConnection
+import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
@@ -12,6 +13,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
+import net.wastu.artha.core.model.Direction
+import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.providers.AccountStatus
 import org.json.JSONObject
@@ -19,9 +22,6 @@ import org.json.JSONObject
 /** Read-only native source snapshots and GETs; no handmade exports or session refresh. */
 internal class GojekOrderReader(private val files: RootFileReader) {
     suspend fun transactions(interactive: Boolean = false): List<UnifiedTransaction> = withContext(Dispatchers.IO) {
-        if (interactive) {
-            triggerHistoryRefresh()
-        }
         val rows = ImportRows()
         val details = linkedMapOf<String, JSONObject>()
         val orders = mutableListOf<GojekProviderParser.NativeOrder>()
@@ -67,10 +67,35 @@ internal class GojekOrderReader(private val files: RootFileReader) {
         }
         catch (_: Exception) { /* A cold cache does not block authenticated history. */ }
 
+        val loginPrefsPath = "/data/data/com.gojek.app/shared_prefs/goto-scp-login.xml"
+        val loginModified = files.lastModifiedMillis(loginPrefsPath)
+        val loginStale = loginModified != null &&
+            System.currentTimeMillis() - loginModified > TimeUnit.DAYS.toMillis(30)
+        if (loginStale && !cachedPayments) {
+            throw ProviderReadException(AccountStatus.NEEDS_LOGIN, GOJEK_NEEDS_LOGIN_MESSAGE)
+        }
+        if (interactive || !cachedPayments) {
+            triggerHistoryRefresh()
+        }
+
         val started = System.nanoTime()
         var historyComplete = false
-        try {
-            val headers = sessionHeaders()
+        var liveHeaders: Map<String, String>? = null
+        if (loginStale) {
+            rows.issue(GOJEK_NEEDS_LOGIN_MESSAGE)
+        } else {
+            try {
+                liveHeaders = sessionHeaders()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: ProviderReadException) {
+                rows.issue(error)
+            } catch (_: Exception) {
+                rows.issue(GOJEK_NEEDS_LOGIN_MESSAGE)
+            }
+        }
+        if (liveHeaders != null) try {
+            val headers = liveHeaders
             var next: String? = GojekProviderParser.HISTORY_URL
             val visited = mutableSetOf<String>()
             var pages = 0
@@ -109,9 +134,13 @@ internal class GojekOrderReader(private val files: RootFileReader) {
                 catch (e: ProviderReadException) { rows.issue(e) }
                 catch (_: Exception) { rows.issue("One GoPay payment detail is unavailable") }
             }
+            importJagoReferencedPayments(headers, rows, System.nanoTime(), checkActive, details)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (e: ProviderReadException) { rows.issue(e) }
         catch (_: Exception) { rows.issue(ProviderReadException(AccountStatus.ERROR, "Gojek live history is unavailable; valid cached payments are retained")) }
+        if (liveHeaders != null && rows.transactions.isEmpty()) {
+            importJagoReferencedPayments(liveHeaders, rows, System.nanoTime(), checkActive, details)
+        }
 
         for (index in rows.transactions.indices) {
             coroutineContext.ensureActive()
@@ -168,6 +197,7 @@ internal class GojekOrderReader(private val files: RootFileReader) {
             put("Authorization", "Bearer $token")
             put("Accept", "application/json"); put("Accept-Encoding", "identity"); put("Content-Type", "application/json")
             put("X-AppId", "com.gojek.app"); put("X-AppVersion", version.substringBefore('-'))
+            put("Gojek-Country-Code", "ID"); put("X-Country-Code", "ID")
             put("X-Platform", "Android"); put("X-User-Type", "customer")
             put("X-DeviceOS", "Android,${Build.VERSION.RELEASE}")
             put("X-PhoneMake", Build.MANUFACTURER); put("X-PhoneModel", "${Build.BRAND},${Build.MODEL}")
@@ -207,14 +237,75 @@ internal class GojekOrderReader(private val files: RootFileReader) {
         } finally { connection.disconnect() }
     }
 
-    private fun requireGojekSuccess(code: Int, connection: HttpURLConnection? = null) {
-        val auth = connection?.getHeaderField("www-authenticate").orEmpty()
-        val isInvalidToken = code == 400 && (auth.contains("invalid-token", ignoreCase = true) || auth.contains("realm=gojek", ignoreCase = true))
-        if (code == 401 || isInvalidToken) {
-            throw ProviderReadException(AccountStatus.NEEDS_LOGIN, "Gojek session expired. Open Gojek to refresh your session.")
+    private data class JagoGopayHint(val orderId: String, val jago: UnifiedTransaction)
+
+    private suspend fun importJagoReferencedPayments(
+        headers: Map<String, String>,
+        rows: ImportRows,
+        started: Long,
+        checkActive: () -> Unit,
+        details: MutableMap<String, JSONObject>,
+    ) {
+        val known = rows.transactions.map { it.providerTransactionId.removePrefix("gopay:") }.toSet()
+        val hints = jagoGopayHints().filter { it.orderId !in known }
+        if (hints.isEmpty()) return
+        var reads = 0
+        for (hint in hints) {
+            checkActive()
+            if (reads >= MAX_DETAILS || deadlineExceeded(started)) break
+            reads++
+            val orderId = hint.orderId
+            val cachedDetail = details[orderId]
+            val payment = when {
+                cachedDetail != null -> runCatching { GojekProviderParser.payment(cachedDetail) }.getOrNull()
+                else -> null
+            } ?: try {
+                val detail = GojekProviderParser.detail(paymentDetailRequest(orderId, headers, started, checkActive))
+                details.putIfAbsent(orderId, detail)
+                GojekProviderParser.payment(detail)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: ProviderReadException) {
+                GojekProviderParser.paymentFromJagoLinkedDebit(hint.jago, orderId)
+            } catch (_: Exception) {
+                GojekProviderParser.paymentFromJagoLinkedDebit(hint.jago, orderId)
+            } ?: continue
+            val existing = rows.transactions.indexOfFirst { it.key == payment.key }
+            if (existing < 0) rows.transactions += payment
+            else rows.transactions[existing] = payment
         }
-        if (code == 403) requireHttpSuccess(code, "Gojek")
-        if (code !in 200..299) throw ProviderReadException(AccountStatus.ERROR, "Gojek history request failed (HTTP $code); valid cached payments are retained")
+    }
+
+    private suspend fun jagoGopayHints(): List<JagoGopayHint> = runCatching {
+        JagoTransactionReader(files).transactions()
+            .asSequence()
+            .filter { it.provider == Provider.JAGO && it.direction == Direction.DEBIT }
+            .mapNotNull { transaction ->
+                val payload = runCatching { JSONObject(transaction.rawPayload) }.getOrNull() ?: return@mapNotNull null
+                val code = payload.optString("code")
+                if (code !in GOPAY_BANK_CODES) return@mapNotNull null
+                val orderId = payload.optJSONObject("fields")?.optString("f6")
+                    ?.removeSuffix("-1")
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() && it.any(Char::isLetter) }
+                    ?: return@mapNotNull null
+                JagoGopayHint(orderId, transaction)
+            }
+            .distinctBy { it.orderId }
+            .take(MAX_DETAILS)
+            .toList()
+    }.getOrDefault(emptyList())
+
+    private suspend fun gopayOrderIdsFromJagoHints(): List<String> = jagoGopayHints().map { it.orderId }
+
+    private fun paymentDetailRequest(orderId: String, headers: Map<String, String>, started: Long, checkActive: () -> Unit): JSONObject {
+        val escaped = URLEncoder.encode(orderId, "UTF-8").replace("+", "%20")
+        return request(
+            "https://customer.gopayapi.com/v2/users/order-history/$escaped/details?country_code=ID",
+            headers,
+            started,
+            checkActive,
+        )
     }
 
     private suspend fun triggerHistoryRefresh() {
@@ -231,10 +322,85 @@ internal class GojekOrderReader(private val files: RootFileReader) {
 
     private fun deadlineExceeded(started: Long): Boolean = System.nanoTime() - started >= TimeUnit.SECONDS.toNanos(60)
 
+    internal suspend fun probeDetailHttp(orderId: String, headers: Map<String, String>): Int = withContext(Dispatchers.IO) {
+        val connection = (URL(
+            "https://customer.gopayapi.com/v2/users/order-history/${URLEncoder.encode(orderId, "UTF-8").replace("+", "%20")}/details?country_code=ID",
+        ).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            instanceFollowRedirects = false
+            connectTimeout = 10_000
+            readTimeout = 15_000
+            headers.forEach { (name, value) -> setRequestProperty(name, value) }
+        }
+        try {
+            connection.responseCode
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /** Safe diagnostics for device probes; never returns bearer tokens or decrypted secrets. */
+    internal suspend fun diagnoseHistoryAccess(): String = withContext(Dispatchers.IO) {
+        val parts = mutableListOf<String>()
+        try {
+            val headers = sessionHeaders()
+            parts += "headerKeys=${headers.keys.sorted().joinToString(",")}"
+            parts += "bearerLen=${headers["Authorization"]?.removePrefix("Bearer ")?.length ?: 0}"
+            val candidates = listOf(
+                GojekProviderParser.HISTORY_URL,
+                "https://customer.gopayapi.com/v1/users/order-history?country_code=ID",
+                "https://customer.gopayapi.com/v1/users/order-history/completed?country_code=ID",
+            )
+            for (candidate in candidates) {
+                val started = System.nanoTime()
+                val connection = (URL(candidate).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    instanceFollowRedirects = false
+                    connectTimeout = 10_000
+                    readTimeout = 15_000
+                    headers.forEach { (name, value) -> setRequestProperty(name, value) }
+                }
+                try {
+                    val code = connection.responseCode
+                    val path = URI(candidate).path
+                    parts += "$path=http$code"
+                    val auth = gojekWwwAuthenticate(connection)
+                    val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                    val body = stream?.let { GojekProviderParser.readBounded(it).toString(Charsets.UTF_8) }.orEmpty()
+                    val codes = Regex(""""code"\s*:\s*"([^"]+)"""")
+                        .findAll(body).map { it.groupValues[1] }.distinct().take(3).joinToString(",")
+                    if (codes.isNotBlank()) parts += "$path codes=$codes"
+                    if (code in 200..299) {
+                        val root = runCatching { JSONObject(body) }.getOrNull()
+                        val completed = root?.optJSONObject("data")?.optJSONArray("completed")?.length() ?: -1
+                        val success = root?.opt("success")
+                        parts += "$path completedGroups=$completed success=$success"
+                    }
+                    parts += "$path ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)}"
+                } finally {
+                    connection.disconnect()
+                }
+            }
+            val hints = gopayOrderIdsFromJagoHints()
+            parts += "jagoHints=${hints.size}"
+            hints.firstOrNull()?.let { id ->
+                parts += "detailHttp=${probeDetailHttp(id, headers)}"
+            }
+        } catch (error: ProviderReadException) {
+            parts += "provider=${error.status.name}"
+            parts += "message=${error.message?.take(120)}"
+        } catch (error: Exception) {
+            parts += "failure=${error.javaClass.simpleName}"
+            parts += "message=${error.message?.take(120)}"
+        }
+        parts.joinToString("; ")
+    }
+
     private companion object {
         const val MAX_CACHE_ENTRIES = 1000
         const val MAX_PAGES = 50
         const val MAX_DETAILS = 20
         val ENRICHED_SERVICES = setOf("GORIDE", "GOCAR", "GOFOOD", "GOSEND", "GOBLUEBIRD")
+        val GOPAY_BANK_CODES = setOf("GPD01", "GPD05", "GPC02")
     }
 }

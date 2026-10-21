@@ -182,6 +182,41 @@ internal object GojekProviderParser {
             item.optString("description").ifBlank { "GoPay Payment" }, payload.toString(), isQris = qris, isReversal = reversal)
     }
 
+    /** When GoPay history APIs return GoPay-1000, keep bank↔wallet fusion using Jago's order reference. */
+    fun paymentFromJagoLinkedDebit(jago: UnifiedTransaction, orderId: String): UnifiedTransaction {
+        schema(jago.provider == Provider.JAGO && jago.direction == Direction.DEBIT, "Jago-linked GoPay hints require a settled debit")
+        val source = JSONObject(jago.rawPayload)
+        val code = source.optString("code")
+        schema(code in setOf("GPD01", "GPD05"), "Jago-linked GoPay hints require a GoPay debit code")
+        val fields = source.optJSONObject("fields")
+        val counterpart = source.optString("counterpart").ifBlank { fields?.optString("f17").orEmpty() }.trim()
+        val description = when {
+            jago.description.isNotBlank() && !jago.description.equals("GoPay Payment", ignoreCase = true) -> jago.description
+            counterpart.isNotBlank() && !counterpart.equals("GoPay", ignoreCase = true) -> counterpart
+            else -> "GoPay Payment"
+        }
+        val qris = source.optBoolean("isQris") ||
+            jago.isQris ||
+            listOf(counterpart, jago.description, source.optString("note")).any { it.contains("QRIS", ignoreCase = true) }
+        val payload = JSONObject()
+            .put("origin", "gopay-order-history")
+            .put("provider", Provider.GOJEK.name)
+            .put("orderNumber", orderId)
+            .put("isQris", qris)
+            .put("paymentEvidence", "jago-linked-order-reference")
+            .put("jagoProviderTransactionId", jago.providerTransactionId)
+        return UnifiedTransaction(
+            provider = Provider.GOJEK,
+            providerTransactionId = "gopay:$orderId",
+            direction = Direction.DEBIT,
+            money = jago.money,
+            occurredAt = jago.occurredAt,
+            description = description,
+            rawPayload = payload.toString(),
+            isQris = qris,
+        )
+    }
+
     fun orderCards(root: JSONObject): List<NativeOrder> = orderPage(root).orders
 
     /** Non-order display widgets are expected; invalid order actions cannot discard valid neighbors. */
