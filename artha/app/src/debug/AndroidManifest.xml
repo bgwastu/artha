@@ -4,6 +4,7 @@
         <receiver android:name=".debug.GojekProbeReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="net.wastu.artha.DEBUG_GOJEK_PROBE" />
+                <action android:name="net.wastu.artha.DEBUG_GOJEK_INGEST" />
             </intent-filter>
         </receiver>
         <activity android:name=".DemoScreenshotActivity"

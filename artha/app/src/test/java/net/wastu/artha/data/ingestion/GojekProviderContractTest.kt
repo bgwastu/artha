@@ -349,6 +349,25 @@ class GojekProviderContractTest {
         val payload = JSONObject(row.rawPayload)
         assertEquals("jago-linked-order-reference", payload.getString("paymentEvidence"))
         assertEquals("0320261015013200cLFRf1Yw0yID", payload.getString("orderNumber"))
+        assertEquals("Indomaret", payload.getString("merchantName"))
+    }
+
+    @Test fun jagoLinkedQrisDebitBuildsMerchantTitleAndDetailRows() {
+        val jago = UnifiedTransaction(
+            provider = Provider.JAGO,
+            providerTransactionId = "jago:fixture",
+            direction = Direction.DEBIT,
+            money = Money(15_000_00L),
+            occurredAt = Instant.parse("2026-10-02T05:00:00Z"),
+            description = "Kopi Kenangan",
+            rawPayload = """{"code":"GPD01","counterpart":"GoPay","notes":"QRIS","localized":"QRIS KOPI KENANGAN","fields":{"f6":"order-fixture-1"}}""",
+            isQris = true,
+        )
+        val row = GojekProviderParser.paymentFromJagoLinkedDebit(jago, "order-fixture")
+        assertEquals("QRIS Kopi Kenangan", row.description)
+        assertTrue(row.isQris)
+        val payload = JSONObject(row.rawPayload)
+        assertTrue(payload.getJSONArray("detailViewItems").length() >= 2)
     }
 
     @Test fun cachedPaymentsFinishPartialWhenLiveSessionIsInvalid() {

@@ -66,6 +66,10 @@ object TransactionDecipherer {
 
         // 4. GoPay Payments via Linked Jago Pocket
         if (c in setOf("GPD01", "GPD05", "GPC02") || (d.equals("GoPay", ignoreCase = true) && n.contains("Gopay", ignoreCase = true))) {
+            if (d.startsWith("QRIS", ignoreCase = true) || n.contains("QRIS", ignoreCase = true) ||
+                m.contains("QRIS", ignoreCase = true) || listOf(d, n, m).any { it.contains("Pembayaran QRIS", ignoreCase = true) }) {
+                return decipher("QRD01", m, d, n, direction)
+            }
             val title = when {
                 c == "GPC02" || d.contains("Refund", ignoreCase = true) -> "GoPay Refund"
                 n.contains("Tip", ignoreCase = true) -> "GoPay Tip"

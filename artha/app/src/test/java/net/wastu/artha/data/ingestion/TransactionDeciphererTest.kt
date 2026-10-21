@@ -83,6 +83,16 @@ class TransactionDeciphererTest {
         assertEquals("GoPay", rideDebit.paymentMethod)
         assertFalse(rideDebit.isQris)
 
+        val qrisDebit = TransactionDecipherer.decipher(
+            code = "GPD01",
+            merchantOrCounterpart = "GoPay",
+            description = "QRIS KOPI KENANGAN",
+            notes = "",
+            direction = Direction.DEBIT,
+        )
+        assertTrue(qrisDebit.isQris)
+        assertEquals("Kopi Kenangan", qrisDebit.title)
+
         val refundCredit = TransactionDecipherer.decipher(
             code = "GPC02",
             merchantOrCounterpart = "",

@@ -15,9 +15,9 @@ class LibsuRootAccess(private val context: Context) : RootAccess {
         withContext(Dispatchers.IO) {
             try {
                 // A new su process detects revocation even if libsu's main shell was cached.
-                Shell.Builder.create().setContext(context).setTimeout(10).build("su").use { shell ->
+                Shell.Builder.create().setContext(context).setTimeout(10)
+                    .build("su", "-M", "-c", "/system/bin/sh").use { shell ->
                     if (!shell.isRoot) return@use false
-                    // newJob discards output unless an explicit destination is provided.
                     val result = shell.newJob().to(mutableListOf<String>()).add("id -u").exec()
                     result.isSuccess && result.out.singleOrNull()?.trim() == "0"
                 }

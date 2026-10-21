@@ -193,14 +193,18 @@ internal object GojekProviderParser {
         schema(code in setOf("GPD01", "GPD05"), "Jago-linked GoPay hints require a GoPay debit code")
         val fields = source.optJSONObject("fields")
         val counterpart = source.optString("counterpart").ifBlank { fields?.optString("f17").orEmpty() }.trim()
-        val description = when {
-            jago.description.isNotBlank() && !jago.description.equals("GoPay Payment", ignoreCase = true) -> jago.description
-            counterpart.isNotBlank() && !counterpart.equals("GoPay", ignoreCase = true) -> counterpart
-            else -> "GoPay Payment"
-        }
+        val notes = source.optString("notes")
+        val localized = source.optString("localized")
         val qris = source.optBoolean("isQris") ||
             jago.isQris ||
-            listOf(counterpart, jago.description, source.optString("note")).any { it.contains("QRIS", ignoreCase = true) }
+            listOf(counterpart, jago.description, notes, localized).any { it.contains("QRIS", ignoreCase = true) }
+        val merchant = merchantFromJagoHint(counterpart, jago.description, localized, notes)
+        val description = when {
+            merchant != null -> gopayDisplayDescription(merchant, qris)
+            jago.description.isNotBlank() && !jago.description.equals("GoPay Payment", ignoreCase = true) -> jago.description
+            localized.isNotBlank() && !localized.equals("GoPay", ignoreCase = true) -> localized
+            else -> "GoPay Payment"
+        }
         val payload = JSONObject()
             .put("origin", "gopay-order-history")
             .put("provider", Provider.GOJEK.name)
@@ -208,6 +212,16 @@ internal object GojekProviderParser {
             .put("isQris", qris)
             .put("paymentEvidence", "jago-linked-order-reference")
             .put("jagoProviderTransactionId", jago.providerTransactionId)
+            .put("counterpart", counterpart)
+            .put("notes", notes)
+            .put("localized", localized)
+        source.optString("paymentMethod").takeIf { it.isNotBlank() }?.let { payload.put("paymentMethod", it) }
+        merchant?.let { payload.put("merchantName", it) }
+        val detailItems = JSONArray()
+        if (merchant != null) detailItems.put(JSONObject().put("title", "Merchant").put("value", merchant))
+        if (qris) detailItems.put(JSONObject().put("title", "Payment method").put("value", "QRIS"))
+        notes.trim().takeIf { it.isNotBlank() }?.let { detailItems.put(JSONObject().put("title", "Notes").put("value", it)) }
+        if (detailItems.length() > 0) mergeDetailViewItems(payload, detailItems, includeMerchant = false)
         return UnifiedTransaction(
             provider = Provider.GOJEK,
             providerTransactionId = "gopay:$orderId",
@@ -218,6 +232,18 @@ internal object GojekProviderParser {
             rawPayload = payload.toString(),
             isQris = qris,
         )
+    }
+
+    private fun merchantFromJagoHint(counterpart: String, title: String, localized: String, notes: String): String? {
+        for (candidate in listOf(title, localized, counterpart, notes)) {
+            val trimmed = candidate.trim()
+            if (trimmed.isBlank()) continue
+            if (trimmed.equals("GoPay Payment", ignoreCase = true) || trimmed.equals("GoPay", ignoreCase = true)) continue
+            if (trimmed.equals("QRIS Payment", ignoreCase = true)) continue
+            val withoutQris = trimmed.replace(Regex("(?i)^qris\\s*[-:]?\\s*"), "").trim()
+            if (withoutQris.isNotBlank() && !withoutQris.equals("QRIS", ignoreCase = true)) return withoutQris
+        }
+        return null
     }
 
     fun orderCards(root: JSONObject): List<NativeOrder> = orderPage(root).orders
@@ -299,14 +325,14 @@ internal object GojekProviderParser {
         val merchant = payload.optString("merchantName").takeIf { it.isNotBlank() }
         val display = payload.optString("orderDisplayDescription").takeIf { it.isNotBlank() }
         val description = when {
-            merchant != null -> gopayDisplayDescription(transaction, merchant, qris)
+            merchant != null -> gopayDisplayDescription(merchant, qris)
             display != null && transaction.description.equals("GoPay Payment", ignoreCase = true) -> display
             else -> transaction.description
         }
         return transaction.copy(description = description, rawPayload = payload.toString(), isQris = qris)
     }
 
-    private fun gopayDisplayDescription(transaction: UnifiedTransaction, merchant: String, qris: Boolean): String {
+    private fun gopayDisplayDescription(merchant: String, qris: Boolean): String {
         val trimmed = merchant.trim()
         if (!qris) return trimmed
         return if (trimmed.contains("QRIS", ignoreCase = true)) trimmed else "QRIS $trimmed"
