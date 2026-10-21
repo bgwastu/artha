@@ -40,12 +40,23 @@ object LedgerReconciler {
                 runCatching { item.getJSONObject("amount").get("value").toString().toBigDecimal().movePointRight(2).longValueExact() == tx.money.amountMinor && java.time.OffsetDateTime.parse(item.getString("order_timestamp")).toInstant() == tx.occurredAt }.getOrDefault(false)
         } == true
         private val savedShopeePayment = tx.provider == Provider.SHOPEE && tx.direction == Direction.DEBIT &&
-            origin in setOf("shopee-order-api", "shopeefood-order-api") && payload.optBoolean("paymentDetailVerified") &&
-            tx.money.currencyCode == "IDR" && runCatching {
+            origin in setOf("shopee-order-api", "shopeefood-order-api", "shopee-digital-api") &&
+            payload.optBoolean("paymentDetailVerified") && tx.money.currencyCode == "IDR" && runCatching {
                 val paid = payload.get("sourceAmountPaid").toString().toBigDecimal().divide(java.math.BigDecimal(1000)).longValueExact()
-                val time = payload.get("sourcePaymentTime").toString().toBigDecimal().longValueExact()
-                paid == tx.money.amountMinor && (if (origin == "shopee-order-api") java.time.Instant.ofEpochSecond(time)
-                    else java.time.Instant.ofEpochMilli(time)) == tx.occurredAt
+                paid == tx.money.amountMinor && when (origin) {
+                    "shopee-order-api" -> {
+                        val time = payload.get("sourcePaymentTime").toString().toBigDecimal().longValueExact()
+                        java.time.Instant.ofEpochSecond(time) == tx.occurredAt
+                    }
+                    "shopee-digital-api" -> {
+                        val time = payload.get("sourcePaidTime").toString().toBigDecimal().longValueExact()
+                        java.time.Instant.ofEpochSecond(time) == tx.occurredAt
+                    }
+                    else -> {
+                        val time = payload.get("sourcePaymentTime").toString().toBigDecimal().longValueExact()
+                        java.time.Instant.ofEpochMilli(time) == tx.occurredAt
+                    }
+                }
             }.getOrDefault(false)
         val confirmed = tx.provider == Provider.JAGO || savedShopeePayment ||
             tx.provider == Provider.SHOPEE && tx.direction == Direction.CREDIT && origin == "shopee-refund-api" && settled &&
@@ -342,7 +353,7 @@ object LedgerReconciler {
             }
         } else {
             val primaryRole = when (primary.provider) {
-                Provider.SHOPEE -> "Marketplace Order"
+                Provider.SHOPEE -> if (pPayload.optString("origin") == "shopee-digital-api") "Digital Purchase" else "Marketplace Order"
                 Provider.GOJEK, Provider.GRAB -> "Trip / Ride"
                 else -> "Transaction"
             }

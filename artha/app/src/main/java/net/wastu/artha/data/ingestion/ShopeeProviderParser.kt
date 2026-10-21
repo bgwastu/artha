@@ -72,6 +72,36 @@ internal object ShopeeProviderParser {
         }
     }
 
+    data class DigitalListPage(val orders: JSONArray, val nextCreateTime: Long?)
+
+    fun digitalListPage(response: JSONObject): DigitalListPage {
+        val data = digitalData(response)
+        val list = data.optJSONArray("list") ?: JSONArray()
+        val next = data.optLong("last_create_time").takeIf { it > 0L }
+        return DigitalListPage(list, next)
+    }
+
+    fun digitalDetail(response: JSONObject): JSONObject =
+        digitalData(response).optJSONObject("order") ?: schema("digital order detail")
+
+    fun digitalData(response: JSONObject): JSONObject {
+        if (response.has("err_code")) {
+            val code = integer(response, "err_code")
+            if (code != 0L) throw ProviderReadException(
+                AccountStatus.ERROR, "Shopee digital API rejected history (err_code $code).",
+            )
+            return response.optJSONObject("data") ?: schema("digital response data")
+        }
+        val legacyError = long(response.opt("error"))
+        if (legacyError == 9_030_9999L) {
+            throw ProviderReadException(
+                AccountStatus.ERROR,
+                "Shopee access challenge (HTTP 403). Open Shopee to check access; readable history will be retained.",
+            )
+        }
+        return data(response, food = false)
+    }
+
     fun data(response: JSONObject, food: Boolean): JSONObject {
         val code = integer(response, if (food) "code" else "error")
         // Marketplace control: error=19. App ApiCode: AuthFailed=3004, AuthTokenExpired=3011.
@@ -235,26 +265,27 @@ internal object ShopeeProviderParser {
     fun digitalProduct(order: JSONObject, detail: JSONObject? = null): Payment? {
         val id = (order.optString("order_id").ifBlank { order.optString("orderId") }).also(::validId)
         val source = detail ?: order
-        val rawAmount = long(source.opt("total_amount"))
+        val rawAmount = long(source.opt("final_price"))
+            ?: long(source.opt("total_amount"))
             ?: long(source.opt("amount"))
             ?: long(source.opt("final_amount"))
             ?: return null
         if (rawAmount <= 0L) return null
-        val time = long(source.opt("paid_time"))?.takeIf { it > 0 }
+        val time = long(source.opt("payment_time"))?.takeIf { it > 0 }
+            ?: long(source.opt("paid_time"))?.takeIf { it > 0 }
             ?: long(source.opt("create_time"))?.takeIf { it > 0 }
             ?: return null
-        val name = source.optString("item_name")
-            .ifBlank { source.optString("product_name") }
-            .ifBlank { source.optString("title") }
-            .ifBlank { "Shopee Digital Purchase" }
-        val status = source.optInt("order_status", source.optInt("status", -1))
-        val cancelled = status == 4 || source.optBoolean("cancelled", false)
+        val name = digitalDescription(source)
+        val cancelled = long(source.opt("cancel_time"))?.let { it > 0 } == true ||
+            source.optBoolean("cancelled", false)
         val items = JSONArray().put(JSONObject().put("name", name).put("price", "Rp${BigDecimal.valueOf(rawAmount, 5).stripTrailingZeros().toPlainString()}"))
+        val channel = source.optString("channel_name")
         val raw = receipt("shopee-digital-api", "Shopee Digital", name, items)
             .put("orderId", id)
             .put("sourceAmountPaid", rawAmount)
+            .put("sourcePaidTime", time)
             .put("grossPaidAmountMinor", money(rawAmount).amountMinor)
-            .put("paymentDetailVerified", detail != null)
+            .put("paymentDetailVerified", detail != null || source.optString("item_name").isNotBlank())
             .put("paymentEvidence", "settled-order-payment")
             .put("paymentStatus", "COMPLETED")
             .put("paymentDirection", "DEBIT")
@@ -263,6 +294,13 @@ internal object ShopeeProviderParser {
             .put("paymentTimestamp", seconds(time).toString())
             .put("cancelled", cancelled)
             .put("refundState", if (cancelled) "unresolved" else "not_observed")
+            .also { payload ->
+                if (channel.isNotBlank()) payload.put("sourcePaymentMethod", channel)
+                source.optJSONObject("bill_info")?.optJSONObject("details")?.let { bill ->
+                    bill.optString("vehiclecategory").takeIf { it.isNotBlank() }?.let { payload.put("vehicleCategory", it) }
+                    bill.optString("vehiclemodel").takeIf { it.isNotBlank() }?.let { payload.put("vehicleModel", it) }
+                }
+            }
         return Payment(UnifiedTransaction(
             provider = Provider.SHOPEE,
             providerTransactionId = "shopee:digital:$id",
@@ -348,6 +386,21 @@ internal object ShopeeProviderParser {
         if (value !in 946684800000L..4102444800000L) schema("milliseconds timestamp")
         return Instant.ofEpochMilli(value)
     }
+    internal fun digitalDescription(order: JSONObject): String {
+        val title = order.optString("item_name")
+            .ifBlank { order.optString("product_name") }
+            .ifBlank { order.optString("title") }
+            .ifBlank { "Shopee Digital Purchase" }
+        val details = order.optJSONObject("bill_info")?.optJSONObject("details")
+        val vehicle = details?.let {
+            listOfNotNull(
+                it.optString("vehiclecategory").takeIf(String::isNotBlank),
+                it.optString("vehiclemodel").takeIf(String::isNotBlank),
+            ).joinToString(" ")
+        }?.takeIf(String::isNotBlank)
+        return if (vehicle != null) "$title - $vehicle" else title
+    }
+
     private fun money(raw: Long): Money {
         // Both source contracts use rupiah * 100,000; ledger IDR minor units are rupiah * 100.
         if (raw <= 0L || raw % 1000L != 0L) schema("exact IDR amount")

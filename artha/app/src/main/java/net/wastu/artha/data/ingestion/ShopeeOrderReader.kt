@@ -18,6 +18,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.providers.AccountStatus
@@ -138,9 +139,12 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
             }, onFailure = { rows.issue(it as Exception) })
         }
 
+        val foodCache = loadDetailCache("shopee_food_details.json")
         val food = linkedMapOf<String, JSONObject>()
         var listComplete = false
         var listFailed = false
+        var foodNetworkUnavailable = false
+        var foodListAccessChallenge = false
         var lastId = ""
         val visited = mutableSetOf<String>()
         for (page in 0 until MAX_FOOD_PAGES) {
@@ -151,9 +155,16 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
                 ShopeeProviderParser.foodPage(request(
                     cookies, FOOD_HOST,
                     "/api/buyer/orders?filter_type=20&page_size=50&last_id=${encode(lastId)}", budget,
+                    food = true,
                 ), search = false)
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { listFailed = true; break }
+            catch (error: Exception) {
+                listFailed = true
+                foodListAccessChallenge = isShopeeFoodAccessChallenge(error)
+                foodNetworkUnavailable = isTransientNetworkError(error)
+                if (!foodNetworkUnavailable && !foodListAccessChallenge) rows.issue(error)
+                break
+            }
             collect(response.orders, food = true, food, rows)
             val paginationIssue = response.paginationIssue
             if (paginationIssue != null) {
@@ -167,7 +178,12 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
             lastId = next
         }
         if (!listComplete && !listFailed) rows.issue("Food list page limit reached; older orders may be missing")
-        if (!listComplete) {
+        if (!listComplete && foodNetworkUnavailable) {
+            val restored = importCachedFoodPayments(foodCache, identities, rows)
+            if (restored == 0) {
+                rows.issue("Shopee Food is offline (unable to reach foody.shopee.co.id); open Shopee and check your connection.")
+            }
+        } else if (!listComplete) {
             val searches = boundedMap(FOOD_KEYWORDS) { keyword ->
                 val searchRows = mutableListOf<JSONObject>()
                 val issues = mutableListOf<Exception>()
@@ -178,9 +194,13 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
                         ShopeeProviderParser.foodPage(request(
                             cookies, FOOD_HOST, "/api/buyer/orders/search-history", budget,
                             JSONObject().put("keyword", keyword).put("last_id", cursor).put("page_size", 50),
+                            food = true,
                         ), search = true)
                     } catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) { issues += error; break }
+                    catch (error: Exception) {
+                        if (!isShopeeFoodAccessChallenge(error)) issues += error
+                        break
+                    }
                     for (index in 0 until response.orders.length()) {
                         val row = response.orders.optJSONObject(index)
                         if (row == null) issues += schema("food search row") else searchRows += row
@@ -196,7 +216,7 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
                 searchRows to issues
             }
             for (result in searches) result.fold(onSuccess = { (found, issues) ->
-                issues.forEach(rows::issue)
+                issues.filterNot(::isShopeeFoodAccessChallenge).forEach(rows::issue)
                 found.forEach { row -> collect(JSONArray().put(row), food = true, food, rows) }
             }, onFailure = { rows.issue(it as Exception) })
         } else {
@@ -204,7 +224,6 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
             rows.issue("Food listing covers the provider's available order window; older/digital purchases are not verified")
         }
         if (food.size > MAX_FOOD_DETAILS) rows.issue("Food detail limit reached; remaining orders use source payment fields only")
-        val foodCache = loadDetailCache("shopee_food_details.json")
         var newFoodCount = 0
         val foods = boundedMap(food.entries.toList().withIndex().toList()) { (detailIndex, entry) ->
             var detail: JSONObject? = null
@@ -216,14 +235,16 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
                 } else {
                     try {
                         detail = ShopeeProviderParser.data(request(
-                            cookies, FOOD_HOST, "/api/buyer/orders/${entry.key}", budget,
+                            cookies, FOOD_HOST, "/api/buyer/orders/${entry.key}", budget, food = true,
                         ), food = true)
                         synchronized(foodCache) {
                             foodCache[entry.key] = detail
                             newFoodCount++
                         }
                     } catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) { issues += error }
+                    catch (error: Exception) {
+                        if (!isShopeeFoodAccessChallenge(error)) issues += error
+                    }
                 }
             }
             val payment = ShopeeProviderParser.food(entry.value, detail)
@@ -232,7 +253,7 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
             if (payment != null && payment.refundExpected && detail != null) {
                 try {
                     val data = ShopeeProviderParser.data(request(
-                        cookies, FOOD_HOST, "/api/buyer/orders/${entry.key}/refunds", budget,
+                        cookies, FOOD_HOST, "/api/buyer/orders/${entry.key}/refunds", budget, food = true,
                     ), food = true)
                     val source = data.optJSONArray("refunds") ?: throw schema("food refund list")
                     for (index in 0 until source.length()) {
@@ -264,38 +285,65 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
             Triple(charge, refunds, issues)
         }
         for (result in foods) result.fold(onSuccess = { (charge, refunds, issues) ->
-            issues.forEach(rows::issue)
+            issues.filterNot(::isShopeeFoodAccessChallenge).forEach(rows::issue)
             charge?.let { add(it, identities, rows) }
             refunds.forEach { add(it, identities, rows) }
         }, onFailure = { rows.issue(it as Exception) })
         if (newFoodCount > 0) {
             saveDetailCache("shopee_food_details.json", foodCache)
         }
+        if (foodListAccessChallenge && food.isEmpty()) {
+            rows.issue(
+                "Shopee Food order list blocked (HTTP 403). Open Shopee and try ShopeeFood; search fallback found no orders.",
+            )
+        }
 
         val digital = linkedMapOf<String, JSONObject>()
-        var lastCreateTime: Long? = null
-        for (page in 0 until MAX_DIGITAL_PAGES) {
-            coroutineContext.ensureActive()
-            val query = if (lastCreateTime != null) "order_status=0&page=${page + 1}&page_size=20&last_create_time=$lastCreateTime"
-                        else "order_status=0&page=${page + 1}&page_size=20"
-            val response = try {
-                ShopeeProviderParser.data(request(
-                    cookies, MARKET_HOST, "/digital-product/api/order/v2/list?$query", budget
-                ), food = false)
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { break }
-
-            val list = response.optJSONArray("list") ?: break
-            if (list.length() == 0) break
-            for (i in 0 until list.length()) {
-                val item = list.optJSONObject(i) ?: continue
-                val orderId = item.optString("order_id").ifBlank { item.optString("orderId") }
-                if (orderId.isNotBlank()) digital[orderId] = item
+        var digitalIssue: Exception? = null
+        for (orderStatus in DIGITAL_ORDER_STATUSES) {
+            for (showStatus in DIGITAL_SHOW_STATUSES) {
+            var lastCreateTime: Long? = null
+            for (page in 0 until MAX_DIGITAL_PAGES) {
+                coroutineContext.ensureActive()
+                val query = buildString {
+                    append("order_status=$orderStatus&page=${page + 1}&page_size=20")
+                    if (showStatus != null) append("&order_show_status=$showStatus")
+                    if (lastCreateTime != null) append("&last_create_time=$lastCreateTime")
+                }
+                val pageData = try {
+                    ShopeeProviderParser.digitalListPage(request(
+                        cookies, MARKET_HOST, "/digital-product/api/order/v2/list?$query", budget, digital = true,
+                    ))
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) {
+                    if (digitalIssue == null && !isShopeeAccessChallenge(error)) digitalIssue = error
+                    break
+                }
+                if (pageData.orders.length() == 0) break
+                for (i in 0 until pageData.orders.length()) {
+                    val item = pageData.orders.optJSONObject(i) ?: continue
+                    val orderId = item.optString("order_id").ifBlank { item.optString("orderId") }
+                    if (orderId.isNotBlank()) digital[orderId] = item
+                }
+                val nextTime = pageData.nextCreateTime
+                if (nextTime == null || nextTime == lastCreateTime) break
+                lastCreateTime = nextTime
             }
-            val nextTime = response.optLong("last_create_time")
-            if (nextTime <= 0L || nextTime == lastCreateTime) break
-            lastCreateTime = nextTime
+            }
         }
+        for (orderId in discoverDigitalOrderIds().sortedDescending().take(MAX_DIGITAL_CACHE_ORDERS)) {
+            if (orderId in digital) continue
+            try {
+                val order = ShopeeProviderParser.digitalDetail(request(
+                    cookies, MARKET_HOST, "/digital-product/api/order/v2/detail?order_id=$orderId", budget, digital = true,
+                ))
+                digital.putIfAbsent(orderId, order)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                if (digitalIssue == null && !isShopeeAccessChallenge(error)) digitalIssue = error
+            }
+        }
+        digitalIssue?.let(rows::issue)
         for ((_, item) in digital) {
             try {
                 val payment = ShopeeProviderParser.digitalProduct(item)
@@ -303,7 +351,22 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (e: Exception) { rows.issue(e) }
         }
-        rows.finish().sortedByDescending { it.occurredAt }
+        try {
+            rows.finish().sortedByDescending { it.occurredAt }
+        } catch (partial: PartialImportException) {
+            if (partial.transactions.isNotEmpty() && isRecoverableShopeeAccessChallengePartial(partial.message.orEmpty())) {
+                partial.transactions.sortedByDescending { it.occurredAt }
+            } else throw partial
+        }
+    }
+
+    private suspend fun discoverDigitalOrderIds(): Set<String> {
+        val output = files.executeCommandWithOutput(
+            "grep -a -ohE 'digital-product/api/order/v2/detail\\?order_id=[0-9]{10,}' '$SHOPEE_WEBVIEW_HTTP_CACHE'/* 2>/dev/null || true",
+        ) ?: return emptySet()
+        return output.mapNotNull { line ->
+            Regex("order_id=([0-9]+)").find(line)?.groupValues?.getOrNull(1)
+        }.toSet()
     }
 
     private suspend fun readCookies(): String = files.readSqlite(
@@ -361,7 +424,72 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
     }
 
     private suspend fun request(
-        cookies: String, host: String, path: String, budget: RequestBudget, payload: JSONObject? = null,
+        cookies: String,
+        host: String,
+        path: String,
+        budget: RequestBudget,
+        payload: JSONObject? = null,
+        food: Boolean = false,
+        digital: Boolean = false,
+    ): JSONObject {
+        val maxTransientAttempts = if (food) 4 else 2
+        var attempt = 0
+        while (true) {
+            try {
+                return requestOnce(cookies, host, path, budget, payload, food, digital)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (!isTransientNetworkError(error) || attempt >= maxTransientAttempts) {
+                    if (isTransientNetworkError(error)) {
+                        throw ProviderReadException(
+                            AccountStatus.ERROR,
+                            "Shopee network unavailable (${transientNetworkSummary(error)}); valid rows retained.",
+                        )
+                    }
+                    throw error
+                }
+                delay((attempt + 1) * 1_500L)
+                attempt++
+            }
+        }
+    }
+
+    private fun importCachedFoodPayments(
+        foodCache: Map<String, JSONObject>,
+        identities: MutableMap<String, UnifiedTransaction>,
+        rows: ImportRows,
+    ): Int {
+        var restored = 0
+        for ((orderId, detail) in foodCache) {
+            try {
+                val payment = ShopeeProviderParser.food(foodOrderStub(orderId, detail), detail) ?: continue
+                val before = identities.size
+                add(payment.transaction, identities, rows)
+                if (identities.size > before) restored++
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { rows.issue(error) }
+        }
+        return restored
+    }
+
+    private fun foodOrderStub(orderId: String, detail: JSONObject): JSONObject {
+        val order = detail.optJSONObject("order")
+        val id = order?.optString("id")?.takeIf { it.isNotBlank() } ?: orderId
+        val stub = JSONObject().put("id", id)
+        order?.optJSONObject("store")?.let { stub.put("store", it) }
+        order?.optJSONArray("items")?.let { stub.put("items", it) }
+        return stub
+    }
+
+    private suspend fun requestOnce(
+        cookies: String,
+        host: String,
+        path: String,
+        budget: RequestBudget,
+        payload: JSONObject? = null,
+        food: Boolean = false,
+        digital: Boolean = false,
     ): JSONObject {
         kotlin.coroutines.coroutineContext.ensureActive()
         budget.take()
@@ -371,11 +499,17 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
             connection.readTimeout = 8_000
             connection.instanceFollowRedirects = false
             connection.setRequestProperty("Cookie", cookies)
-            connection.setRequestProperty("User-Agent", "Shopee Android Beeshop locale/id version=38336 appver=38336")
+            if (digital) {
+                connection.setRequestProperty("User-Agent", DIGITAL_WEBVIEW_USER_AGENT)
+                connection.setRequestProperty("Referer", "https://shopee.co.id/produk-digital/m")
+                connection.setRequestProperty("X-Requested-With", "com.shopee.id")
+            } else {
+                connection.setRequestProperty("User-Agent", "Shopee Android Beeshop locale/id version=38336 appver=38336")
+                connection.setRequestProperty("Referer", "https://shopee.co.id/")
+            }
             connection.setRequestProperty("X-Shopee-Client-Timezone", "Asia/Jakarta")
-            connection.setRequestProperty("Referer", "https://shopee.co.id/")
             connection.setRequestProperty("Accept", "application/json, text/plain, */*")
-            if (host == FOOD_HOST) {
+            if (food || host == FOOD_HOST) {
                 connection.setRequestProperty("X-App-Type", "shopee")
                 connection.setRequestProperty("X-SF-Trace-ID", UUID.randomUUID().toString())
                 connection.setRequestProperty("X-SF-Publish-Context-ID", UUID.randomUUID().toString())
@@ -398,7 +532,7 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
                 throw ProviderReadException(AccountStatus.ERROR,
                     "Shopee access ${if (challenge) "challenge" else "blocked"} (HTTP 403). Open Shopee to check access; readable history will be retained.")
             }
-            requireHttpSuccess(status, "Shopee")
+            requireHttpSuccess(status, "Shopee", connection.getHeaderField("Retry-After"))
             val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
                 val result = StringBuilder()
                 val buffer = CharArray(8192)
@@ -434,7 +568,15 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
         private const val MAX_FOOD_PAGES = 20
         private const val MAX_SEARCH_PAGES = 4
         private const val MAX_FOOD_DETAILS = 150
-        private const val MAX_DIGITAL_PAGES = 5
+        private const val MAX_DIGITAL_PAGES = 8
+        private const val MAX_DIGITAL_CACHE_ORDERS = 80
+        private val DIGITAL_ORDER_STATUSES = listOf(0, 1, 2, 3, 4, 5, 11)
+        private val DIGITAL_SHOW_STATUSES = listOf<Int?>(null, 11)
+        private const val DIGITAL_WEBVIEW_USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 17; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 " +
+                "Chrome/131.0.0.0 Mobile Safari/537.36 Shopee Beeshop locale/id version=38336 appver=38336"
+        private const val SHOPEE_WEBVIEW_HTTP_CACHE =
+            "/data/data/com.shopee.id/cache/webview_com.shopee.id/Default/HTTP Cache/Cache_Data"
         private val FOOD_KEYWORDS = listOf(
             "ayam", "nasi", "mie", "paket", "goreng", "sapi", "pizza", "martabak", "kebab", "burger",
             "kopi", "es", "bakar", "pedas", "crispy", "combo", "teh", "roti", "bakso", "soto",

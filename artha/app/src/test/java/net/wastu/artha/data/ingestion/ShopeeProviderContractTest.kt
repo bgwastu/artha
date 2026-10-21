@@ -25,6 +25,45 @@ class ShopeeProviderContractTest {
         assertEquals("Rp6250", item.getString("price"))
         assertEquals(2, item.getInt("qty"))
     }
+    @Test fun digitalDetailUsesErrCodeEnvelope() {
+        val response = JSONObject("""{"err_code":0,"data":{"order":{"order_id":"101","item_name":"Example","final_price":10000000000,"payment_time":1700000000}}}""")
+        assertEquals("101", ShopeeProviderParser.digitalDetail(response).getString("order_id"))
+    }
+
+    @Test fun digitalListPageUsesErrCodeEnvelope() {
+        val response = JSONObject("""{
+            "err_code":0,"err_msg":"success","data":{
+                "last_create_time":1700000100,
+                "list":[{"order_id":"909192","item_name":"Paspor","total_amount":95000000000,"create_time":1700000000,"order_status":3}],
+                "total":1
+            }
+        }""")
+        val page = ShopeeProviderParser.digitalListPage(response)
+        assertEquals(1700000100L, page.nextCreateTime)
+        assertEquals("909192", page.orders.getJSONObject(0).getString("order_id"))
+        val payment = ShopeeProviderParser.digitalProduct(page.orders.getJSONObject(0))!!
+        assertTrue(JSONObject(payment.transaction.rawPayload).getBoolean("paymentDetailVerified"))
+    }
+
+    @Test fun digitalProductUsesFinalPricePaymentTimeAndBillVehicleDetails() {
+        val order = JSONObject("""{
+            "order_id": "2791036233107073915",
+            "item_name": "Samsat Digital Nasional (SIGNAL)",
+            "final_price": 28200000000,
+            "total_amount": 28400000000,
+            "payment_time": 1791036310,
+            "channel_name": "Saldo ShopeePay",
+            "bill_info": {"details": {"vehiclecategory": "SEPEDA MOTOR", "vehiclemodel": "H1B02N42L0 A/T"}}
+        }""")
+        val payment = ShopeeProviderParser.digitalProduct(order)!!
+        assertEquals("shopee:digital:2791036233107073915", payment.transaction.providerTransactionId)
+        assertEquals(28_200_000L, payment.transaction.money.amountMinor)
+        assertEquals(Instant.ofEpochSecond(1_791_036_310L), payment.transaction.occurredAt)
+        assertEquals("Samsat Digital Nasional (SIGNAL) - SEPEDA MOTOR H1B02N42L0 A/T", payment.transaction.description)
+        val raw = JSONObject(payment.transaction.rawPayload)
+        assertEquals("Saldo ShopeePay", raw.getString("sourcePaymentMethod"))
+    }
+
     @Test fun digitalProductUsesPaidAmountAndPaymentTime() {
         val order = JSONObject("""{
             "order_id": "909192",
@@ -327,6 +366,36 @@ class ShopeeProviderContractTest {
                 }
             }
         }
+    }
+
+    @Test fun transientNetworkErrorsAreRecognizedForRetry() {
+        assertTrue(isTransientNetworkError(java.net.UnknownHostException("shopee.co.id")))
+        assertTrue(isTransientNetworkError(Exception("No address associated with hostname")))
+        assertFalse(isTransientNetworkError(ProviderReadException(AccountStatus.ERROR, "Shopee schema")))
+    }
+
+    @Test fun singleAccessChallengePartialIsRecoverableWhenRowsExist() {
+        assertTrue(isRecoverableShopeeAccessChallengePartial(
+            "Incomplete import: 1 issues. Shopee access challenge (HTTP 403). Open Shopee to check access; readable history will be retained.",
+        ))
+        assertFalse(isRecoverableShopeeAccessChallengePartial(
+            "Incomplete import: 2 issues. Shopee access challenge (HTTP 403). Food list page limit reached",
+        ))
+    }
+
+    @Test fun foodListAccessChallengeIsNotCountedWhenSearchRecoversOrders() {
+        val challenge = ProviderReadException(
+            AccountStatus.ERROR,
+            "Shopee access challenge (HTTP 403). Open Shopee to check access; readable history will be retained.",
+        )
+        assertTrue(isShopeeFoodAccessChallenge(challenge))
+        assertFalse(isShopeeFoodAccessChallenge(ProviderReadException(AccountStatus.ERROR, "Shopee marketplace blocked (HTTP 403)")))
+        val payment = ShopeeProviderParser.food(foodOrder(), foodDetail(foodOrder()))!!.transaction
+        val rows = ImportRows()
+        rows.transactions += payment
+        // List endpoint challenge is ignored when food rows were recovered elsewhere.
+        rows.finish()
+        assertEquals(1, rows.transactions.size)
     }
 
     @Test fun sourceAuthAndSchemaFailuresRemainTypedAndValidRowsSurvive() {
