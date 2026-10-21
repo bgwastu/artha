@@ -26,6 +26,7 @@ class ArthaViewModelTest {
     private var opens = 0
     private val ledger = object : LedgerRepository {
         override fun observeTransactions() = transactions
+        override suspend fun loadTransactions() = transactions.value
         override suspend fun append(transactions: List<UnifiedTransaction>) = AppendResult(transactions.size, 0)
     }
 

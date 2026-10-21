@@ -12,6 +12,9 @@ interface TransactionDao {
     @Query("SELECT * FROM unified_transactions ORDER BY occurredAtEpochMillis DESC, provider, providerTransactionId")
     fun observeTransactions(): Flow<List<TransactionEntity>>
 
+    @Query("SELECT * FROM unified_transactions ORDER BY occurredAtEpochMillis DESC, provider, providerTransactionId")
+    suspend fun loadAll(): List<TransactionEntity>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun append(transactions: List<TransactionEntity>): List<Long>
 

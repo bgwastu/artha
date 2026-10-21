@@ -255,7 +255,12 @@ class TransactionEditFeedbackTest {
         Dispatchers.setMain(dispatcher)
         var vm: ArthaViewModel? = null
         try {
-            val prefs = FixturePreferences(mapOf("ai_base_url" to "https://fictional.example/v1", "ai_api_key" to "fictional-test-key", "ai_model" to "fictional-model"))
+            val prefs = FixturePreferences(mapOf(
+                "analysis_enabled" to "true",
+                "ai_base_url" to "https://fictional.example/v1",
+                "ai_api_key" to "fictional-test-key",
+                "ai_model" to "fictional-model",
+            ))
             val store = AnalysisStore(prefs.context)
             val state = MutableStateFlow<SpendingState>(SpendingState.Ready((0..32).map { payment().copy(providerTransactionId = if (it == 0) payment().providerTransactionId else "fixture-$it") }, emptyMap()))
             val called = CompletableDeferred<Unit>()
@@ -358,6 +363,7 @@ class TransactionEditFeedbackTest {
         private val preferences = proxy<SharedPreferences> { name, args ->
             when (name) {
                 "getString" -> values[args[0]] ?: args[1]
+                "getBoolean" -> values[args[0]]?.toBooleanStrictOrNull() ?: (args[1] as Boolean)
                 "contains" -> values.containsKey(args[0])
                 "edit" -> editor()
                 else -> error("Unexpected preference call: $name")
@@ -373,6 +379,7 @@ class TransactionEditFeedbackTest {
             editor = proxy { name, args ->
                 when (name) {
                     "putString" -> { changes[args[0] as String] = args[1] as String?; editor }
+                    "putBoolean" -> { changes[args[0] as String] = (args[1] as Boolean).toString(); editor }
                     "remove" -> { changes[args[0] as String] = null; editor }
                     "commit" -> {
                         beforeCommit?.invoke()

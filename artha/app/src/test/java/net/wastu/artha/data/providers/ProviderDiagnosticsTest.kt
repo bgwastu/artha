@@ -155,6 +155,7 @@ class ProviderDiagnosticsTest {
     private class FixtureLedger : LedgerRepository {
         var rows = emptyList<UnifiedTransaction>()
         override fun observeTransactions() = flowOf(rows)
+        override suspend fun loadTransactions() = rows
         override suspend fun append(transactions: List<UnifiedTransaction>): AppendResult {
             rows = rows + transactions
             return AppendResult(transactions.size, 0)

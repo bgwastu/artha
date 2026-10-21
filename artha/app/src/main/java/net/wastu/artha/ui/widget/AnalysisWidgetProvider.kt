@@ -12,6 +12,7 @@ import android.widget.RemoteViews
 import net.wastu.artha.MainActivity
 import net.wastu.artha.R
 import net.wastu.artha.core.model.Money
+import net.wastu.artha.data.analysis.AnalysisFeature
 import net.wastu.artha.data.analysis.BudgetAnalyzer
 import net.wastu.artha.ui.formatMoney
 import java.time.YearMonth
@@ -77,6 +78,23 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
                 views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
                 appWidgetManager.partiallyUpdateAppWidget(id, views)
             }
+        }
+        if (!AnalysisFeature.isEnabled(context)) {
+            WidgetRefresh.schedule("analysis", pendingResult) {
+                for (id in appWidgetIds) {
+                    val views = RemoteViews(context.packageName, R.layout.widget_analysis)
+                    val month = YearMonth.now(net.wastu.artha.core.model.AccountingTime.clock)
+                    views.setTextViewText(R.id.widget_month_title, month.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)))
+                    views.setTextViewText(R.id.widget_total_amount, "—")
+                    views.setTextViewText(R.id.widget_status, "Analysis off")
+                    views.setViewVisibility(R.id.widget_details, View.GONE)
+                    views.setViewVisibility(R.id.widget_categories_list, View.GONE)
+                    views.setViewVisibility(R.id.widget_empty_text, View.GONE)
+                    views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
+                    appWidgetManager.updateAppWidget(id, views)
+                }
+            }
+            return
         }
         status()
         WidgetRefresh.schedule("analysis", pendingResult, onFailure = { status(failed = true) }) {

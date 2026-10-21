@@ -8,6 +8,7 @@ data class AppendResult(val inserted: Int, val duplicates: Int, val evidenceUpda
 /** Append-only: existing Unified Transactions are never replaced or deleted. */
 interface LedgerRepository {
     fun observeTransactions(): Flow<List<UnifiedTransaction>>
+    suspend fun loadTransactions(): List<UnifiedTransaction>
     suspend fun append(transactions: List<UnifiedTransaction>): AppendResult
     suspend fun appendProviderImport(transactions: List<UnifiedTransaction>): AppendResult = append(transactions)
 }

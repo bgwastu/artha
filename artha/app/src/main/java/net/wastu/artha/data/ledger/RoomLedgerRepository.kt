@@ -13,6 +13,9 @@ class RoomLedgerRepository(
         transactions.map(TransactionEntity::toDomain)
     }
 
+    override suspend fun loadTransactions(): List<UnifiedTransaction> =
+        dao.loadAll().map(TransactionEntity::toDomain)
+
     override suspend fun append(transactions: List<UnifiedTransaction>): AppendResult {
         // Parse before inserting the batch so malformed payloads cannot be partially appended.
         transactions.forEach { JSONObject(it.rawPayload) }

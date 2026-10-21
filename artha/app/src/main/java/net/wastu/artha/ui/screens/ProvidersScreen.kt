@@ -1,5 +1,7 @@
 package net.wastu.artha.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -35,6 +37,8 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.SettingsSuggest
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Widgets
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -59,6 +63,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -75,6 +81,7 @@ import net.wastu.artha.data.analysis.aiConnectionFailure
 import net.wastu.artha.ui.theme.incomeColor
 import net.wastu.artha.data.providers.AccountStatus
 import net.wastu.artha.data.providers.ProviderDiagnostic
+import net.wastu.artha.data.export.LedgerExportStorage
 import net.wastu.artha.ui.ArthaViewModel
 
 import androidx.compose.foundation.rememberScrollState
@@ -101,12 +108,50 @@ fun ProvidersScreen(
     onOpenDemo: (() -> Unit)? = null,
 ) {
     var selectedProvider by rememberSaveable { mutableStateOf<Provider?>(null) }
-    var showAiConfig by rememberSaveable { mutableStateOf(false) }
-    var showCategories by rememberSaveable { mutableStateOf(false) }
+    var showAnalysisSettings by rememberSaveable { mutableStateOf(false) }
     var showContext by rememberSaveable { mutableStateOf(false) }
     var showWidgetHelp by rememberSaveable { mutableStateOf(false) }
     var savingAi by remember { mutableStateOf(false) }
     var aiError by remember { mutableStateOf<String?>(null) }
+    var exporting by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var importingFile by remember { mutableStateOf(false) }
+    val importDocument = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val vm = viewModel ?: return@rememberLauncherForActivityResult
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            importingFile = true
+            try {
+                vm.importExportFile(context, uri)
+                Toast.makeText(context, "Import saved", Toast.LENGTH_SHORT).show()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                Toast.makeText(context, "Import failed", Toast.LENGTH_SHORT).show()
+            } finally {
+                importingFile = false
+            }
+        }
+    }
+    val exportDocument = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        val vm = viewModel ?: return@rememberLauncherForActivityResult
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            exporting = true
+            try {
+                val body = vm.buildExportJsonl()
+                LedgerExportStorage.writeToUri(context, uri, body)
+                Toast.makeText(context, "Export saved", Toast.LENGTH_SHORT).show()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Toast.makeText(context, "Export failed", Toast.LENGTH_SHORT).show()
+            } finally {
+                exporting = false
+            }
+        }
+    }
 
     val snapshot by viewModel?.analysisSnapshot?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val importEnabled by viewModel?.importEnabled?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(Provider.entries.toSet()) }
@@ -143,17 +188,40 @@ fun ProvidersScreen(
         if (viewModel != null) {
             item { SettingsHeading("Analysis") }
             item {
+                val enabled = snapshot?.analysisEnabled == true
                 val config = snapshot?.aiConfig
                 val filled = config != null && config.baseUrl.isNotBlank() && config.apiKey.isNotBlank() && config.model.isNotBlank()
-                val validUrl = config != null && runCatching { AiAnalysisService.endpoint(config.baseUrl) }.isSuccess
-                val summary = if (!filled) "Not set up" else if (!validUrl) "Check URL" else "Configured"
-                SettingsLink("AI", summary, Icons.Default.SettingsSuggest) {
+                val summary = when {
+                    !enabled -> "Off"
+                    !filled -> "On · not configured"
+                    else -> "On"
+                }
+                SettingsLink("Analysis", summary, Icons.Default.SettingsSuggest) {
                     aiError = null
-                    showAiConfig = true
+                    showAnalysisSettings = true
                 }
             }
-            item { SettingsLink("Categories", null, Icons.Default.Category) { showCategories = true } }
             item { SettingsLink("Personal context", null, Icons.Default.EditNote) { showContext = true } }
+            item {
+                SettingsLink(
+                    "Export transactions",
+                    if (exporting) "Exporting…" else null,
+                    Icons.Default.FileDownload,
+                ) {
+                    if (exporting) return@SettingsLink
+                    exportDocument.launch(viewModel.suggestedExportFileName())
+                }
+            }
+            item {
+                SettingsLink(
+                    "Import transactions",
+                    if (importingFile) "Importing…" else null,
+                    Icons.Default.FileUpload,
+                ) {
+                    if (importingFile) return@SettingsLink
+                    importDocument.launch(arrayOf("application/json", "application/*", "text/*"))
+                }
+            }
         }
         item { SettingsLink("Widgets", null, Icons.Default.Widgets) { showWidgetHelp = true } }
         if (onOpenDemo != null) item { SettingsLink("Demo mode", "Explore sample data", Icons.Default.PlayArrow, onOpenDemo) }
@@ -195,25 +263,32 @@ fun ProvidersScreen(
             },
             confirmButton = { TextButton(onClick = { showWidgetHelp = false }) { Text("Close") } })
     }
-    if (showAiConfig && snapshot != null && viewModel != null) {
-        AiConfigDialog(snapshot!!.aiConfig,
-            onDismiss = { if (!savingAi) showAiConfig = false },
-            saving = savingAi, error = aiError,
-            onSave = { config ->
+    if (showAnalysisSettings && snapshot != null && viewModel != null) {
+        val analysisSnapshot = snapshot!!
+        AnalysisSettingsSheet(
+            aiConfig = analysisSnapshot.aiConfig,
+            analysisEnabled = analysisSnapshot.analysisEnabled,
+            customCategories = analysisSnapshot.customCategories,
+            categoryIcons = analysisSnapshot.categoryIcons,
+            automationState = categoryAutomation,
+            savingAi = savingAi,
+            aiError = aiError,
+            onDismiss = { if (!savingAi) showAnalysisSettings = false },
+            onAnalysisEnabled = viewModel::setAnalysisEnabled,
+            onSaveAi = { config ->
                 savingAi = true
                 aiError = null
                 viewModel.updateAiConfig(config) { error ->
                     savingAi = false
                     aiError = error
-                    if (error == null) showAiConfig = false
                 }
-            })
-    }
-    if (showCategories && snapshot != null && viewModel != null) {
-        ManageCategoriesSheet(snapshot!!.customCategories, snapshot!!.categoryIcons,
-            { showCategories = false }, viewModel::addCustomCategory, viewModel::removeCustomCategory,
-            viewModel::setCategoryIcon, viewModel::resetCategoriesToDefault,
-            automationState = categoryAutomation, onRetryAi = viewModel::retryAutomaticCategories)
+            },
+            onAddCategory = viewModel::addCustomCategory,
+            onRemoveCategory = viewModel::removeCustomCategory,
+            onSetCategoryIcon = viewModel::setCategoryIcon,
+            onResetCategories = viewModel::resetCategoriesToDefault,
+            onRetryAi = viewModel::retryAutomaticCategories,
+        )
     }
     if (showContext && snapshot != null && viewModel != null) {
         KnowledgeEditorDialog(snapshot!!.knowledge, { showContext = false }) {

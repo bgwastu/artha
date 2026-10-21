@@ -21,6 +21,7 @@ class IngestionCoordinatorTest {
     private var appended = emptyList<UnifiedTransaction>()
     private val ledger = object : LedgerRepository {
         override fun observeTransactions() = flowOf(appended)
+        override suspend fun loadTransactions() = appended
         override suspend fun append(transactions: List<UnifiedTransaction>): AppendResult {
             appended = transactions
             return AppendResult(transactions.size, 0)

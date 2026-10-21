@@ -63,6 +63,7 @@ class ImportValidationTest {
         var saved = emptyList<UnifiedTransaction>()
         val ledger = object : LedgerRepository {
             override fun observeTransactions() = flowOf(saved)
+            override suspend fun loadTransactions() = saved
             override suspend fun append(transactions: List<UnifiedTransaction>): AppendResult {
                 saved = transactions; return AppendResult(saved.size, 0)
             }

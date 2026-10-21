@@ -38,6 +38,7 @@ class ProviderVisibilityTest {
             })
             val ledger = object : LedgerRepository {
                 override fun observeTransactions() = transactions
+                override suspend fun loadTransactions() = transactions.value
                 override suspend fun append(transactions: List<UnifiedTransaction>) = AppendResult(0, 0)
             }
             val viewModel = ArthaViewModel(RootAccess { true }, { ledger }, preferences = preferences)

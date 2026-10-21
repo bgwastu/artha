@@ -57,7 +57,9 @@ class LedgerRecoveryTest {
             var rootRequests = 0
             var imports = 0
             val repo = object : LedgerRepository {
-                override fun observeTransactions() = MutableStateFlow(listOf(payment))
+                private val rows = listOf(payment)
+                override fun observeTransactions() = MutableStateFlow(rows)
+                override suspend fun loadTransactions() = rows
                 override suspend fun append(transactions: List<UnifiedTransaction>) = AppendResult(0, transactions.size)
             }
             val model = ArthaViewModel(RootAccess { rootRequests++; false }, {

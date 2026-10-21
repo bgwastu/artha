@@ -9,7 +9,13 @@ import kotlinx.coroutines.flow.*
 import net.wastu.artha.core.model.*
 import net.wastu.artha.core.root.*
 import net.wastu.artha.data.analysis.*
+import android.content.Context
+import android.net.Uri
+import net.wastu.artha.data.export.LedgerExportStorage
+import net.wastu.artha.data.export.LedgerJsonlExport
+import net.wastu.artha.data.export.LedgerJsonlImport
 import net.wastu.artha.data.ledger.LedgerRepository
+import net.wastu.artha.data.ledger.ProviderObservations
 import net.wastu.artha.data.providers.ProviderPreferences
 sealed interface LedgerState {
     data object Loading : LedgerState
@@ -95,6 +101,26 @@ class ArthaViewModel(
     fun setTargetDestination(dest: String?) { _targetDestination.value = dest }
     fun setProviderEnabled(provider: Provider, enabled: Boolean) { preferences?.setEnabled(provider, enabled) }
     fun setImportEnabled(provider: Provider, enabled: Boolean) { preferences?.setImportEnabled(provider, enabled) }
+    fun setAnalysisEnabled(enabled: Boolean) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setAnalysisEnabled(enabled) } }
+
+    fun suggestedExportFileName(): String = LedgerExportStorage.fileName(clock.instant())
+
+    suspend fun buildExportJsonl(): String = withContext(Dispatchers.IO) {
+        val raw = ledger().loadTransactions()
+        val editable = raw.filterNot(ProviderObservations::isObservation)
+        analysisStore?.migrateMetadata(editable)
+        LedgerJsonlExport.build(raw, analysisSnapshot.value, clock.instant())
+    }
+
+    suspend fun importExportFile(context: Context, uri: Uri) = withContext(Dispatchers.IO) {
+        val body = context.contentResolver.openInputStream(uri)?.use { stream ->
+            stream.readBytes().toString(Charsets.UTF_8)
+        } ?: throw IllegalStateException("Unable to read the import file.")
+        val parsed = LedgerJsonlImport.parse(body)
+        analysisStore?.mergeImportedAnalysis(parsed.meta, parsed.labels)
+        ledger().append(parsed.transactions)
+    }
+
     fun enterForeground() {
         observeSavedLedger()
         automaticRefresh()
@@ -157,6 +183,10 @@ class ArthaViewModel(
                 val config = input.snapshot.aiConfig
                 if (config != previousConfig || input.retry != previousRetry) failedBatch = null
                 previousConfig = config; previousRetry = input.retry
+                if (!input.snapshot.analysisEnabled) {
+                    _categoryAutomation.value = CategoryAutomationState.NOT_CONFIGURED
+                    return@collectLatest
+                }
                 if (config.baseUrl.isBlank() || config.apiKey.isBlank() || config.model.isBlank()) {
                     _categoryAutomation.value = CategoryAutomationState.NOT_CONFIGURED
                     return@collectLatest
@@ -368,6 +398,7 @@ class ArthaViewModel(
             snapshot.knowledge + "\nresearch-v6\n${snapshot.aiConfig.baseUrl}\n${snapshot.aiConfig.model}\n${snapshot.aiConfig.apiKey}\n${if (month == YearMonth.now(clock.withZone(AccountingTime.zone))) java.time.LocalDate.now(clock.withZone(AccountingTime.zone)) else month}", snapshot.customCategories)
 
     fun analyzeMonth(month: YearMonth, forceReanalyze: Boolean = false, debounceMs: Long = 600) {
+        if (!analysisSnapshot.value.analysisEnabled) return
         if ((_refreshing.value || _categoryAutomation.value == CategoryAutomationState.WORKING) && !forceReanalyze) return
         val config = analysisSnapshot.value.aiConfig
         if (analysisStore == null || config.baseUrl.isBlank() || config.model.isBlank() || config.apiKey.isBlank()) return

@@ -44,6 +44,7 @@ class ArthaUiTest {
         var opened = false
         val viewModel = ArthaViewModel(RootAccess { false }, { opened = true; object : net.wastu.artha.data.ledger.LedgerRepository {
             override fun observeTransactions() = kotlinx.coroutines.flow.flowOf(emptyList<UnifiedTransaction>())
+            override suspend fun loadTransactions() = emptyList<UnifiedTransaction>()
             override suspend fun append(transactions: List<UnifiedTransaction>) = net.wastu.artha.data.ledger.AppendResult(0, 0)
         } })
         model = viewModel

@@ -30,6 +30,7 @@ data class AnalysisSnapshot(
     val analysisFingerprints: Map<String, String> = emptyMap(),
     val manualCategories: Set<String> = emptySet(),
     val aiCategoryFingerprints: Map<String, String> = emptyMap(),
+    val analysisEnabled: Boolean = false,
 )
 
 val INITIAL_DEFAULT_CATEGORIES = listOf(
@@ -96,7 +97,15 @@ class AnalysisStore(context: Context) {
             analysisFingerprints = parseMap(fingerprintsJson),
             manualCategories = parseList(prefs.getString("manual_categories", "[]") ?: "[]").toSet(),
             aiCategoryFingerprints = parseMap(prefs.getString("ai_category_fingerprints", "{}") ?: "{}"),
+            analysisEnabled = prefs.getBoolean("analysis_enabled", false),
         )
+    }
+
+    @Synchronized
+    fun setAnalysisEnabled(enabled: Boolean) {
+        prefs.edit { putBoolean("analysis_enabled", enabled) }
+        _snapshot.value = _snapshot.value.copy(analysisEnabled = enabled)
+        runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
     }
 
     @Synchronized
@@ -342,9 +351,85 @@ class AnalysisStore(context: Context) {
     }
 
     @Synchronized
+    fun mergeImportedAnalysis(meta: org.json.JSONObject?, labels: List<net.wastu.artha.data.export.ImportedLabels>) {
+        var next = _snapshot.value
+        meta?.optJSONObject("analysis")?.let { analysis ->
+            val importedNotes = jsonObjectToMap(analysis.optJSONObject("userNotes"))
+            val importedCategories = jsonObjectToMap(analysis.optJSONObject("categories"))
+            val importedReasons = jsonObjectToMap(analysis.optJSONObject("reasons"))
+            val importedMonthlyNotes = jsonObjectToMap(analysis.optJSONObject("monthlyNotes"))
+            val importedSummaries = jsonObjectToMap(analysis.optJSONObject("monthlySummaries"))
+            val importedIcons = jsonObjectToMap(analysis.optJSONObject("categoryIcons"))
+            val importedManual = jsonArrayToList(analysis.optJSONArray("manualCategories")).toSet()
+            val importedCustom = jsonArrayToList(analysis.optJSONArray("customCategories"))
+            val knowledge = analysis.optString("knowledge")
+            next = next.copy(
+                knowledge = knowledge.ifBlank { next.knowledge },
+                customCategories = (importedCustom + next.customCategories).distinctBy { it.lowercase() },
+                categoryIcons = next.categoryIcons + importedIcons,
+                monthlyNotes = next.monthlyNotes + importedMonthlyNotes,
+                monthlySummaries = next.monthlySummaries + importedSummaries,
+                userNotes = next.userNotes + importedNotes,
+                categories = next.categories + importedCategories,
+                reasons = next.reasons + importedReasons,
+                manualCategories = next.manualCategories + importedManual,
+            )
+        }
+        val userNotes = next.userNotes.toMutableMap()
+        val categories = next.categories.toMutableMap()
+        val reasons = next.reasons.toMutableMap()
+        val manual = next.manualCategories.toMutableSet()
+        val updatedAt = next.updatedAt.toMutableMap()
+        val now = System.currentTimeMillis()
+        for (label in labels) {
+            label.userNote?.let {
+                userNotes[label.key] = it
+                updatedAt["note:${label.key}"] = now
+            }
+            label.category?.let { category ->
+                categories[label.key] = category
+                reasons[label.key] = label.reason.orEmpty()
+                updatedAt["cat:${label.key}"] = now
+                if (label.classificationIsManual) manual += label.key
+            }
+        }
+        next = next.copy(userNotes = userNotes, categories = categories, reasons = reasons, manualCategories = manual, updatedAt = updatedAt)
+        prefs.edit {
+            putString("knowledge", next.knowledge)
+            putString("custom_categories", JSONArray(next.customCategories).toString())
+            putString("custom_category_icons", JSONObject(next.categoryIcons as Map<*, *>).toString())
+            putString("monthly_notes", JSONObject(next.monthlyNotes as Map<*, *>).toString())
+            putString("monthly_summaries", JSONObject(next.monthlySummaries as Map<*, *>).toString())
+            putString("user_notes", JSONObject(next.userNotes as Map<*, *>).toString())
+            putString("categories", JSONObject(next.categories as Map<*, *>).toString())
+            putString("reasons", JSONObject(next.reasons as Map<*, *>).toString())
+            putString("manual_categories", JSONArray(next.manualCategories.toList()).toString())
+            putString("updated_at_map", JSONObject(next.updatedAt.mapValues { it.value.toString() } as Map<*, *>).toString())
+        }
+        _snapshot.value = next
+        runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
+    }
+
+    @Synchronized
     fun migrateMetadata(transactions: List<net.wastu.artha.core.model.UnifiedTransaction>) {
         val migrated = TransactionMetadata.migrate(_snapshot.value, transactions)
         if (migrated != _snapshot.value) applyMergedSnapshot(migrated)
+    }
+
+    private fun jsonObjectToMap(obj: JSONObject?): Map<String, String> {
+        if (obj == null) return emptyMap()
+        val map = mutableMapOf<String, String>()
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            map[key] = obj.optString(key)
+        }
+        return map
+    }
+
+    private fun jsonArrayToList(array: JSONArray?): List<String> {
+        if (array == null) return emptyList()
+        return List(array.length()) { index -> array.optString(index) }.filter { it.isNotBlank() }
     }
 
     private fun parseMap(json: String): Map<String, String> {
