@@ -273,26 +273,26 @@ internal class GojekOrderReader(private val files: RootFileReader) {
         val hints = jagoGopayHints().filter { it.orderId !in known }
         if (hints.isEmpty()) return
         var reads = 0
+        // The detail API is bounded and abandoned after its first rejection; Jago-derived rows need no network.
+        var apiUsable = true
         for (hint in hints) {
             checkActive()
-            if (reads >= MAX_DETAILS || deadlineExceeded(started)) break
-            reads++
             val orderId = hint.orderId
             val cachedDetail = details[orderId]
-            val payment = when {
-                cachedDetail != null -> runCatching { GojekProviderParser.payment(cachedDetail) }.getOrNull()
-                else -> null
-            } ?: try {
-                val detail = GojekProviderParser.detail(paymentDetailRequest(orderId, headers, started, checkActive))
-                details.putIfAbsent(orderId, detail)
-                GojekProviderParser.payment(detail)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: ProviderReadException) {
-                GojekProviderParser.paymentFromJagoLinkedDebit(hint.jago, orderId)
-            } catch (_: Exception) {
-                GojekProviderParser.paymentFromJagoLinkedDebit(hint.jago, orderId)
-            } ?: continue
+            var payment = cachedDetail?.let { runCatching { GojekProviderParser.payment(it) }.getOrNull() }
+            if (payment == null && apiUsable && reads < MAX_DETAILS && !deadlineExceeded(started)) {
+                reads++
+                try {
+                    val detail = GojekProviderParser.detail(paymentDetailRequest(orderId, headers, started, checkActive))
+                    details.putIfAbsent(orderId, detail)
+                    payment = GojekProviderParser.payment(detail)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    apiUsable = false
+                }
+            }
+            payment = payment ?: runCatching { GojekProviderParser.paymentFromJagoLinkedDebit(hint.jago, orderId) }.getOrNull() ?: continue
             val existing = rows.transactions.indexOfFirst { it.key == payment.key }
             if (existing < 0) rows.transactions += payment
             else rows.transactions[existing] = payment
@@ -315,7 +315,6 @@ internal class GojekOrderReader(private val files: RootFileReader) {
                 JagoGopayHint(orderId, transaction)
             }
             .distinctBy { it.orderId }
-            .take(MAX_DETAILS)
             .toList()
     }.getOrDefault(emptyList())
 

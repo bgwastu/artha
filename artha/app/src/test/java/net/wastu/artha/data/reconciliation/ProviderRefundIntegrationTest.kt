@@ -60,8 +60,7 @@ class ProviderRefundIntegrationTest {
         val a = bank.copy(description = "GoPay")
         val b = a.copy(providerTransactionId = "jago:other")
         val rows = LedgerReconciler.reconcileLedger(listOf(settled, a, b))
-        assertEquals(3, rows.size)
-        assertFalse(rows.first { it.provider == Provider.GOJEK }.isConfirmed)
+        assertEquals(2, rows.size)
         assertEquals(2, rows.count { it.isConfirmed })
     }
 }

@@ -37,12 +37,13 @@ class ConservativeMatchingTest {
         assertEquals(7_500_000, BudgetAnalyzer.analyzeMonth(YearMonth.of(2026, 9), listOf(row)).totalPersonalSpendingMinor)
     }
 
-    @Test fun repeatedAmountsAndCurrenciesAreNotGuessed() {
+    @Test fun repeatedAmountsResolveOneToOneAndCurrenciesAreNotGuessed() {
         val order = tx(Provider.SHOPEE, "shopee:o", "Order")
         val a = tx(Provider.JAGO, "jago:a", "Shopee")
         val b = tx(Provider.JAGO, "jago:b", "Shopee")
         val rows = listOf(order, a, b)
-        assertEquals(3, LedgerReconciler.reconcileLedger(rows).size)
+        // One order claims exactly one of the identical bank debits; the other stays its own payment.
+        assertEquals(2, LedgerReconciler.reconcileLedger(rows).size)
         assertEquals(LedgerReconciler.reconcileLedger(rows), LedgerReconciler.reconcileLedger(rows.reversed()))
         assertEquals(2, LedgerReconciler.reconcileLedger(listOf(order, a.copy(money = Money(a.money.amountMinor, "USD")))).size)
     }

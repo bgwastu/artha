@@ -149,11 +149,24 @@ object LedgerReconciler {
             o.key to (if (exactRefMatch.isNotEmpty()) exactRefMatch else candidates).map { it.tx }
         }
         val reverseCount = choices.values.flatten().groupingBy { it.key }.eachCount()
+        val assigned = mutableMapOf<String, UnifiedTransaction>()
+        for (o in orders) choices[o.key]?.singleOrNull()?.takeIf { reverseCount[it.key] == 1 }?.let { assigned[o.key] = it }
+        // Contested candidates (repeated amounts) resolve one-to-one by nearest time, within a day.
+        val taken = assigned.values.mapTo(mutableSetOf()) { it.key }
+        val orderByKey = orders.associateBy { it.key }
+        val contested = choices.filter { (k, v) -> k !in assigned && v.isNotEmpty() }
+            .flatMap { (k, v) -> v.filter { it.key !in taken }.map { b -> Triple(orderByKey.getValue(k), b, Duration.between(orderByKey.getValue(k).occurredAt, b.occurredAt).abs()) } }
+            .filter { it.third <= Duration.ofDays(1) }
+            .sortedWith(compareBy<Triple<UnifiedTransaction, UnifiedTransaction, Duration>> { it.third }.thenBy { it.first.key }.thenBy { it.second.key })
+        for ((o, b, _) in contested) {
+            if (o.key in assigned || b.key in taken) continue
+            assigned[o.key] = b; taken += b.key
+        }
         val matched = mutableSetOf<String>()
         val enriched = orders.map { o ->
-            val b = choices[o.key]?.singleOrNull()?.takeIf { reverseCount[it.key] == 1 }
+            val b = assigned[o.key]
             if (b == null) {
-                // Several plausible bank partners cannot count again as another confirmed payment.
+                // Plausible partners that remain unassigned could double count this payment.
                 if (choices[o.key].orEmpty().isNotEmpty() && o.isConfirmed) o.copy(isConfirmed = false) else o
             } else {
                 matched += b.key
