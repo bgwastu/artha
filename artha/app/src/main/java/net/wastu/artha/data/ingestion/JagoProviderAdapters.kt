@@ -231,8 +231,9 @@ internal object JagoCachedHistory {
             put("cardLast4", deciphered.cardLast4)
             put("isQris", deciphered.isQris)
             put("paymentMethod", deciphered.paymentMethod)
-            put("counterpart", counterpart)
-            put("code", code)
+            // A card mask ("•••• •••• •••• 8384") is not a counterparty; keep it as `cardMask`
+            // instead so display code cannot mistake the last digits for a merchant title.
+            if (counterpart.contains("••")) put("cardMask", counterpart) else put("counterpart", counterpart)
             put("notes", notes)
             put("localized", localized)
             put("pocketId", pocketId)

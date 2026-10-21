@@ -7,16 +7,29 @@ import org.json.JSONObject
 private const val HUMAN_LINE_SEP = " - "
 
 /** One-line title for lists and detail headers; ASCII separators only. */
+
 internal fun transactionHumanLine(transaction: UnifiedTransaction): String {
     val payload = runCatching { JSONObject(transaction.rawPayload) }.getOrNull()
     val built = payload?.let { lineFromPayload(it) }
     val normalized = normalizeHumanLine(built ?: transaction.description)
     return normalized.ifBlank { transaction.description.trim() }
+        .let { if (isOpaqueFallback(it)) opaqueTitle(payload) else it }
+}
+
+/** Jago-only GoPay rows carry no merchant; "004 - Gopay - Generic Jago payment" is Jago's own note. */
+internal fun isOpaqueFallback(title: String): Boolean =
+    title.contains("Generic Jago payment", ignoreCase = true) ||
+        title.equals("Gopay Tabungan Transaction", ignoreCase = true)
+
+private fun opaqueTitle(payload: JSONObject?): String {
+    val pocket = payload?.optString("pocketName")?.trim().orEmpty()
+    return if (pocket.isBlank() || pocket.equals("GoPay Tabungan", ignoreCase = true)) "GoPay Payment"
+    else "GoPay Payment$HUMAN_LINE_SEP$pocket"
 }
 
 private fun lineFromPayload(payload: JSONObject): String? {
-    val merchant = payload.optString("merchantName").ifBlank { payload.optString("counterpart") }
-    if (merchant.isNotBlank()) {
+    val merchant = usableMerchant(payload.optString("merchantName")) ?: usableMerchant(payload.optString("counterpart"))
+    if (merchant != null) {
         return if (payload.optBoolean("isQris") && !merchant.contains("QRIS", ignoreCase = true)) {
             "QRIS$HUMAN_LINE_SEP$merchant"
         } else {
@@ -39,6 +52,17 @@ private fun lineFromPayload(payload: JSONObject): String? {
         return if (tier.isNotBlank()) listOf(tier, route).joinToString(HUMAN_LINE_SEP) else route
     }
     return null
+}
+
+/** Values promoters stored as merchant evidence but that describe nothing are not titles. */
+private fun usableMerchant(raw: String): String? {
+    val trimmed = raw.trim()
+    if (trimmed.isBlank()) return null
+    if (trimmed.contains("••")) return null
+    if (trimmed.contains("Generic Jago payment", ignoreCase = true)) return null
+    if (trimmed.contains("Gopay Tabungan Transaction", ignoreCase = true)) return null
+    if (trimmed.equals("GoPay", ignoreCase = true) || trimmed.equals("GOPAY_SAVINGS_TRANSACTION", ignoreCase = true)) return null
+    return trimmed
 }
 
 private fun primaryItemLabel(items: JSONArray?): String {

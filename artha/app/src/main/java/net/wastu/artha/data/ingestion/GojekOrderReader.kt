@@ -81,6 +81,7 @@ internal class GojekOrderReader(private val files: RootFileReader) {
         val started = System.nanoTime()
         var historyComplete = false
         var liveHeaders: Map<String, String>? = null
+        var gatewayEnforced = false
         if (loginStale) {
             rows.issue(GOJEK_NEEDS_LOGIN_MESSAGE)
         } else {
@@ -116,6 +117,9 @@ internal class GojekOrderReader(private val files: RootFileReader) {
                 throw cancelled
             } catch (e: ProviderReadException) {
                 if (e.message == GOJEK_HISTORY_LIST_UNAVAILABLE_MESSAGE && rows.transactions.isNotEmpty()) {
+                    // The gateway rejects unsigned requests for every gopayapi host; further live
+                    // calls would each repeat the same rejections within the 60s import window.
+                    gatewayEnforced = true
                     rows.issue("GoPay live history refresh unavailable; cached payments kept")
                 } else {
                     rows.issue(e)
@@ -123,7 +127,7 @@ internal class GojekOrderReader(private val files: RootFileReader) {
             } catch (_: Exception) {
                 rows.issue(ProviderReadException(AccountStatus.ERROR, "Gojek live history is unavailable; valid cached payments are retained"))
             }
-            if (!deadlineExceeded(started)) {
+            if (!deadlineExceeded(started) && !gatewayEnforced) {
                 try {
                     importOrders(request(GojekProviderParser.ORDERS_URL, headers, started, checkActive), orders, rows, checkActive, preferLive = true)
                 } catch (cancelled: CancellationException) {
@@ -134,8 +138,8 @@ internal class GojekOrderReader(private val files: RootFileReader) {
                     rows.issue("Gojek native order enrichment is unavailable")
                 }
             }
-            fetchPaymentDetails(headers, rows, details, started, checkActive)
-            importJagoReferencedPayments(headers, rows, System.nanoTime(), checkActive, details)
+            if (!gatewayEnforced) fetchPaymentDetails(headers, rows, details, started, checkActive)
+            importJagoReferencedPayments(headers, rows, System.nanoTime(), checkActive, details, gatewayEnforced)
         }
 
         for (index in rows.transactions.indices) {
@@ -202,7 +206,7 @@ internal class GojekOrderReader(private val files: RootFileReader) {
         return page
     }
 
-    private suspend fun sessionHeaders(): Map<String, String> {
+    internal suspend fun sessionHeaders(): Map<String, String> {
         val base = "/data/data/com.gojek.app/shared_prefs"
         val paths = listOf("goto-scp-login.xml", "AuthPreferences.xml", "gojek-identity-sso.xml", "network_persistence.xml").map { "$base/$it" }
         val snapshot = files.stableBatch(paths)
@@ -268,13 +272,15 @@ internal class GojekOrderReader(private val files: RootFileReader) {
         started: Long,
         checkActive: () -> Unit,
         details: MutableMap<String, JSONObject>,
+        gatewayEnforced: Boolean = false,
     ) {
         val known = rows.transactions.map { it.providerTransactionId.removePrefix("gopay:") }.toSet()
         val hints = jagoGopayHints().filter { it.orderId !in known }
         if (hints.isEmpty()) return
         var reads = 0
         // The detail API is bounded and abandoned after its first rejection; Jago-derived rows need no network.
-        var apiUsable = true
+        // A known-enforced gateway would reject each detail read identically; skip the attempts.
+        var apiUsable = !gatewayEnforced
         for (hint in hints) {
             checkActive()
             val orderId = hint.orderId

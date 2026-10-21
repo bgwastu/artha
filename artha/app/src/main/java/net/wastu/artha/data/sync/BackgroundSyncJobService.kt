@@ -8,6 +8,7 @@ import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -23,15 +24,19 @@ class BackgroundSyncJobService : JobService() {
     override fun onStartJob(params: JobParameters?): Boolean {
         val app = applicationContext as? ArthaApplication ?: return false
         scope.launch {
+            var allProvidersHealthy = true
             try {
                 if (app.rootAccess.verify()) {
-                    app.ingestion.ingestAll(force = false)
+                    val summaries = app.ingestion.ingestAll(force = false)
+                    // A provider that could not be read must not silently wait a full hour:
+                    // rescheduling lets the job retry the whole batch sooner.
+                    allProvidersHealthy = summaries.values.none { it.startsWith("Unavailable") }
                     AnalysisWidgetProvider.triggerUpdate(app)
                     TransactionsWidgetProvider.triggerUpdate(app)
                 }
             } catch (_: Exception) {
             } finally {
-                jobFinished(params, false)
+                jobFinished(params, !allProvidersHealthy)
             }
         }
         return true
@@ -56,6 +61,8 @@ object BackgroundSyncScheduler {
         val builder = JobInfo.Builder(JOB_ID, component)
             .setPeriodic(INTERVAL_MILLIS)
             .setPersisted(true)
+            // Failed background batches retry sooner instead of waiting another full hour.
+            .setBackoffCriteria(10 * 60 * 1000L, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
             .setRequiresBatteryNotLow(true)
         scheduler.schedule(builder.build())
     }

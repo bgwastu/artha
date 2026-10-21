@@ -201,8 +201,8 @@ internal object GojekProviderParser {
         val merchant = merchantFromJagoHint(counterpart, jago.description, localized, notes)
         val description = when {
             merchant != null -> gopayDisplayDescription(merchant, qris)
-            jago.description.isNotBlank() && !jago.description.equals("GoPay Payment", ignoreCase = true) -> jago.description
-            localized.isNotBlank() && !localized.equals("GoPay", ignoreCase = true) -> localized
+            jago.description.isNotBlank() && !jagoHintNoise(jago.description) -> jago.description
+            localized.isNotBlank() && !jagoHintNoise(localized) -> localized
             else -> "GoPay Payment"
         }
         val payload = JSONObject()
@@ -237,13 +237,27 @@ internal object GojekProviderParser {
     private fun merchantFromJagoHint(counterpart: String, title: String, localized: String, notes: String): String? {
         for (candidate in listOf(title, localized, counterpart, notes)) {
             val trimmed = candidate.trim()
-            if (trimmed.isBlank()) continue
-            if (trimmed.equals("GoPay Payment", ignoreCase = true) || trimmed.equals("GoPay", ignoreCase = true)) continue
-            if (trimmed.equals("QRIS Payment", ignoreCase = true)) continue
+            if (jagoHintNoise(trimmed) || trimmed.isBlank()) continue
             val withoutQris = trimmed.replace(Regex("(?i)^qris\\s*[-:]?\\s*"), "").trim()
             if (withoutQris.isNotBlank() && !withoutQris.equals("QRIS", ignoreCase = true)) return withoutQris
         }
         return null
+    }
+
+    /**
+     * Jago placeholders that name the wallet rather than the counterparty. GoPay Savings
+     * debits carry "004 - Gopay - Generic Jago payment" as their only text; promoting that
+     * note to a merchant produced titles that name nothing.
+     */
+    private fun jagoHintNoise(text: String): Boolean {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return true
+        if (trimmed.equals("GoPay Payment", ignoreCase = true) || trimmed.equals("GoPay", ignoreCase = true)) return true
+        if (trimmed.equals("QRIS Payment", ignoreCase = true)) return true
+        if (trimmed.contains("Generic Jago payment", ignoreCase = true)) return true
+        if (trimmed.equals("GoPay Tabungan Transaction", ignoreCase = true) || trimmed.equals("Transaksi GoPay Tabungan", ignoreCase = true)) return true
+        if (trimmed.equals("GoPay Savings - Non Tokopedia", ignoreCase = true)) return true
+        return false
     }
 
     fun orderCards(root: JSONObject): List<NativeOrder> = orderPage(root).orders
