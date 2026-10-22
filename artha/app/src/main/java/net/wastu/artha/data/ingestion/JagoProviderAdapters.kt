@@ -206,6 +206,7 @@ internal object JagoCachedHistory {
                 pocketName = pocketName,
                 code = text(1),
                 counterpart = text(2),
+                merchantName = if (deciphered.isQris) deciphered.title else null,
                 notes = text(4),
                 localized = localized,
                 deciphered = deciphered,
@@ -220,6 +221,7 @@ internal object JagoCachedHistory {
         pocketName: String?,
         code: String,
         counterpart: String,
+        merchantName: String?,
         notes: String,
         localized: String,
         deciphered: TransactionDecipherer.Deciphered,
@@ -231,6 +233,7 @@ internal object JagoCachedHistory {
             put("cardLast4", deciphered.cardLast4)
             put("isQris", deciphered.isQris)
             put("paymentMethod", deciphered.paymentMethod)
+            put("code", code)
             // A card mask ("•••• •••• •••• 8384") is not a counterparty; keep it as `cardMask`
             // instead so display code cannot mistake the last digits for a merchant title.
             if (counterpart.contains("••")) put("cardMask", counterpart) else put("counterpart", counterpart)
@@ -313,8 +316,8 @@ class ShopeeProviderAdapter(private val files: RootFileReader) : ProviderAdapter
 class GojekProviderAdapter(private val files: RootFileReader) : ProviderAdapter {
     override val coverageHint = Provider.GOJEK.historyCoverageHint
     override val provider = Provider.GOJEK
-    override suspend fun ingest(): List<UnifiedTransaction> = GojekOrderReader(files).transactions(interactive = false)
-    override suspend fun ingestInteractive(): List<UnifiedTransaction> = GojekOrderReader(files).transactions(interactive = true)
+    override suspend fun ingest(): List<UnifiedTransaction> = GojekOrderReader(files).transactions()
+    override suspend fun ingestInteractive(): List<UnifiedTransaction> = GojekOrderReader(files).transactions()
 }
 
 class GrabProviderAdapter(private val files: RootFileReader) : ProviderAdapter {

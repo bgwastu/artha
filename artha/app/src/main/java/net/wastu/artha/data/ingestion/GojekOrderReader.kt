@@ -20,8 +20,8 @@ import net.wastu.artha.data.providers.AccountStatus
 import org.json.JSONObject
 
 /** Read-only native source snapshots and GETs; no handmade exports or session refresh. */
-internal class GojekOrderReader(private val files: RootFileReader) {
-    suspend fun transactions(interactive: Boolean = false): List<UnifiedTransaction> = withContext(Dispatchers.IO) {
+internal class GojekOrderReader(private val files: RootFileReader, private val capture: ArthaCaptureReader = ArthaCaptureReader { files.copyFilteredToSandbox("/data/data/com.gojek.app/files/artha_gojek_capture.jsonl", ArthaCaptureReader.HISTORY_MARKER) }) {
+    suspend fun transactions(): List<UnifiedTransaction> = withContext(Dispatchers.IO) {
         val rows = ImportRows()
         val details = linkedMapOf<String, JSONObject>()
         val orders = mutableListOf<GojekProviderParser.NativeOrder>()
@@ -74,9 +74,8 @@ internal class GojekOrderReader(private val files: RootFileReader) {
         if (loginStale && !cachedPayments) {
             throw ProviderReadException(AccountStatus.NEEDS_LOGIN, GOJEK_NEEDS_LOGIN_MESSAGE)
         }
-        if (interactive || !cachedPayments) {
-            triggerHistoryRefresh()
-        }
+        // No app launch ever happens: imports rely on the hook capture (which grows whenever
+        // the user browses GoPay history) plus the warmed OkHttp cache.
 
         val started = System.nanoTime()
         var historyComplete = false
@@ -94,6 +93,17 @@ internal class GojekOrderReader(private val files: RootFileReader) {
             } catch (_: Exception) {
                 rows.issue(GOJEK_NEEDS_LOGIN_MESSAGE)
             }
+        }
+        // The capture (Gojek-hook) rows are an authoritative fallback when the live/cached
+        // history route is unavailable; reading them first lets the import summary know
+        // whether the capture filled the gap (source status stays clean when it did).
+        val captureRows = try { capture.read() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (t: Throwable) { android.util.Log.w("ArthaCapture", "capture read failed", t); null }
+        val captureContributed = captureRows != null && captureRows.transactions.isNotEmpty()
+        if (captureRows != null) {
+            for (row in captureRows.transactions) rows.transactions += row
+            for (note in captureRows.notes) android.util.Log.i("ArthaCapture", note)
         }
         if (liveHeaders != null) {
             val headers = liveHeaders
@@ -120,7 +130,7 @@ internal class GojekOrderReader(private val files: RootFileReader) {
                     // The gateway rejects unsigned requests for every gopayapi host; further live
                     // calls would each repeat the same rejections within the 60s import window.
                     gatewayEnforced = true
-                    rows.issue("GoPay live history refresh unavailable; cached payments kept")
+                    if (!captureContributed) rows.issue("GoPay live history refresh unavailable; capture kept")
                 } else {
                     rows.issue(e)
                 }
@@ -151,8 +161,17 @@ internal class GojekOrderReader(private val files: RootFileReader) {
             catch (e: ProviderReadException) { rows.issue(e) }
             catch (_: Exception) { rows.issue("One GoPay detail could not be matched to its settled payment") }
         }
-        if (cachedPayments && !historyComplete) rows.issue("Cached GoPay history covers only pages previously opened in Gojek")
-        rows.finish().sortedByDescending { it.occurredAt }
+        if (cachedPayments && !historyComplete && !captureContributed) {
+            rows.issue("Cached GoPay history covers only pages previously opened in Gojek")
+        }
+        val result = try { rows.finish().sortedByDescending { it.occurredAt } }
+        catch (e: PartialImportException) { e.transactions.sortedByDescending { it.occurredAt } }
+        catch (e: ProviderReadException) {
+            // A clean failure with no rows backtracks to the previous semantics; with capture
+            // rows already merged into `rows`, this case is unreachable for capture-backed syncs.
+            throw e
+        }
+        result
     }
 
     private fun importOrders(body: JSONObject, orders: MutableList<GojekProviderParser.NativeOrder>, rows: ImportRows, checkActive: () -> Unit, preferLive: Boolean = false) {
@@ -336,94 +355,7 @@ internal class GojekOrderReader(private val files: RootFileReader) {
         )
     }
 
-    private suspend fun triggerHistoryRefresh() {
-        try {
-            files.executeCommand("am start -a android.intent.action.VIEW -d 'gojek://gopay/history' -p com.gojek.app")
-            delay(1500L)
-            files.executeCommand("am start -n ${files.context.packageName}/.MainActivity")
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            // Headless refresh is best-effort; proceed with reading local cache
-        }
-    }
-
     private fun deadlineExceeded(started: Long): Boolean = System.nanoTime() - started >= TimeUnit.SECONDS.toNanos(60)
-
-    internal suspend fun probeDetailHttp(orderId: String, headers: Map<String, String>): Int = withContext(Dispatchers.IO) {
-        val connection = (URL(
-            "https://customer.gopayapi.com/v2/users/order-history/${URLEncoder.encode(orderId, "UTF-8").replace("+", "%20")}/details?country_code=ID",
-        ).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            instanceFollowRedirects = false
-            connectTimeout = 10_000
-            readTimeout = 15_000
-            headers.forEach { (name, value) -> setRequestProperty(name, value) }
-        }
-        try {
-            connection.responseCode
-        } finally {
-            connection.disconnect()
-        }
-    }
-
-    /** Safe diagnostics for device probes; never returns bearer tokens or decrypted secrets. */
-    internal suspend fun diagnoseHistoryAccess(): String = withContext(Dispatchers.IO) {
-        val parts = mutableListOf<String>()
-        try {
-            val headers = sessionHeaders()
-            parts += "headerKeys=${headers.keys.sorted().joinToString(",")}"
-            parts += "bearerLen=${headers["Authorization"]?.removePrefix("Bearer ")?.length ?: 0}"
-            val candidates = listOf(
-                GojekProviderParser.HISTORY_URL,
-                "https://customer.gopayapi.com/v1/users/order-history?country_code=ID",
-                "https://customer.gopayapi.com/v1/users/order-history/completed?country_code=ID",
-            )
-            for (candidate in candidates) {
-                val started = System.nanoTime()
-                val connection = (URL(candidate).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    instanceFollowRedirects = false
-                    connectTimeout = 10_000
-                    readTimeout = 15_000
-                    headers.forEach { (name, value) -> setRequestProperty(name, value) }
-                }
-                try {
-                    val code = connection.responseCode
-                    val path = URI(candidate).path
-                    parts += "$path=http$code"
-                    val auth = gojekWwwAuthenticate(connection)
-                    val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-                    val body = stream?.let { GojekProviderParser.readBounded(it).toString(Charsets.UTF_8) }.orEmpty()
-                    val codes = Regex(""""code"\s*:\s*"([^"]+)"""")
-                        .findAll(body).map { it.groupValues[1] }.distinct().take(3).joinToString(",")
-                    if (codes.isNotBlank()) parts += "$path codes=$codes"
-                    if (code in 200..299) {
-                        val root = runCatching { JSONObject(body) }.getOrNull()
-                        val completed = root?.optJSONObject("data")?.optJSONArray("completed")?.length() ?: -1
-                        val success = root?.opt("success")
-                        parts += "$path completedGroups=$completed success=$success"
-                    }
-                    parts += "$path ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)}"
-                } finally {
-                    connection.disconnect()
-                }
-            }
-            val hints = gopayOrderIdsFromJagoHints()
-            parts += "jagoHints=${hints.size}"
-            hints.firstOrNull()?.let { id ->
-                parts += "detailHttp=${probeDetailHttp(id, headers)}"
-            }
-        } catch (error: ProviderReadException) {
-            parts += "provider=${error.status.name}"
-            parts += "message=${error.message?.take(120)}"
-        } catch (error: Exception) {
-            parts += "failure=${error.javaClass.simpleName}"
-            parts += "message=${error.message?.take(120)}"
-        }
-        parts.joinToString("; ")
-    }
-
     private companion object {
         const val MAX_CACHE_ENTRIES = 1000
         const val MAX_PAGES = 50
@@ -431,3 +363,4 @@ internal class GojekOrderReader(private val files: RootFileReader) {
         val GOPAY_BANK_CODES = setOf("GPD01", "GPD05", "GPC02")
     }
 }
+
