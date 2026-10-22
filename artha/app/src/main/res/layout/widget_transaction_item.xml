@@ -33,6 +33,34 @@
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
+            <ImageView
+                android:id="@+id/widget_item_tag_reversed"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="4dp"
+                android:background="@drawable/bg_widget_tag_tertiary"
+                android:contentDescription="Reversed"
+                android:importantForAccessibility="no"
+                android:paddingStart="4dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="4dp"
+                android:paddingBottom="2dp"
+                android:src="@drawable/ic_widget_reversed"
+                android:visibility="gone" />
+            <ImageView
+                android:id="@+id/widget_item_tag_grouped"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="4dp"
+                android:background="@drawable/bg_widget_tag_secondary"
+                android:contentDescription="Grouped"
+                android:importantForAccessibility="no"
+                android:paddingStart="4dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="4dp"
+                android:paddingBottom="2dp"
+                android:src="@drawable/ic_widget_grouped"
+                android:visibility="gone" />
             <TextView
                 android:id="@+id/widget_item_tag_status_secondary"
                 android:layout_width="wrap_content"

@@ -489,7 +489,7 @@ private val StatusTagKinds = setOf(TransactionTagKind.REVERSED, TransactionTagKi
 private fun TagRow(tags: List<TransactionTag>) {
     if (tags.isEmpty()) return
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        tags.forEach { tag -> TransactionTagPill(tag, Modifier.height(20.dp).semantics { contentDescription = tag.description }) }
+        tags.forEach { tag -> TransactionTagPill(tag, Modifier.height(20.dp).semantics { contentDescription = tag.description }, compact = false) }
     }
 }
 

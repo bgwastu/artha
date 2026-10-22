@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.outlined.CreditCard
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -20,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.Placeholder
@@ -39,6 +42,17 @@ private val TagIconSize = 12.dp
 private val TagIconGap = 2.dp
 private val TagGap = 6.dp
 
+/** Reversal and grouping are frequent, so the list shows them as a glyph; the label stays for speech. */
+private val TransactionTag.iconOnly: Boolean get() = kind in setOf(
+    TransactionTagKind.REVERSED, TransactionTagKind.REFUND, TransactionTagKind.GROUPED)
+
+private val TransactionTag.icon: ImageVector? get() = when (kind) {
+    TransactionTagKind.REVERSED, TransactionTagKind.REFUND -> Icons.AutoMirrored.Outlined.Undo
+    TransactionTagKind.GROUPED -> Icons.Outlined.Link
+    TransactionTagKind.CARD -> Icons.Outlined.CreditCard
+    else -> null
+}
+
 @Composable
 private fun tagLabelStyle(): TextStyle = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium)
 
@@ -46,7 +60,8 @@ private fun tagLabelStyle(): TextStyle = MaterialTheme.typography.labelSmall.cop
  * Small M3 tag. Filled tags say what happened to the money; outlined tags say how it was paid.
  */
 @Composable
-fun TransactionTagPill(tag: TransactionTag, modifier: Modifier = Modifier) {
+fun TransactionTagPill(tag: TransactionTag, modifier: Modifier = Modifier, compact: Boolean = true) {
+    val showLabel = !(compact && tag.iconOnly)
     val outlined = tag.kind == TransactionTagKind.QRIS || tag.kind == TransactionTagKind.CARD
     val colors = MaterialTheme.colorScheme
     val (container, content) = when (tag.kind) {
@@ -65,10 +80,8 @@ fun TransactionTagPill(tag: TransactionTag, modifier: Modifier = Modifier) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(TagIconGap),
         ) {
-            if (tag.kind == TransactionTagKind.CARD) {
-                Icon(Icons.Outlined.CreditCard, contentDescription = null, modifier = Modifier.size(TagIconSize))
-            }
-            Text(tag.label, style = tagLabelStyle(), maxLines = 1)
+            tag.icon?.let { Icon(it, contentDescription = null, modifier = Modifier.size(TagIconSize)) }
+            if (showLabel) Text(tag.label, style = tagLabelStyle(), maxLines = 1)
         }
     }
 }
@@ -95,10 +108,13 @@ fun TaggedTitle(
     val lineHeight = style.lineHeight
     val inline = remember(tags, labelStyle, density, lineHeight) {
         tags.mapIndexed { index, tag ->
-            val labelWidth = measurer.measure(tag.label, labelStyle, maxLines = 1).size.width
             val width = with(density) {
-                val icon = if (tag.kind == TransactionTagKind.CARD) (TagIconSize + TagIconGap).toPx() else 0f
-                (labelWidth + icon + (TagHorizontalPadding * 2 + TagGap).toPx()).toSp()
+                val content = when {
+                    tag.iconOnly -> TagIconSize.toPx()
+                    tag.icon != null -> measurer.measure(tag.label, labelStyle, maxLines = 1).size.width + (TagIconSize + TagIconGap).toPx()
+                    else -> measurer.measure(tag.label, labelStyle, maxLines = 1).size.width.toFloat()
+                }
+                (content + (TagHorizontalPadding * 2 + TagGap).toPx()).toSp()
             }
             val height = with(density) { (labelStyle.lineHeight.toPx() + 2.dp.toPx()).toSp() }
             "tag$index" to InlineTextContent(Placeholder(width, height, PlaceholderVerticalAlign.TextCenter)) {
