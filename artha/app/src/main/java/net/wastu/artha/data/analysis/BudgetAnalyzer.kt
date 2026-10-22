@@ -72,14 +72,19 @@ object BudgetAnalyzer {
         }.trim()
     }
 
+    /** Jago codes for moves between the user's own pockets and deposits. */
+    val INTERNAL_TRANSFER_CODES = setOf("TDD02", "TDC02", "TDC03", "TDC08", "TDC12", "SAD01", "SAD02", "SAC01", "SAC02")
+    /** Jago codes for top-ups into the user's own e-wallets. */
+    val WALLET_FUNDING_CODES = setOf("WTD02", "WTD03", "WTD06", "WTD-AJ-EWALLET")
+
     fun isSpending(tx: UnifiedTransaction): Boolean {
         if (tx.direction != Direction.DEBIT || !tx.isConfirmed || tx.money.currencyCode != "IDR") return false
-        if (tx.isReversal || tx.description.contains("(Reversed)", ignoreCase = true)) return false
+        if (tx.isReversedRecord) return false
         val p = runCatching { JSONObject(tx.rawPayload) }.getOrNull()
         if (p?.optBoolean("isWalletFunding") == true) return false
         if (p?.optBoolean("isPocketTransfer") == true || tx.description.startsWith("Pocket Transfer:", ignoreCase = true)) return false
         val code = p?.optString("code").orEmpty()
-        if (code in setOf("TDD02", "TDC02", "TDC03", "TDC08", "TDC12", "SAD01", "SAD02", "SAC01", "SAC02", "WTD02", "WTD03", "WTD06", "WTD-AJ-EWALLET")) return false
+        if (code in INTERNAL_TRANSFER_CODES || code in WALLET_FUNDING_CODES) return false
         if (p?.optJSONObject("fields")?.optString("f22") == "INTERNAL") return false
         return true // Accounting exclusion is source evidence, never an editable display category.
     }

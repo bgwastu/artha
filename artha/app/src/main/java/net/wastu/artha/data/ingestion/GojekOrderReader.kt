@@ -164,14 +164,9 @@ internal class GojekOrderReader(private val files: RootFileReader, private val c
         if (cachedPayments && !historyComplete && !captureContributed) {
             rows.issue("Cached GoPay history covers only pages previously opened in Gojek")
         }
-        val result = try { rows.finish().sortedByDescending { it.occurredAt } }
+        // A clean failure with no rows still throws ProviderReadException to the caller.
+        try { rows.finish().sortedByDescending { it.occurredAt } }
         catch (e: PartialImportException) { e.transactions.sortedByDescending { it.occurredAt } }
-        catch (e: ProviderReadException) {
-            // A clean failure with no rows backtracks to the previous semantics; with capture
-            // rows already merged into `rows`, this case is unreachable for capture-backed syncs.
-            throw e
-        }
-        result
     }
 
     private fun importOrders(body: JSONObject, orders: MutableList<GojekProviderParser.NativeOrder>, rows: ImportRows, checkActive: () -> Unit, preferLive: Boolean = false) {

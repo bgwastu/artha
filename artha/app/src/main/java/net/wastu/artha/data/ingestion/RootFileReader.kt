@@ -52,7 +52,8 @@ class RootFileReader(internal val context: Context) {
             val result = shell.newJob().to(output, mutableListOf()).add(
                 // Both the live capture and its rotated .1 file may hold newer/older pages; grep
                 // across both so the dedupe at parse time sees the complete page set.
-                "if [ -f '$sourcePath' ]; then " +
+                // Truncate first: a copy interrupted by the shell timeout must not leave lines behind.
+                "if [ -f '$sourcePath' ]; then : > '$temporary'; " +
                     "for src in '$sourcePath' '$sourcePath.1'; do " +
                     "grep -F '$marker' \"\$src\" >> '$temporary' 2>/dev/null; done; " +
                     "chown ${Process.myUid()}:${Process.myUid()} '$temporary'; " +
@@ -139,20 +140,6 @@ class RootFileReader(internal val context: Context) {
         }
     }
 
-    suspend fun executeCommand(command: String): Boolean = withContext(Dispatchers.IO) {
-        check(Process.myUserHandle() == UserHandle.getUserHandleForUid(0)) { "Provider imports currently support the primary Android profile only." }
-        coroutineContext.ensureActive()
-        try {
-            Shell.Builder.create().setContext(context).setTimeout(10).build("su", "-M", "-c", "/system/bin/sh").use { shell ->
-                if (!shell.isRoot) return@use false
-                shell.newJob().add(command).exec().isSuccess
-            }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            false
-        }
-    }
     suspend fun executeCommandWithOutput(command: String): List<String>? = withContext(Dispatchers.IO) {
         check(Process.myUserHandle() == UserHandle.getUserHandleForUid(0)) { "Provider imports currently support the primary Android profile only." }
         coroutineContext.ensureActive()

@@ -32,7 +32,7 @@ fun formatTime(instant: Instant): String = TransactionTimeFormatter.format(insta
 /** A reversing credit is still incoming money; only a voided outgoing charge has zero net spending. */
 internal fun paymentRowAmount(transaction: UnifiedTransaction): String {
     val credit = transaction.direction == Direction.CREDIT
-    val reversed = transaction.isReversal || transaction.description.contains("(Reversed)", ignoreCase = true)
+    val reversed = transaction.isReversedRecord
     return if (!credit && reversed) "Rp0" else "${if (credit) "+" else "−"}${formatMoney(transaction.money)}"
 }
 

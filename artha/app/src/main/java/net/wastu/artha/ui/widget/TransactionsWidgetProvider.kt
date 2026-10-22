@@ -177,7 +177,7 @@ internal fun buildTransactionItemView(
     views.setTextViewText(R.id.widget_item_pocket, pocketName.orEmpty())
     views.setViewVisibility(R.id.widget_item_pocket, if (pocketName.isNullOrBlank()) View.GONE else View.VISIBLE)
 
-    val isZero = !isCredit && (tx.isReversal || tx.description.contains("(Reversed)", ignoreCase = true))
+    val isZero = !isCredit && tx.isReversedRecord
     val amountText = paymentRowAmount(tx)
     val amountColorRes = when {
         isZero -> R.color.widget_amount_supporting

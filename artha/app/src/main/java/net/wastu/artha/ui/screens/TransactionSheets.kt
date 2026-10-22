@@ -219,7 +219,7 @@ private fun TransactionDetailsBody(
     val showOrder = items != null && items.length() > 0
     val showGoPayDetails = detailViewItems != null && detailViewItems.length() > 0 && !showRoute && !showOrder
     val credit = record.direction == Direction.CREDIT
-    val isReversal = record.isReversal || record.description.contains("(Reversed)", ignoreCase = true)
+    val isReversal = record.isReversedRecord
     val humanTitle = remember(record.key, record.description, record.rawPayload) { transactionHumanLine(record) }
     val shopLabel = payload?.detailText("shopName") ?: payload?.detailText("restaurantName")
     val showShopInItems = showOrder && shopLabel != null && !humanTitle.startsWith(shopLabel, ignoreCase = true)
@@ -752,12 +752,12 @@ internal fun transactionAccountingLabel(transaction: UnifiedTransaction): String
     if (BudgetAnalyzer.isSpending(transaction)) return null
     val payload = try { JSONObject(transaction.rawPayload) } catch (_: JSONException) { null }
     return when {
-        transaction.isReversal || transaction.description.contains("(Reversed)", ignoreCase = true) -> if (transaction.direction == Direction.CREDIT) "Incoming reversal" else "Reversed"
+        transaction.isReversedRecord -> if (transaction.direction == Direction.CREDIT) "Incoming reversal" else "Reversed"
         transaction.direction == Direction.CREDIT -> "Incoming"
         transaction.money.currencyCode != "IDR" -> "Outside IDR spending"
-        payload?.optBoolean("isWalletFunding") == true -> "Wallet funding"
+        payload?.optBoolean("isWalletFunding") == true || payload?.optString("code") in BudgetAnalyzer.WALLET_FUNDING_CODES -> "Wallet funding"
         payload?.optBoolean("isPocketTransfer") == true || transaction.description.startsWith("Pocket Transfer:", ignoreCase = true) -> "Pocket transfer"
-        payload?.optString("code") in setOf("TDD02", "TDC02", "TDC03", "TDC08", "TDC12", "SAD01", "SAD02", "SAC01", "SAC02") ||
+        payload?.optString("code") in BudgetAnalyzer.INTERNAL_TRANSFER_CODES ||
             payload?.optJSONObject("fields")?.optString("f22") == "INTERNAL" -> "Transfer"
         else -> "Not included in spending"
     }

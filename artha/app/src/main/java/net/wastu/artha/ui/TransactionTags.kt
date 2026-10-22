@@ -18,7 +18,7 @@ data class TransactionTag(val kind: TransactionTagKind, val label: String) {
 internal fun transactionTags(transaction: UnifiedTransaction): List<TransactionTag> {
     val payload = runCatching { JSONObject(transaction.rawPayload) }.getOrNull()
     val credit = transaction.direction == Direction.CREDIT
-    val reversed = transaction.isReversal || transaction.description.contains("(Reversed)", ignoreCase = true)
+    val reversed = transaction.isReversedRecord
     val transfer = payload?.optBoolean("isPocketTransfer") == true ||
         transaction.description.startsWith("Pocket Transfer:", ignoreCase = true)
     // Only the reference-matched refund path records refundedAmountMinor; amount guesses never do.

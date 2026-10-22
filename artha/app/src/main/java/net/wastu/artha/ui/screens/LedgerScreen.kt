@@ -632,11 +632,11 @@ fun HighlightedText(
 @Composable
 fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlightQuery: String = "", showCategory: Boolean = true) {
     val credit = transaction.direction == Direction.CREDIT
-    val reversed = transaction.isReversal || transaction.description.contains("(Reversed)", ignoreCase = true)
+    val reversed = transaction.isReversedRecord
     val tags = remember(transaction) { transactionTags(transaction) }
     val movedMoney = tags.any { it.kind == TransactionTagKind.REVERSED || it.kind == TransactionTagKind.REFUND || it.kind == TransactionTagKind.TRANSFER }
-    val title = transactionHumanLine(transaction)
-    val amount = paymentRowAmount(transaction)
+    val title = remember(transaction) { transactionHumanLine(transaction) }
+    val amount = remember(transaction) { paymentRowAmount(transaction) }
     val amountColor = when {
         !credit && reversed -> MaterialTheme.colorScheme.onSurfaceVariant
         credit -> incomeColor()

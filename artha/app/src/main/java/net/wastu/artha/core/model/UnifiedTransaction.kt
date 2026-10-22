@@ -52,6 +52,9 @@ data class UnifiedTransaction(
 ) {
     val key: String get() = canonicalKey ?: "${provider.name}:$providerTransactionId"
 
+    /** Reconciled reversals carry the flag; older ledger rows only carry the description marker. */
+    val isReversedRecord: Boolean get() = isReversal || description.contains("(Reversed)", ignoreCase = true)
+
     init {
         require(providerTransactionId.isNotBlank())
         require(description.isNotBlank())

@@ -52,6 +52,14 @@ class TransactionPresentationTest {
         assertEquals("−${formatMoney(ordinary.money)}", paymentRowAmount(ordinary))
     }
 
+    @Test fun walletTopUpCodesReadAsWalletFundingNotAGenericExclusion() {
+        val topUp = transaction("wtd").copy(rawPayload = """{"code":"WTD02"}""")
+        assertFalse(net.wastu.artha.data.analysis.BudgetAnalyzer.isSpending(topUp))
+        assertEquals("Wallet funding", net.wastu.artha.ui.screens.transactionAccountingLabel(topUp))
+        val pocketMove = transaction("sad").copy(rawPayload = """{"code":"SAD01"}""")
+        assertEquals("Transfer", net.wastu.artha.ui.screens.transactionAccountingLabel(pocketMove))
+    }
+
     @Test fun browsingUsesConfirmationSourceAndDirectionFilters() {
         val records = listOf(
             transaction("payment"), transaction("order", confirmed = false),

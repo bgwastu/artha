@@ -160,7 +160,9 @@ class ArthaViewModel(
                 }
                 launch {
                     combine(_reconciledCache, _selectedMonth, analysisSnapshot, _refreshing, _categoryAutomation) { rows, month, snapshot, importing, categoryState ->
-                        if (importing || categoryState == CategoryAutomationState.WORKING) null else month to fingerprint(month, rows, snapshot)
+                        // Hashing every spending row is wasted work while analysis is off.
+                        if (!snapshot.analysisEnabled || importing || categoryState == CategoryAutomationState.WORKING) null
+                        else month to fingerprint(month, rows, snapshot)
                     }.flowOn(computationDispatcher).distinctUntilChanged().debounce(2000).collect { input ->
                         input?.let { (month, _) -> analyzeMonth(month, debounceMs = 0) }
                     }
@@ -325,36 +327,21 @@ class ArthaViewModel(
         clearCategoryFilter()
         setTargetDestination("ANALYSIS")
     }
-    fun setUserNote(transaction: UnifiedTransaction, note: String, onComplete: (Result<Unit>) -> Unit) {
+    /** Runs one analysis-store write off the main thread and reports its outcome; cancellation still propagates. */
+    private fun storeWrite(unavailable: String, onComplete: (Result<Unit>) -> Unit, write: AnalysisStore.() -> Unit) {
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
-                try {
-                    checkNotNull(analysisStore) { "Notes are unavailable" }.setUserNote(transaction.key, note)
-                    Result.success(Unit)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (error: Exception) {
-                    Result.failure<Unit>(error)
-                }
+                try { checkNotNull(analysisStore) { unavailable }.write(); Result.success(Unit) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) { Result.failure<Unit>(error) }
             }
             onComplete(result)
         }
     }
-    fun setTransactionCategory(transaction: UnifiedTransaction, category: String, onComplete: (Result<Unit>) -> Unit) {
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                try {
-                    checkNotNull(analysisStore) { "Categories are unavailable" }.setClassification(transaction.key, category, "", manual = true)
-                    Result.success(Unit)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (error: Exception) {
-                    Result.failure<Unit>(error)
-                }
-            }
-            onComplete(result)
-        }
-    }
+    fun setUserNote(transaction: UnifiedTransaction, note: String, onComplete: (Result<Unit>) -> Unit) =
+        storeWrite("Notes are unavailable", onComplete) { setUserNote(transaction.key, note) }
+    fun setTransactionCategory(transaction: UnifiedTransaction, category: String, onComplete: (Result<Unit>) -> Unit) =
+        storeWrite("Categories are unavailable", onComplete) { setClassification(transaction.key, category, "", manual = true) }
     fun applyKnowledgeRewrite(rewritten: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setKnowledge(rewritten) } }
     fun updateAiConfig(config: AiConfig, onComplete: (String?) -> Unit = {}) {
         viewModelScope.launch {
@@ -372,16 +359,8 @@ class ArthaViewModel(
             onComplete(error)
         }
     }
-    fun addCustomCategory(category: String, onComplete: (Result<Unit>) -> Unit = {}) {
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                try { checkNotNull(analysisStore) { "Categories unavailable" }.addCustomCategory(category); Result.success(Unit) }
-                catch (cancelled: CancellationException) { throw cancelled }
-                catch (error: Exception) { Result.failure<Unit>(error) }
-            }
-            onComplete(result)
-        }
-    }
+    fun addCustomCategory(category: String, onComplete: (Result<Unit>) -> Unit = {}) =
+        storeWrite("Categories unavailable", onComplete) { addCustomCategory(category) }
     fun removeCustomCategory(category: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.removeCustomCategory(category) } }
     fun resetCategoriesToDefault() { viewModelScope.launch(Dispatchers.IO) { analysisStore?.resetCategoriesToDefault() } }
     fun setCategoryIcon(category: String, iconKey: String?) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setCategoryIcon(category, iconKey) } }
