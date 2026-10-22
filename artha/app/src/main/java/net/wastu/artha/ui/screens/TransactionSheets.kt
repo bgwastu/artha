@@ -92,6 +92,9 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import net.wastu.artha.ui.theme.expenseColor
 import net.wastu.artha.ui.theme.incomeColor
 import java.time.Instant
@@ -109,6 +112,8 @@ class TransactionDetailsState internal constructor() {
     /** Index into the group records being viewed, or -1 for the transaction itself. */
     internal var recordIndex by mutableStateOf(-1)
     internal var sourceExpanded by mutableStateOf(false)
+    /** Last measured height of the transaction page; a record page keeps it so the sheet doesn't jump. */
+    internal var pageHeightPx by mutableStateOf(0)
 
     internal fun chooseCategory(category: String, current: String,
         persist: (String, (Result<Unit>) -> Unit) -> Unit, onDone: () -> Unit,
@@ -267,7 +272,8 @@ private fun TransactionDetailsBody(
             onRetry = { selectCategory(state.categoryDraft) },
         )
     } else if (state.editor == null && state.recordIndex in records.indices) {
-        GroupRecordDetails(records[state.recordIndex], showBack = showRecordBack, onBack = { state.recordIndex = -1 })
+        GroupRecordDetails(records[state.recordIndex], minHeight = with(LocalDensity.current) { state.pageHeightPx.toDp() },
+            showBack = showRecordBack, onBack = { state.recordIndex = -1 })
     } else if (state.editor == "note") {
         TransactionNoteEditor(
             text = state.noteDraft,
@@ -291,6 +297,7 @@ private fun TransactionDetailsBody(
             Column(
                 Modifier
                     .fillMaxWidth()
+                    .onSizeChanged { state.pageHeightPx = it.height }
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 24.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -556,12 +563,13 @@ private fun GroupRecordsSection(records: List<GroupRecord>, parentTime: Instant,
 
 /** One source record on its own: what that source saw, before reconciliation merged it. */
 @Composable
-private fun GroupRecordDetails(item: GroupRecord, showBack: Boolean, onBack: () -> Unit) {
+private fun GroupRecordDetails(item: GroupRecord, minHeight: androidx.compose.ui.unit.Dp, showBack: Boolean, onBack: () -> Unit) {
     val tx = item.transaction
     val payload = remember(tx.rawPayload) { runCatching { JSONObject(tx.rawPayload) }.getOrNull() }
     SelectionContainer {
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
+            Modifier.fillMaxWidth().heightIn(min = minHeight).verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             if (showBack) Row(verticalAlignment = Alignment.CenterVertically) {
