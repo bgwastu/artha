@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="artha_background">#F7FAF5</color>
     <color name="launcher_background">#173E36</color>
     <color name="widget_background">#F7FAF5</color>
     <color name="widget_background_stroke">#DFE5DD</color>

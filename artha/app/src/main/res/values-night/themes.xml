@@ -1,0 +1,10 @@
+<resources>
+    <style name="Theme.Artha" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">@color/artha_background</item>
+        <!-- Android 12+ splash foreground defaults to windowBackground: night reads it from values-night. -->
+        <item name="android:windowSplashScreenBehavior">icon_preferred</item>
+    </style>
+</resources>

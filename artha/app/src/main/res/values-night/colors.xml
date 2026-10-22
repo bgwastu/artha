@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="artha_background">#101510</color>
     <color name="widget_background">#171D17</color>
     <color name="widget_background_stroke">#30372F</color>
     <color name="widget_text_primary">#DEE5DB</color>
