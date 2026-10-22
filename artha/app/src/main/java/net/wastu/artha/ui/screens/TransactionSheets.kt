@@ -77,6 +77,21 @@ import net.wastu.artha.ui.formatMoney
 import net.wastu.artha.ui.paymentRowAmount
 import net.wastu.artha.ui.transactionHumanLine
 import net.wastu.artha.ui.originalPaymentMoney
+import net.wastu.artha.ui.GroupRecord
+import net.wastu.artha.ui.TransactionTag
+import net.wastu.artha.ui.TransactionTagKind
+import net.wastu.artha.ui.formatTime
+import net.wastu.artha.core.model.AccountingTime
+import net.wastu.artha.ui.formatMinorAmount
+import net.wastu.artha.ui.groupNetMinor
+import net.wastu.artha.ui.groupRecords
+import net.wastu.artha.ui.transactionTags
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.text.style.TextOverflow
 import net.wastu.artha.ui.theme.expenseColor
 import net.wastu.artha.ui.theme.incomeColor
 import java.time.Instant
@@ -91,7 +106,8 @@ class TransactionDetailsState internal constructor() {
     internal var noteDraft by mutableStateOf("")
     internal var saveError by mutableStateOf<String?>(null)
     internal var savedFeedback by mutableStateOf<String?>(null)
-    internal var linkedExpanded by mutableStateOf(false)
+    /** Index into the group records being viewed, or -1 for the transaction itself. */
+    internal var recordIndex by mutableStateOf(-1)
     internal var sourceExpanded by mutableStateOf(false)
 
     internal fun chooseCategory(category: String, current: String,
@@ -113,21 +129,25 @@ class TransactionDetailsState internal constructor() {
 
     internal fun dismiss(onClose: () -> Unit) {
         if (!saving) {
-            if (editor != null) editor = null else onClose()
+            when {
+                editor != null -> editor = null
+                recordIndex >= 0 -> recordIndex = -1
+                else -> onClose()
+            }
         }
     }
 
     internal companion object {
         val saver = listSaver<TransactionDetailsState, Any>(
             save = { listOf(it.editor.orEmpty(), it.categoryDraft, it.noteDraft, it.saveError.orEmpty(),
-                it.savedFeedback.orEmpty(), it.linkedExpanded, it.sourceExpanded) },
+                it.savedFeedback.orEmpty(), it.recordIndex, it.sourceExpanded) },
             restore = { values -> TransactionDetailsState().apply {
                 editor = (values[0] as String).ifEmpty { null }
                 categoryDraft = values[1] as String
                 noteDraft = values[2] as String
                 saveError = (values[3] as String).ifEmpty { null }
                 savedFeedback = (values[4] as String).ifEmpty { null }
-                linkedExpanded = values[5] as Boolean
+                recordIndex = values[5] as Int
                 sourceExpanded = values[6] as Boolean
             } },
         )
@@ -153,11 +173,11 @@ fun TransactionDetailsSheet(
             // Material hides the sheet before its Back callback. Keep it visible
             // while that callback returns an editor to the transaction details.
             confirmValueChange = { value ->
-                value != SheetValue.Hidden || (state.editor == null && !state.saving)
+                value != SheetValue.Hidden || (state.editor == null && state.recordIndex < 0 && !state.saving)
             },
         ),
     ) {
-        TransactionDetailsBody(transaction, viewModel, state)
+        TransactionDetailsBody(transaction, viewModel, state, showRecordBack = true)
     }
 }
 
@@ -177,7 +197,7 @@ fun TransactionDetailsContent(
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Transaction", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             TextButton(onClick = close, enabled = !state.saving) {
-                Text(if (state.editor == null) "Close" else "Back")
+                Text(if (state.editor == null && state.recordIndex < 0) "Close" else "Back")
             }
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {
@@ -192,6 +212,7 @@ private fun TransactionDetailsBody(
     transaction: UnifiedTransaction,
     viewModel: ArthaViewModel?,
     state: TransactionDetailsState,
+    showRecordBack: Boolean = false,
 ) {
     val snapshot = viewModel?.analysisSnapshot?.collectAsStateWithLifecycle()?.value
     val availableCategories = snapshot?.customCategories ?: net.wastu.artha.data.analysis.INITIAL_DEFAULT_CATEGORIES
@@ -213,7 +234,8 @@ private fun TransactionDetailsBody(
     val notes = payload?.detailText("notes")
     val counterpart = payload?.detailText("counterpart")
     val items = payload?.optJSONArray("items")
-    val grouped = payload?.optJSONArray("groupedTransactions")
+    val records = remember(record.rawPayload) { groupRecords(record) }
+    val tags = remember(record) { transactionTags(record) }
     val detailViewItems = payload?.optJSONArray("detailViewItems")
     val showRoute = !pickup.isNullOrBlank() && !dropoff.isNullOrBlank()
     val showOrder = items != null && items.length() > 0
@@ -244,6 +266,8 @@ private fun TransactionDetailsBody(
             onBack = closeEditor,
             onRetry = { selectCategory(state.categoryDraft) },
         )
+    } else if (state.editor == null && state.recordIndex in records.indices) {
+        GroupRecordDetails(records[state.recordIndex], showBack = showRecordBack, onBack = { state.recordIndex = -1 })
     } else if (state.editor == "note") {
         TransactionNoteEditor(
             text = state.noteDraft,
@@ -271,15 +295,7 @@ private fun TransactionDetailsBody(
                     .padding(horizontal = 24.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Image(
-                            painter = painterResource(record.provider.iconRes),
-                            contentDescription = record.provider.displayName,
-                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)),
-                        )
-                    }
-                }
+                SourceHeader(record.provider, formatDate(record.occurredAt))
                 Text(
                     paymentRowAmount(record),
                     style = MaterialTheme.typography.headlineMedium,
@@ -287,40 +303,14 @@ private fun TransactionDetailsBody(
                     color = if (!credit && isReversal) MaterialTheme.colorScheme.onSurfaceVariant
                         else if (credit) incomeColor() else expenseColor(),
                 )
-                transactionAccountingLabel(record)?.let { Text(it, style = MaterialTheme.typography.labelLarge) }
-                if (!credit && isReversal) DetailRow("Original charge", formatMoney(originalPaymentMoney(record)))
+                // A status tag (Reversed, Transfer, ...) already says why this is outside spending.
+                if (tags.none { it.kind in StatusTagKinds }) transactionAccountingLabel(record)?.let { Text(it, style = MaterialTheme.typography.labelLarge) }
+                // With records shown, the original charge and net already appear in the Records section.
+                if (!credit && isReversal && records.isEmpty()) DetailRow("Original charge", formatMoney(originalPaymentMoney(record)))
                 state.savedFeedback?.let { SaveFeedback(it, false) }
                 Text(humanTitle, style = MaterialTheme.typography.titleLarge)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DetailBadge(
-                        record.provider.displayName,
-                        MaterialTheme.colorScheme.secondaryContainer,
-                        MaterialTheme.colorScheme.onSecondaryContainer,
-                    )
-                    DetailBadge(
-                        if (credit) "Incoming" else "Outgoing",
-                        if (credit) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                        if (credit) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (record.isQris) {
-                        DetailBadge("QRIS", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer)
-                    }
-                    if (isReversal) {
-                        DetailBadge(if (credit) "Reversal" else "Reversed", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
-                    }
-                    if (record.cardLast4 != null) {
-                        DetailBadge(
-                            "Card ${record.cardLast4}",
-                            MaterialTheme.colorScheme.secondaryContainer,
-                            MaterialTheme.colorScheme.onSecondaryContainer,
-                        )
-                    }
-                }
-                Text(
-                    formatDate(record.occurredAt),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                TagRow(tags)
+                if (records.isNotEmpty()) GroupRecordsSection(records, record.occurredAt, linkedRecordsExplanation(record)) { state.recordIndex = it }
 
                 if (!credit && snapshot?.analysisEnabled != false) {
                     DetailEditRow(
@@ -428,7 +418,7 @@ private fun TransactionDetailsBody(
                                 item.detailText("qty")?.let {
                                     Text("Quantity: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
-                                item.detailText("price")?.let { DetailRow("Item price", it) }
+                                item.detailText("price")?.let { DetailRow("Item price", itemPriceText(it)) }
                             }
                         }
                         notes?.let {
@@ -463,36 +453,12 @@ private fun TransactionDetailsBody(
                 record.pocket?.let { DetailRow("Pocket", it.name) }
                 if (notes != null && !showOrder) DetailRow("Source note", notes)
 
-                if (grouped != null && grouped.length() > 1) {
-                    TextButton(onClick = { state.linkedExpanded = !state.linkedExpanded }) {
-                        Text(if (state.linkedExpanded) "Hide linked records" else "Linked records (${grouped.length()})")
-                    }
-                    if (state.linkedExpanded) {
-                        linkedRecordsExplanation(record)?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                        for (i in 0 until grouped.length()) {
-                            val item = grouped.optJSONObject(i) ?: continue
-                            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                val provider = Provider.entries.firstOrNull { it.name == item.optString("provider") }
-                                Text(provider?.displayName ?: "Source record", style = MaterialTheme.typography.titleSmall)
-                                Text(linkedSourceRole(item), style = MaterialTheme.typography.labelMedium)
-                                item.detailText("description")?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                                val epoch = item.optLong("occurredAtEpochMillis")
-                                if (epoch > 0L) Text(formatDate(Instant.ofEpochMilli(epoch)), style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
-                    }
-                }
                 TextButton(onClick = { state.sourceExpanded = !state.sourceExpanded }) {
                     Text(if (state.sourceExpanded) "Hide source details" else "Source details")
                 }
                 if (state.sourceExpanded) {
                     DetailRow("Reference", record.providerTransactionId)
                     record.cardLast4?.let { DetailRow("Card", it) }
-                    if (grouped != null) for (i in 0 until grouped.length()) {
-                        val item = grouped.optJSONObject(i) ?: continue
-                        val provider = Provider.entries.firstOrNull { it.name == item.optString("provider") }
-                        item.detailText("providerTransactionId")?.let { DetailRow(provider?.displayName ?: "Reference", it) }
-                    }
                 }
 
                 Spacer(Modifier.height(24.dp))
@@ -508,15 +474,115 @@ private fun JSONObject.detailText(key: String): String? {
     return value?.toString()?.trim()?.takeIf { it.isNotBlank() }
 }
 
+/** Providers store item prices as whole rupiah, sometimes with an "Rp" prefix; show them like other amounts. */
+internal fun itemPriceText(raw: String): String {
+    val digits = raw.trim().removePrefix("Rp").trim()
+    val rupiah = digits.takeIf { it.isNotEmpty() && it.all(Char::isDigit) }?.toBigIntegerOrNull() ?: return raw
+    return formatMinorAmount(rupiah.multiply(java.math.BigInteger.valueOf(100)))
+}
+
+private val StatusTagKinds = setOf(TransactionTagKind.REVERSED, TransactionTagKind.REFUND,
+    TransactionTagKind.TRANSFER, TransactionTagKind.PARTIAL_REFUND)
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DetailBadge(label: String, containerColor: Color, contentColor: Color) {
-    Surface(color = containerColor, contentColor = contentColor, shape = MaterialTheme.shapes.small) {
-        Text(
-            label,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
+private fun TagRow(tags: List<TransactionTag>) {
+    if (tags.isEmpty()) return
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        tags.forEach { tag -> TransactionTagPill(tag, Modifier.height(20.dp).semantics { contentDescription = tag.description }) }
+    }
+}
+
+@Composable
+private fun SourceHeader(provider: Provider, supporting: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Image(painterResource(provider.iconRes), contentDescription = null,
+            modifier = Modifier.size(40.dp).clip(MaterialTheme.shapes.medium))
+        Column {
+            Text(provider.displayName, style = MaterialTheme.typography.titleSmall)
+            Text(supporting, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** The source records behind one reconciled row, each openable, with a net line for refunds. */
+@Composable
+private fun GroupRecordsSection(records: List<GroupRecord>, parentTime: Instant, explanation: String?, onOpen: (Int) -> Unit) {
+    val parentDay = parentTime.atZone(AccountingTime.zone).toLocalDate()
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Records", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+        explanation?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.large) {
+            Column {
+                records.forEachIndexed { index, item ->
+                    if (index > 0) HorizontalDivider(Modifier.padding(start = 64.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    ListItem(
+                        modifier = Modifier.clickable(onClickLabel = "Open record") { onOpen(index) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        overlineContent = { Text(item.role) },
+                        headlineContent = { Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                        supportingContent = {
+                            val at = item.transaction.occurredAt
+                            Text(if (at.atZone(AccountingTime.zone).toLocalDate() == parentDay) formatTime(at) else formatDate(at))
+                        },
+                        leadingContent = {
+                            Image(painterResource(item.transaction.provider.iconRes), item.transaction.provider.displayName,
+                                Modifier.size(32.dp).clip(MaterialTheme.shapes.small))
+                        },
+                        trailingContent = {
+                            Text(item.signedAmount, style = MaterialTheme.typography.labelLarge,
+                                color = if (item.transaction.direction == Direction.CREDIT) incomeColor() else MaterialTheme.colorScheme.onSurface)
+                        },
+                    )
+                }
+                groupNetMinor(records)?.let { net ->
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    val currency = records.first().transaction.money.currencyCode
+                    val amount = formatMinorAmount(java.math.BigInteger.valueOf(kotlin.math.abs(net)), currency)
+                    ListItem(
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        headlineContent = { Text("Net", fontWeight = FontWeight.SemiBold) },
+                        trailingContent = {
+                            Text(when { net > 0 -> "−$amount"; net < 0 -> "+$amount"; else -> amount },
+                                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                                color = if (net < 0) incomeColor() else MaterialTheme.colorScheme.onSurface)
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** One source record on its own: what that source saw, before reconciliation merged it. */
+@Composable
+private fun GroupRecordDetails(item: GroupRecord, showBack: Boolean, onBack: () -> Unit) {
+    val tx = item.transaction
+    val payload = remember(tx.rawPayload) { runCatching { JSONObject(tx.rawPayload) }.getOrNull() }
+    SelectionContainer {
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            if (showBack) Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack, modifier = Modifier.padding(end = 4.dp)) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to transaction")
+                }
+                Text(item.role, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+            } else Text(item.role, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+            SourceHeader(tx.provider, formatDate(tx.occurredAt))
+            Text(item.signedAmount, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
+                color = if (tx.direction == Direction.CREDIT) incomeColor() else expenseColor())
+            Text(item.title, style = MaterialTheme.typography.titleLarge)
+            TagRow(item.tags)
+            DetailRow("Reference", tx.providerTransactionId)
+            (payload?.detailText("sourcePaymentMethod") ?: payload?.detailText("paymentMethod"))?.let { DetailRow("Payment method", it) }
+            payload?.detailText("counterpart")?.takeUnless { item.title.contains(it, ignoreCase = true) }?.let { DetailRow("Counterpart", it) }
+            tx.pocket?.let { DetailRow("Pocket", it.name) }
+            payload?.detailText("notes")?.let { DetailRow("Source note", it) }
+            tx.description.takeUnless { item.title.equals(it, ignoreCase = true) }?.let { DetailRow("Source description", it) }
+            Spacer(Modifier.height(24.dp))
+        }
     }
 }
 
@@ -767,11 +833,4 @@ internal fun linkedRecordsExplanation(transaction: UnifiedTransaction): String? 
     val groups = try { JSONObject(transaction.rawPayload).optJSONArray("groupedTransactions") } catch (_: JSONException) { null } ?: return null
     return if (groups.length() > 1 && transaction.canonicalKey != null && BudgetAnalyzer.isSpending(transaction))
         "Counted once in spending." else null
-}
-
-internal fun linkedSourceRole(record: JSONObject): String = when (val role = record.optString("role")) {
-    "Payment", "Order details", "Receipt", "Refund", "Original Charge", "Card Payment", "Wallet Payment", "Merchant Payment" -> role
-    "Bank Payment" -> if (record.optString("provider") == Provider.JAGO.name) "Bank payment" else "Source record"
-    "Marketplace Order" -> "Order details"
-    else -> "Source record"
 }

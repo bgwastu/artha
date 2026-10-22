@@ -25,7 +25,6 @@ import net.wastu.artha.core.root.RootAccess
 import net.wastu.artha.data.analysis.*
 import net.wastu.artha.data.analysis.AnalysisSyncMerger
 import net.wastu.artha.ui.screens.linkedRecordsExplanation
-import net.wastu.artha.ui.screens.linkedSourceRole
 import net.wastu.artha.ui.screens.transactionAccountingLabel
 import net.wastu.artha.ui.screens.TransactionDetailsState
 import org.json.JSONObject
@@ -167,7 +166,7 @@ class TransactionEditFeedbackTest {
             noteDraft = "Unsaved first line\nUnsaved second line"
             categoryDraft = "Long fictional chosen category"
             saveError = "Couldn’t save note. Try again."
-            linkedExpanded = true
+            recordIndex = 1
             sourceExpanded = true
             saving = true
         }
@@ -178,7 +177,7 @@ class TransactionEditFeedbackTest {
         assertEquals(state.noteDraft, restored.noteDraft)
         assertEquals(state.categoryDraft, restored.categoryDraft)
         assertEquals(state.saveError, restored.saveError)
-        assertTrue(restored.linkedExpanded)
+        assertEquals(1, restored.recordIndex)
         assertTrue(restored.sourceExpanded)
         assertFalse(restored.saving)
     }
