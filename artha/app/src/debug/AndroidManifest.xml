@@ -1,12 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
-        <receiver android:name=".debug.GojekProbeReceiver" android:exported="true">
-            <intent-filter>
-                <action android:name="net.wastu.artha.DEBUG_GOJEK_PROBE" />
-                <action android:name="net.wastu.artha.DEBUG_GOJEK_INGEST" />
-            </intent-filter>
-        </receiver>
         <activity android:name=".DemoScreenshotActivity"
             android:exported="true" android:excludeFromRecents="true"
             android:taskAffinity="net.wastu.artha.screenshots" android:process=":screenshots" />
