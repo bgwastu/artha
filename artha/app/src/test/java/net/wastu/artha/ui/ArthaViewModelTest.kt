@@ -141,14 +141,14 @@ class ArthaViewModelTest {
         assertEquals(false, model.refreshing.value)
     }
 
-    @Test fun unchangedForegroundDoesNotRepeatImports() = runTest(dispatcher) {
+    @Test fun foregroundTriggersSyncEachOpen() = runTest(dispatcher) {
         var calls = 0
         val model = ArthaViewModel(RootAccess { true }, { ledger }, ingest = { calls++; emptyMap() }, computationDispatcher = dispatcher)
         model.enterForeground(); advanceUntilIdle()
         model.enterForeground(); advanceUntilIdle()
-        assertEquals(1, calls)
-        model.refresh(); advanceUntilIdle()
         assertEquals(2, calls)
+        model.refresh(); advanceUntilIdle()
+        assertEquals(3, calls)
         model.lock()
     }
 

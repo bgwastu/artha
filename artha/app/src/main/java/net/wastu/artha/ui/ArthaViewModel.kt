@@ -96,7 +96,6 @@ class ArthaViewModel(
     private var observerJob: Job? = null
     private var ingestionJob: Job? = null
     private var categorizationJob: Job? = null
-    private var lastAutomaticRefresh = Long.MIN_VALUE
 
     fun setTargetDestination(dest: String?) { _targetDestination.value = dest }
     fun setProviderEnabled(provider: Provider, enabled: Boolean) { preferences?.setEnabled(provider, enabled) }
@@ -237,9 +236,8 @@ class ArthaViewModel(
     }
 
     private fun automaticRefresh() {
-        val now = clock.millis()
-        if (lastAutomaticRefresh != Long.MIN_VALUE && now - lastAutomaticRefresh < 15 * 60_000) return
-        lastAutomaticRefresh = now
+        // Every app foreground triggers a sync; per-provider staleness and rate-limit windows
+        // inside the importer decide whether each source actually refreshes.
         importHistory(null, automatic = true)
     }
 
@@ -298,12 +296,11 @@ class ArthaViewModel(
 
     fun stopForegroundImports() {
         if (ingestionJob?.isActive == true) {
-            ingestionJob?.cancel(); lastAutomaticRefresh = Long.MIN_VALUE; _rootGate.value = RootGateState.LOCKED
+            ingestionJob?.cancel(); _rootGate.value = RootGateState.LOCKED
         }
     }
     fun lock() {
         stopForegroundImports(); observerJob?.cancel(); categorizationJob?.cancel(); monthJobs.values.forEach(Job::cancel); monthJobs.clear()
-        lastAutomaticRefresh = Long.MIN_VALUE
         _rootGate.value = RootGateState.LOCKED; _ledgerState.value = LedgerState.Loading
     }
     fun setAnalysisMonth(month: YearMonth) {
