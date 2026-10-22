@@ -11,7 +11,7 @@ import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CreditCard
-import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.filled.AutoAwesomeMotion
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -45,7 +45,7 @@ private val TagGap = 6.dp
 private val TransactionTag.iconOnly: Boolean get() = kind == TransactionTagKind.GROUPED
 
 private val TransactionTag.icon: ImageVector? get() = when (kind) {
-    TransactionTagKind.GROUPED -> Icons.Outlined.Link
+    TransactionTagKind.GROUPED -> Icons.Filled.AutoAwesomeMotion
     TransactionTagKind.CARD -> Icons.Outlined.CreditCard
     else -> null
 }

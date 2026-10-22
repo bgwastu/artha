@@ -84,7 +84,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Category
-import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.TopAppBar
@@ -112,7 +111,6 @@ fun ProvidersScreen(
         onDispose { onDetailOpenChanged(false) }
     }
     var showAnalysisSettings by rememberSaveable { mutableStateOf(false) }
-    var showContext by rememberSaveable { mutableStateOf(false) }
     var showWidgetHelp by rememberSaveable { mutableStateOf(false) }
     var savingAi by remember { mutableStateOf(false) }
     var aiError by remember { mutableStateOf<String?>(null) }
@@ -129,8 +127,6 @@ fun ProvidersScreen(
                 android.util.Log.i("ArthaImport", "picked uri=$uri")
                 vm.importExportFile(context, uri)
                 android.util.Log.i("ArthaImport", "import finished ok")
-                Toast.makeText(context, "Import saved", Toast.LENGTH_SHORT).show()
-                vm.importExportFile(context, uri)
                 Toast.makeText(context, "Import saved", Toast.LENGTH_SHORT).show()
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -208,7 +204,7 @@ fun ProvidersScreen(
             }
         }
         if (viewModel != null) {
-            item { SettingsHeading("Analysis") }
+            item { SettingsHeading("Transaction Analysis") }
             item {
                 val enabled = snapshot?.analysisEnabled == true
                 val config = snapshot?.aiConfig
@@ -218,12 +214,11 @@ fun ProvidersScreen(
                     !filled -> "On - not configured"
                     else -> "On"
                 }
-                SettingsLink("Analysis", summary, Icons.Default.SettingsSuggest) {
+                SettingsLink("Transaction Analysis", summary, Icons.Default.SettingsSuggest) {
                     aiError = null
                     showAnalysisSettings = true
                 }
             }
-            item { SettingsLink("Personal context", null, Icons.Default.EditNote) { showContext = true } }
             item {
                 SettingsLink(
                     "Export transactions",
@@ -315,16 +310,13 @@ fun ProvidersScreen(
             onSetCategoryIcon = viewModel::setCategoryIcon,
             onResetCategories = viewModel::resetCategoriesToDefault,
             onRetryAi = viewModel::retryAutomaticCategories,
+            knowledge = analysisSnapshot.knowledge,
+            onApplyKnowledge = { viewModel.applyKnowledgeRewrite(it) },
         )
-    }
-    if (showContext && snapshot != null && viewModel != null) {
-        KnowledgeEditorDialog(snapshot!!.knowledge, { showContext = false }) {
-            viewModel.applyKnowledgeRewrite(it)
-            showContext = false
-        }
     }
     }
 }
+
 
 @Composable
 private fun SettingsHeading(title: String) {

@@ -32,6 +32,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -67,7 +68,10 @@ fun AnalysisSettingsSheet(
     onSetCategoryIcon: (String, String?) -> Unit,
     onResetCategories: () -> Unit,
     onRetryAi: () -> Unit,
+    knowledge: String?,
+    onApplyKnowledge: (String) -> Unit,
 ) {
+    var showKnowledge by rememberSaveable { mutableStateOf(false) }
     var baseUrl by remember(aiConfig) { mutableStateOf(aiConfig.baseUrl) }
     var apiKey by remember(aiConfig) { mutableStateOf(aiConfig.apiKey) }
     var model by remember(aiConfig) { mutableStateOf(aiConfig.model) }
@@ -91,7 +95,7 @@ fun AnalysisSettingsSheet(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Analysis", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).semantics { heading() })
+                Text("Transaction Analysis", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).semantics { heading() })
                 IconButton(onClick = onDismiss, enabled = !savingAi) { Icon(Icons.Default.Close, "Close") }
             }
             Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -164,8 +168,28 @@ fun AnalysisSettingsSheet(
                         onSetCategoryIcon, onResetCategories, automationState, onRetryAi,
                         expandToSheetHeight = false, showCloseButton = false,
                     )
+                    HorizontalDivider(Modifier.padding(vertical = 12.dp))
+                    Text("Personal context", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(bottom = 4.dp))
+                    Text(
+                        "Facts the AI may use to read your payments fairly. Part of Transaction Analysis, so it is only here while analysis is on.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+                        OutlinedButton(enabled = !savingAi, onClick = { showKnowledge = true }) { Text("Edit personal context") }
+                    }
                 }
             }
         }
+    }
+    if (showKnowledge && analysisEnabled) {
+        KnowledgeEditorDialog(
+            initialKnowledge = knowledge.orEmpty(),
+            onDismiss = { showKnowledge = false },
+            onSave = { text ->
+                showKnowledge = false
+                onApplyKnowledge(text)
+            },
+        )
     }
 }
