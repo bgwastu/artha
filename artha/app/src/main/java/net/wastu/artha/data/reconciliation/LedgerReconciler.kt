@@ -13,7 +13,7 @@ object LedgerReconciler {
 
     private data class AmountKey(val currency: String, val amount: Long, val provider: Provider, val direction: Direction)
     private data class Evidence(val tx: UnifiedTransaction, val payload: JSONObject) {
-        val code = payload.optString("code")
+        val code = payload.optString("code").ifBlank { payload.optJSONObject("fields")?.optString("f1").orEmpty() }
         val reference = payload.optString("originalChargeId").ifBlank { payload.optString("paymentReference") }
         val order = payload.optString("orderNumber").ifBlank { payload.optString("orderId") }.ifBlank { payload.optString("order_id") }
         val origin = payload.optString("origin")
