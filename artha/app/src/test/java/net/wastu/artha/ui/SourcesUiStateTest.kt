@@ -57,7 +57,7 @@ class SourcesUiStateTest {
             diagnostic = ProviderDiagnostic(lastSyncEpochMillis = MS_NOW),
             coverage = coverage, count = 41, importEnabled = true, importing = false,
         )
-        assertEquals("Payments to ${formatSavedDay(latest)} · synced just now", line)
+        assertEquals("Payments to ${formatSavedDay(latest)}, synced just now", line)
     }
 
     @Test fun rowLineWithoutAnyDataFallsBackToNotImported() {
@@ -67,7 +67,7 @@ class SourcesUiStateTest {
     @Test fun rowLineKeepsPausedAndSyncingStatesFirst() {
         assertEquals(
             "Import paused",
-            sourceStateLine(null, null, 0, importEnabled = false, importing = false).substringBefore(" · "),
+            sourceStateLine(null, null, 0, importEnabled = false, importing = false).substringBefore(", "),
         )
         assertTrue(sourceStateLine(null, null, 0, importEnabled = true, importing = true).startsWith("Checking"))
     }

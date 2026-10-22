@@ -459,6 +459,7 @@ private fun SourcePage(
     onEnabled: (Boolean) -> Unit, onImportEnabled: (Boolean) -> Unit, onImport: () -> Unit,
     busy: Boolean = false, feedback: String? = null, onBack: () -> Unit,
 ) {
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
@@ -468,6 +469,7 @@ private fun SourcePage(
             SourcePageContent(provider, enabled, importEnabled, count, diagnostic, coverage, importing,
                 onEnabled, onImportEnabled, onImport, busy = busy, feedback = feedback)
         }
+    }
     }
 }
 
@@ -518,7 +520,7 @@ internal fun sourceStateLine(
         else -> "No saved payments yet"
     },
     diagnostic?.lastSyncEpochMillis?.takeIf { !importing }?.let { "synced ${it.formatRelativeTime()}" },
-).joinToString(" · ").ifBlank { "Not imported yet" }
+).joinToString(", ").ifBlank { "Not imported yet" }
 
 /** Short recovery hint under problem rows; gets its own line so states stay scannable. */
 internal fun sourceRowHint(diagnostic: ProviderDiagnostic?): String? = when (diagnostic?.accountStatus) {
