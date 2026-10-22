@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material3.Icon
@@ -42,12 +41,10 @@ private val TagIconSize = 12.dp
 private val TagIconGap = 2.dp
 private val TagGap = 6.dp
 
-/** Reversal and grouping are frequent, so the list shows them as a glyph; the label stays for speech. */
-private val TransactionTag.iconOnly: Boolean get() = kind in setOf(
-    TransactionTagKind.REVERSED, TransactionTagKind.REFUND, TransactionTagKind.GROUPED)
+/** Grouping is frequent, so the list shows it as a glyph; the label stays for speech. */
+private val TransactionTag.iconOnly: Boolean get() = kind == TransactionTagKind.GROUPED
 
 private val TransactionTag.icon: ImageVector? get() = when (kind) {
-    TransactionTagKind.REVERSED, TransactionTagKind.REFUND -> Icons.AutoMirrored.Outlined.Undo
     TransactionTagKind.GROUPED -> Icons.Outlined.Link
     TransactionTagKind.CARD -> Icons.Outlined.CreditCard
     else -> null

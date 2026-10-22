@@ -205,10 +205,8 @@ private fun bindWidgetTags(views: RemoteViews, tags: List<TransactionTag>) {
         views.setViewVisibility(id, if (text == null) View.GONE else View.VISIBLE)
         if (text != null) views.setTextViewText(id, text)
     }
-    // Reversal and grouping are glyph-only, matching the in-app list.
-    val glyph = status?.kind in setOf(TransactionTagKind.REVERSED, TransactionTagKind.REFUND, TransactionTagKind.GROUPED)
-    views.setViewVisibility(R.id.widget_item_tag_reversed,
-        if (status?.kind == TransactionTagKind.REVERSED || status?.kind == TransactionTagKind.REFUND) View.VISIBLE else View.GONE)
+    // Grouping is glyph-only, matching the in-app list.
+    val glyph = status?.kind == TransactionTagKind.GROUPED
     views.setViewVisibility(R.id.widget_item_tag_grouped, if (status?.kind == TransactionTagKind.GROUPED) View.VISIBLE else View.GONE)
     bind(R.id.widget_item_tag_status_tertiary, status?.label?.takeIf { returned && !glyph })
     bind(R.id.widget_item_tag_status_secondary, status?.label?.takeIf { !returned && !glyph })
