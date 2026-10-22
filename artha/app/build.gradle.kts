@@ -75,6 +75,9 @@ kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarg
 room { schemaDirectory("$projectDir/schemas") }
 
 dependencies {
+    // Xposed API is provided at runtime by Vector/LSPosed inside the target app.
+    compileOnly(files("libs/xposed-api-stub.jar"))
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
