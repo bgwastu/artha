@@ -32,8 +32,40 @@ class RootFileReader(internal val context: Context) {
         check(Process.myUserHandle() == UserHandle.getUserHandleForUid(0)) { "Provider imports currently support the primary Android profile only." }
     }
 
+    /** Small-source reader for provider files; large captures go through copyFilteredToSandbox. */
     suspend fun read(path: String): ByteArray = readBatch(listOf(path))[path]
         ?: throw ProviderReadException(AccountStatus.ERROR, "Provider file missing. Open its app to populate local history.")
+
+    /**
+     * Greps a large provider-owned capture file into Artha's own sandbox so callers can stream
+     * it line by line without loading megabytes of base64 into memory. Only the selected lines
+     * are copied; the sandbox copy is overwritten on each call.
+     */
+    suspend fun copyFilteredToSandbox(sourcePath: String, marker: String): File? = withContext(Dispatchers.IO) {
+        validate(sourcePath)
+        coroutineContext.ensureActive()
+        val destination = File(context.filesDir, "sandbox-capture.jsonl")
+        val temporary = File(context.filesDir, "sandbox-capture.tmp")
+        Shell.Builder.create().setContext(context).setTimeout(30).build("su", "-M", "-c", "/system/bin/sh").use { shell ->
+            if (!shell.isRoot) return@withContext null
+            val output = mutableListOf<String>()
+            val result = shell.newJob().to(output, mutableListOf()).add(
+                // Both the live capture and its rotated .1 file may hold newer/older pages; grep
+                // across both so the dedupe at parse time sees the complete page set.
+                "if [ -f '$sourcePath' ]; then " +
+                    "for src in '$sourcePath' '$sourcePath.1'; do " +
+                    "grep -F '$marker' \"\$src\" >> '$temporary' 2>/dev/null; done; " +
+                    "chown ${Process.myUid()}:${Process.myUid()} '$temporary'; " +
+                    "chmod 600 '$temporary'; mv '$temporary' '$destination'; " +
+                    "stat -c %s '$destination'; else echo MISSING; fi"
+            ).exec()
+            if (!result.isSuccess) return@withContext null
+            when (output.lastOrNull()?.trim()) {
+                null, "", "MISSING" -> null
+                else -> { check(destination.exists()) { "Capture snapshot unavailable" }; destination }
+            }
+        }
+    }
 
     suspend fun readBatch(paths: List<String>): Map<String, ByteArray?> = withContext(Dispatchers.IO) {
         if (paths.isEmpty()) return@withContext emptyMap()
