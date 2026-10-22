@@ -52,6 +52,75 @@ class ArthaApplication : Application() {
             }
         }
 
+    /** Opens the visible Gojek app, walks its history, then imports what its own fetches produced. */
+    private val gojekWalkRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    fun syncGojekWithHistoryWalk() {
+        val walker = net.wastu.artha.data.sync.GojekHistoryWalk(this, rootAccess)
+        if (!gojekWalkRunning.compareAndSet(false, true)) {
+            toast("A history walk is already running")
+            return
+        }
+        toast("Opening Gojek automatically. Leave the phone alone until the import finishes.")
+        applicationScope.launch {
+            try {
+                // Only walk newer than data Artha already holds: the ledger's oldest
+                // GoPay payment and any previous walk floor are already covered.
+                val ledgerOldest = try { ledger.loadTransactions() } catch (_: Exception) { emptyList<net.wastu.artha.core.model.UnifiedTransaction>() }
+                val gojekOldest = ledgerOldest.filter { it.provider == Provider.GOJEK }
+                    .minOfOrNull { it.occurredAt.toEpochMilli() } ?: Long.MAX_VALUE
+                val floor = minOf(gojekOldest, net.wastu.artha.data.sync.GojekHistoryWalk.walkFloor(this@ArthaApplication))
+                val stopAt = if (floor == Long.MAX_VALUE) {
+                    java.time.Instant.parse("2023-01-02T00:00:00Z").toEpochMilli()
+                } else floor
+
+                val result = try {
+                    walker.walk(stopAt, { message -> toast(message) }) {
+                        syncInBackground(Provider.GOJEK, force = true).join()
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    net.wastu.artha.data.sync.GojekWalkResult.FAILED
+                }
+                when (result) {
+                    net.wastu.artha.data.sync.GojekWalkResult.WALKED -> {
+                        val summary = syncInBackground(Provider.GOJEK, force = true).let { job -> joinThenSummary(job) }
+                        if (summary != null) toast("GoPay import finished: $summary")
+                        else toast("GoPay history refresh finished")
+                    }
+                    net.wastu.artha.data.sync.GojekWalkResult.INTERRUPTED ->
+                        toast("Walk paused: the screen left Gojek. Retry when the phone is free")
+                    net.wastu.artha.data.sync.GojekWalkResult.GOJEK_MISSING ->
+                        toast("Gojek is not installed on this phone")
+                    net.wastu.artha.data.sync.GojekWalkResult.ROOT_UNAVAILABLE ->
+                        toast("Root access unavailable. Allow root, then try again")
+                    net.wastu.artha.data.sync.GojekWalkResult.HISTORY_SCREEN_NOT_FOUND ->
+                        toast("Could not reach Gojek's history screen; open it once manually, then try again")
+                    else -> toast("History refresh failed. Try again")
+                }
+            } finally {
+                gojekWalkRunning.set(false)
+            }
+        }
+    }
+
+    private suspend fun joinThenSummary(job: kotlinx.coroutines.Job): String? {
+        job.join()
+        return try {
+            getSharedPreferences("provider_visibility", MODE_PRIVATE)
+                .getString("GOJEK_last_summary", null)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun toast(message: String) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(applicationContext, message, android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
     fun syncInBackgroundIfStale() {
         val anyStale = providerPreferences.importEnabled.value.any { providerPreferences.isStale(it) }
         if (anyStale) {

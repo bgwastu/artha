@@ -2,11 +2,6 @@ package net.wastu.artha.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.Image
@@ -92,6 +87,7 @@ import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.semantics.Role
 
@@ -108,8 +104,13 @@ fun ProvidersScreen(
     onEnabled: (Provider, Boolean) -> Unit = { _, _ -> },
     viewModel: ArthaViewModel? = null,
     onOpenDemo: (() -> Unit)? = null,
+    onDetailOpenChanged: (Boolean) -> Unit = {},
 ) {
     var selectedProvider by rememberSaveable { mutableStateOf<Provider?>(null) }
+    androidx.compose.runtime.DisposableEffect(selectedProvider) {
+        onDetailOpenChanged(selectedProvider != null)
+        onDispose { onDetailOpenChanged(false) }
+    }
     var showAnalysisSettings by rememberSaveable { mutableStateOf(false) }
     var showContext by rememberSaveable { mutableStateOf(false) }
     var showWidgetHelp by rememberSaveable { mutableStateOf(false) }
@@ -125,13 +126,17 @@ fun ProvidersScreen(
         scope.launch {
             importingFile = true
             try {
+                android.util.Log.i("ArthaImport", "picked uri=$uri")
+                vm.importExportFile(context, uri)
+                android.util.Log.i("ArthaImport", "import finished ok")
+                Toast.makeText(context, "Import saved", Toast.LENGTH_SHORT).show()
                 vm.importExportFile(context, uri)
                 Toast.makeText(context, "Import saved", Toast.LENGTH_SHORT).show()
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
-                Toast.makeText(context, "Import failed", Toast.LENGTH_SHORT).show()
-            } finally {
+            } catch (error: Exception) {
+                android.util.Log.e("ArthaImport", "jsonl import failed", error)
+                Toast.makeText(context, "Import failed: ${error.message ?: error::class.java.simpleName}", Toast.LENGTH_LONG).show()
                 importingFile = false
             }
         }
@@ -167,6 +172,10 @@ fun ProvidersScreen(
     val coverage by viewModel?.providerCoverage?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap<Provider, SourceCoverage>()) }
     fun isImporting(provider: Provider) = importBusy && (importing == provider || requestedProvider == provider)
     fun feedback(provider: Provider) = importFeedback?.takeIf { it.provider == null || it.provider == provider }?.message
+    // Gojek walks its visible history before importing; every other source burns straight through.
+    val syncAction: (Provider) -> Unit = { target ->
+        if (target == Provider.GOJEK) viewModel?.requestGojekWalk() else viewModel?.syncProvider(target)
+    }
     BoxWithConstraints(Modifier.widthIn(max = 1320.dp).fillMaxSize()) {
     val expanded = maxWidth >= 840.dp && maxHeight >= 480.dp
     Row(Modifier.fillMaxSize()) {
@@ -232,7 +241,9 @@ fun ProvidersScreen(
                     Icons.Default.FileUpload,
                 ) {
                     if (importingFile) return@SettingsLink
-                    importDocument.launch(arrayOf("application/json", "application/*", "text/*"))
+                    // Real exports can resolve as octet-stream (e.g. .jsonl from Files); the
+                    // parser validates content anyway, so accept the stream type blindly.
+                    importDocument.launch(arrayOf("application/json", "application/*", "text/*", "*/*"))
                 }
             }
         }
@@ -243,9 +254,15 @@ fun ProvidersScreen(
     if (expanded) {
         Column(Modifier.weight(1f).imePadding().verticalScroll(rememberScrollState())) {
             val provider = selectedProvider ?: Provider.entries.first()
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(provider.displayName, style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f).semantics { heading() })
+                SyncHeaderAction(isImporting(provider), provider in importEnabled && !importBusy,
+                    { syncAction(provider) })
+            }
             SourcePageContent(provider, provider in enabled, provider in importEnabled, providerCounts[provider] ?: 0,
                 diagnostics[provider], coverage[provider], isImporting(provider),
-                { onEnabled(provider, it) }, { viewModel?.setImportEnabled(provider, it) }, { viewModel?.syncProvider(provider) },
+                { onEnabled(provider, it) }, { viewModel?.setImportEnabled(provider, it) }, { syncAction(provider) },
                 busy = importBusy && !automaticImport, feedback = feedback(provider))
         }
     }
@@ -257,7 +274,7 @@ fun ProvidersScreen(
     selectedProvider?.takeIf { !expanded }?.let { provider ->
         SourcePage(provider, provider in enabled, provider in importEnabled, providerCounts[provider] ?: 0,
             diagnostics[provider], coverage[provider], isImporting(provider),
-            { onEnabled(provider, it) }, { viewModel?.setImportEnabled(provider, it) }, { viewModel?.syncProvider(provider) },
+            { onEnabled(provider, it) }, { viewModel?.setImportEnabled(provider, it) }, { syncAction(provider) },
             busy = importBusy && !automaticImport, feedback = feedback(provider),
             onBack = { selectedProvider = null })
     }
@@ -312,7 +329,7 @@ fun ProvidersScreen(
 @Composable
 private fun SettingsHeading(title: String) {
     Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.semantics { heading() }.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp))
+        modifier = Modifier.semantics { heading() }.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp))
 }
 
 @Composable
@@ -347,30 +364,14 @@ private val PROBLEM_STATUSES = setOf(
     AccountStatus.RATE_LIMITED, AccountStatus.APP_NOT_INSTALLED,
 )
 
-/** One entry point for manual source sync; keeps the busy animation in one place. */
+/** App-bar style sync action: the standard 48dp icon target with its own accessible name. */
 @Composable
-private fun ImportNowButton(importing: Boolean, busy: Boolean, importEnabled: Boolean, onImport: () -> Unit) {
-    FilledTonalButton(
-        onClick = { if (!importing && !busy) onImport() },
-        enabled = importEnabled,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp).height(52.dp),
-    ) {
-        AnimatedContent(
-            targetState = importing,
-            label = "import_button_content",
-            transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(150)) },
-        ) { loading ->
-            if (loading) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.5.dp)
-                    Text("Syncing history...", style = MaterialTheme.typography.labelLarge)
-                }
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text(if (busy) "Sync in progress" else "Sync history", style = MaterialTheme.typography.labelLarge)
-                }
-            }
+private fun SyncHeaderAction(importing: Boolean, enabled: Boolean, onSync: () -> Unit) {
+    IconButton(onClick = onSync, enabled = enabled) {
+        if (importing) {
+            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        } else {
+            Icon(Icons.Default.Sync, contentDescription = "Sync history")
         }
     }
 }
@@ -385,16 +386,18 @@ private fun SourcePageContent(
 ) {
     val isEnabled = enabled && importEnabled
     val status = diagnostic?.accountStatus ?: AccountStatus.UNKNOWN
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        ImportNowButton(importing, busy, importEnabled, onImport)
-        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            SourceStatePill(diagnostic, importEnabled, importing)
-            Text(sourceStateDescription(status, count > 0), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        }
-        Text(sourceStateLine(diagnostic, coverage, count, importEnabled, importing),
-            modifier = Modifier.padding(horizontal = 16.dp).semantics { liveRegion = LiveRegionMode.Polite },
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
+    ListItem(
+        headlineContent = { Text("Status") },
+        supportingContent = {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(sourceStateDescription(status, count > 0))
+                Text(sourceStateLine(diagnostic, coverage, count, importEnabled, importing),
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        trailingContent = { SourceStatePill(diagnostic, importEnabled, importing) },
+    )
 
     SettingsHeading("Data")
     ListItem(headlineContent = { Text("Saved payments") }, trailingContent = { Text(count.toString()) })
@@ -441,7 +444,7 @@ private fun SourcePageContent(
         sourceName = provider.displayName,
     )
     if (provider == Provider.GOJEK) {
-        Text("This source imports what the Gojek app loads on screen. Open GoPay's transaction history there and scroll a little; the next sync picks it up.",
+        Text("Sync history opens Gojek and scrolls its transaction history for you; imports capture what the app loads. Leave the screen alone until it finishes.",
             Modifier.padding(horizontal = 16.dp, vertical = 2.dp), style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -451,7 +454,7 @@ private fun SourcePageContent(
     }
 }
 
-/** Phone-sized source page: own header row because the shell's app bar already names the tab. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SourcePage(
     provider: Provider, enabled: Boolean, importEnabled: Boolean, count: Int,
@@ -460,12 +463,20 @@ private fun SourcePage(
     busy: Boolean = false, feedback: String? = null, onBack: () -> Unit,
 ) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-            Text(provider.displayName, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
-        }
-        Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+    androidx.compose.material3.Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(provider.displayName, modifier = Modifier.semantics { heading() }) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                },
+                actions = { SyncHeaderAction(importing, importEnabled && !busy, onImport) },
+            )
+        },
+    ) { padding ->
+        Column(
+            Modifier.fillMaxSize().imePadding().padding(padding).verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
+        ) {
             SourcePageContent(provider, enabled, importEnabled, count, diagnostic, coverage, importing,
                 onEnabled, onImportEnabled, onImport, busy = busy, feedback = feedback)
         }

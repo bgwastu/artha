@@ -134,6 +134,7 @@ fun HomeScreen(
     val closeDetails = { selectedKey = null; selectedFallback = null }
     val detailsState = selected?.let { rememberTransactionDetailsState(it.key) }
     val largeNavigationText = LocalDensity.current.fontScale > 1.3f
+    var settingsSourceOpen by rememberSaveable { mutableStateOf(false) }
     fun navigationLabel(item: Destination) =
         if (largeNavigationText && item == Destination.TRANSACTIONS) "Payments" else item.label
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -143,6 +144,7 @@ fun HomeScreen(
             snackbarHost = { androidx.compose.material3.SnackbarHost(snackbarHost) },
             modifier = if (showSearch) Modifier.clearAndSetSemantics {} else Modifier,
             topBar = {
+                if (!settingsSourceOpen || destination != Destination.SETTINGS) {
                 TopAppBar(
                     navigationIcon = {
                         if (destination == Destination.TRANSACTIONS && categoryFilter != null) {
@@ -187,6 +189,7 @@ fun HomeScreen(
                         }
                     },
                 )
+                }
             },
             bottomBar = {
                 if (!showRail) {
@@ -286,6 +289,7 @@ fun HomeScreen(
                                 providerCounts = providerCounts,
                                 onEnabled = onProviderEnabled,
                                 viewModel = viewModel,
+                                onDetailOpenChanged = { settingsSourceOpen = it },
                                 onOpenDemo = { net.wastu.artha.DemoMode.open(context) },
                             )
                         }

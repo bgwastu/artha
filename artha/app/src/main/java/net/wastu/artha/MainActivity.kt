@@ -56,6 +56,7 @@ class MainActivity : ComponentActivity() {
                             analysisStore = application.analysisStore,
                             spendingState = application.spending.state,
                             retrySpending = application.spending::retry,
+                            gojekHistoryWalk = { application.syncGojekWithHistoryWalk() },
                         ).also {
                             if (initialDest != null) it.setTargetDestination(initialDest)
                         }

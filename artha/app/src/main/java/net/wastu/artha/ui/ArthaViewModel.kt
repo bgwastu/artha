@@ -49,6 +49,7 @@ class ArthaViewModel(
     private val computationDispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val spendingState: StateFlow<SpendingState>? = null,
     private val retrySpending: (() -> Unit)? = null,
+    private val gojekHistoryWalk: (() -> Unit)? = null,
     private val categorize: suspend (AiConfig, AnalysisSnapshot, List<CategoryCandidate>) -> Map<String, CategorySuggestion> = AiCategorization::classify,
     initialSnapshot: AnalysisSnapshot = AnalysisSnapshot(),
 ) : ViewModel() {
@@ -128,8 +129,11 @@ class ArthaViewModel(
             stream.readBytes().toString(Charsets.UTF_8)
         } ?: throw IllegalStateException("Unable to read the import file.")
         val parsed = LedgerJsonlImport.parse(body)
+        android.util.Log.i("ArthaImport", "parsed ${parsed.transactions.size} rows from ${body.length} bytes")
         analysisStore?.mergeImportedAnalysis(parsed.meta, parsed.labels)
-        ledger().append(parsed.transactions)
+        ledger().append(parsed.transactions).also { result ->
+            android.util.Log.i("ArthaImport", "append: ${result.inserted} inserted, ${result.duplicates} duplicates")
+        }
     }
 
     fun enterForeground() {
@@ -258,6 +262,8 @@ class ArthaViewModel(
 
     fun refresh() { importHistory(null) }
     fun syncProvider(provider: Provider) { importHistory(provider) }
+    /** Gojek needs its visible history walked first; the host decides how (root UI automation). */
+    fun requestGojekWalk() { (gojekHistoryWalk ?: { syncProvider(Provider.GOJEK) }).invoke() }
     private fun importHistory(provider: Provider?, automatic: Boolean = false) {
         if (automatic && preferences != null && importEnabled.value.none { preferences.isStale(it, clock.millis()) }) return
         val previous = ingestionJob?.takeIf { it.isActive }
