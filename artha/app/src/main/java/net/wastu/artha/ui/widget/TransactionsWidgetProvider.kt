@@ -18,6 +18,9 @@ import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.ui.paymentRowAmount
 import net.wastu.artha.ui.transactionHumanLine
+import net.wastu.artha.ui.transactionTags
+import net.wastu.artha.ui.TransactionTag
+import net.wastu.artha.ui.TransactionTagKind
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -157,13 +160,10 @@ internal fun buildTransactionItemView(
     val views = RemoteViews(context.packageName, R.layout.widget_transaction_item)
 
     views.setImageViewResource(R.id.widget_item_icon, tx.provider.iconRes)
-    val line = transactionHumanLine(tx)
-    val title = if (tx.isQris && !line.contains("QRIS", ignoreCase = true)) {
-        "[QRIS] $line"
-    } else {
-        line
-    }
+    val title = transactionHumanLine(tx)
     views.setTextViewText(R.id.widget_item_description, title)
+    val tags = transactionTags(tx)
+    bindWidgetTags(views, tags)
 
     val zone = net.wastu.artha.core.model.AccountingTime.zone
     val localDate = tx.occurredAt.atZone(zone).toLocalDate()
@@ -171,9 +171,11 @@ internal fun buildTransactionItemView(
     val timeStr = tx.occurredAt.atZone(zone).format(timeFormatter)
     val dateStr = "${widgetDayLabel(localDate)}, $timeStr"
     val isCredit = tx.direction == Direction.CREDIT
+    // The provider icon already names the source; time and pocket sit in separate views.
+    views.setTextViewText(R.id.widget_item_subtitle, timeStr)
     val pocketName = tx.pocket?.name
-    val subtitle = listOfNotNull(tx.provider.displayName, pocketName, timeStr).joinToString(" • ")
-    views.setTextViewText(R.id.widget_item_subtitle, subtitle)
+    views.setTextViewText(R.id.widget_item_pocket, pocketName.orEmpty())
+    views.setViewVisibility(R.id.widget_item_pocket, if (pocketName.isNullOrBlank()) View.GONE else View.VISIBLE)
 
     val isZero = !isCredit && (tx.isReversal || tx.description.contains("(Reversed)", ignoreCase = true))
     val amountText = paymentRowAmount(tx)
@@ -189,10 +191,24 @@ internal fun buildTransactionItemView(
     val fillInIntent = Intent().apply {
         putExtra("extra_destination", "TRANSACTIONS")
     }
-    views.setContentDescription(R.id.widget_item_root, "${tx.provider.displayName}, $title, ${if (isCredit) "Incoming" else "Outgoing"}, $amountText, $dateStr. Open Transactions")
+    views.setContentDescription(R.id.widget_item_root, "${tx.provider.displayName}, ${(tags.map { it.description } + title).joinToString(", ")}, ${if (isCredit) "Incoming" else "Outgoing"}, $amountText, $dateStr. Open Transactions")
     views.setOnClickFillInIntent(R.id.widget_item_root, fillInIntent)
 
     return views
+}
+
+/** RemoteViews cannot draw inline pills, so a fixed set of tag views is shown or hidden. */
+private fun bindWidgetTags(views: RemoteViews, tags: List<TransactionTag>) {
+    val status = tags.firstOrNull { it.kind != TransactionTagKind.QRIS && it.kind != TransactionTagKind.CARD }
+    val returned = status?.kind in setOf(TransactionTagKind.REVERSED, TransactionTagKind.REFUND, TransactionTagKind.PARTIAL_REFUND)
+    fun bind(id: Int, text: String?) {
+        views.setViewVisibility(id, if (text == null) View.GONE else View.VISIBLE)
+        if (text != null) views.setTextViewText(id, text)
+    }
+    bind(R.id.widget_item_tag_status_tertiary, status?.label?.takeIf { returned })
+    bind(R.id.widget_item_tag_status_secondary, status?.label?.takeIf { !returned })
+    bind(R.id.widget_item_tag_qris, tags.firstOrNull { it.kind == TransactionTagKind.QRIS }?.label)
+    bind(R.id.widget_item_tag_card, tags.firstOrNull { it.kind == TransactionTagKind.CARD }?.label)
 }
 
 class TransactionsWidgetService : RemoteViewsService() {

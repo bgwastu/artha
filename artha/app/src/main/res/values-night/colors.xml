@@ -8,4 +8,9 @@
     <color name="widget_amount_outgoing">#DEE5DB</color>
     <color name="widget_amount_supporting">#8B958B</color>
     <color name="widget_pill_background">#212821</color>
+    <color name="widget_tag_secondary_background">#3A4B39</color>
+    <color name="widget_tag_secondary_text">#D4E8D1</color>
+    <color name="widget_tag_tertiary_background">#1F4D51</color>
+    <color name="widget_tag_tertiary_text">#BCEBEE</color>
+    <color name="widget_tag_outline">#424940</color>
 </resources>
