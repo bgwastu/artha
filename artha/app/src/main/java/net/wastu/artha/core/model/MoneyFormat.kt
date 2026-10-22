@@ -16,12 +16,6 @@ private val CachedCurrencyFormat = ThreadLocal.withInitial {
     }
 }
 
-private val FractionalCurrencyFormat = ThreadLocal.withInitial {
-    NumberFormat.getCurrencyInstance(IndonesianLocale).apply {
-        currency = Currency.getInstance("IDR"); minimumFractionDigits = 0; maximumFractionDigits = 2
-    }
-}
-
 fun formatMoney(money: Money): String {
     if (money.currencyCode == "IDR" && money.amountMinor % 100L == 0L) {
         val rupiah = money.amountMinor / 100L
@@ -32,7 +26,9 @@ fun formatMoney(money: Money): String {
 
 fun formatMinorAmount(amountMinor: BigInteger, currencyCode: String = "IDR"): String {
     if (currencyCode == "IDR") {
-        return requireNotNull(FractionalCurrencyFormat.get()).format(BigDecimal(amountMinor, 2))
+        // Show whole rupiah even when the minor part carries cents (Rp1.234,56 stays as its own
+        // fractional string elsewhere; explicit user request: cleaner whole-rupiah display).
+        return requireNotNull(CachedCurrencyFormat.get()).format(amountMinor.divide(java.math.BigInteger.valueOf(100)))
     }
     val currency = Currency.getInstance(currencyCode)
     val amount = BigDecimal(amountMinor, currency.defaultFractionDigits)

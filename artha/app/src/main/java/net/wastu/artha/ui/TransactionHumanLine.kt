@@ -28,7 +28,9 @@ private fun opaqueTitle(payload: JSONObject?): String {
 }
 
 private fun lineFromPayload(payload: JSONObject): String? {
-    val merchant = usableMerchant(payload.optString("merchantName")) ?: usableMerchant(payload.optString("counterpart"))
+    val merchant = usableMerchant(payload.optString("merchantName"))
+        ?: qrisMerchantHint(payload)
+        ?: usableMerchant(payload.optString("counterpart"))
     if (merchant != null) {
         return if (payload.optBoolean("isQris") && !merchant.contains("QRIS", ignoreCase = true)) {
             "QRIS$HUMAN_LINE_SEP$merchant"
@@ -52,6 +54,38 @@ private fun lineFromPayload(payload: JSONObject): String? {
         return if (tier.isNotBlank()) listOf(tier, route).joinToString(HUMAN_LINE_SEP) else route
     }
     return null
+}
+
+/**
+ * QRIS card rows carry the acquirer bank name in `counterpart` (f2), not the seller. The
+ * seller descriptor lives in `localized` (f14), e.g. "CIRCLE K - JAK0922 - QRIS"; strip the
+ * rank/terminal tail and the "- QRIS" marker so the display reads the merchant instead.
+ */
+private fun qrisMerchantHint(payload: JSONObject): String? {
+    if (!payload.optBoolean("isQris")) return null
+    val localized = payload.optString("localized").trim()
+    if (localized.isBlank()) return null
+    val cleaned = localized
+        .replace(Regex("(?i)\\s*-\\s*qr?is\\s*$"), "")
+        .replace(Regex("\\s+[a-z]{0,3}\\d{3,6}\\s*$"), "")
+        .trim()
+    if (cleaned.isBlank() || usableMerchant(cleaned) == null) return null
+    // Uppercase descriptors (e.g. "WEI QIANG", "CIRCLE K - JAK0922") read better title-cased;
+    // mixed-case strings (e.g. "Dunia Kedol") keep their stored casing.
+    val titled = if (cleaned == cleaned.uppercase()) {
+        cleaned.lowercase().split(" - ").joinToString(" - ") { part ->
+            part.split(" ").joinToString(" ") { w ->
+                if (w.length <= 3 && w.all { ch -> ch.isDigit() }) w
+                else w.lowercase().replaceFirstChar { if (it.isLowerCase()) it.uppercaseChar() else it }
+            }
+        }
+    } else cleaned
+    // The acquirer's own name, if it is the only remaining term, is not a merchant either.
+    val lowered = titled.lowercase()
+    val isAcquirerOnly = listOf("bank bca", "bank mandiri", "bank bni", "bank bri", "bsi", "bank syariah", "bank jago")
+        .any { lowered.startsWith(it) || lowered.endsWith(it) }
+    if (isAcquirerOnly) return null
+    return titled
 }
 
 /** Values promoters stored as merchant evidence but that describe nothing are not titles. */
