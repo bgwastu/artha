@@ -92,10 +92,12 @@ import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.semantics.Role
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import net.wastu.artha.ui.SourceCoverage
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -162,6 +164,7 @@ fun ProvidersScreen(
     val automaticImport by viewModel?.automaticImportActive?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
     val requestedProvider by viewModel?.requestedImportProvider?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<Provider?>(null) }
     val importFeedback by viewModel?.importFeedback?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val coverage by viewModel?.providerCoverage?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap<Provider, SourceCoverage>()) }
     fun isImporting(provider: Provider) = importBusy && (importing == provider || requestedProvider == provider)
     fun feedback(provider: Provider) = importFeedback?.takeIf { it.provider == null || it.provider == provider }?.message
     BoxWithConstraints(Modifier.widthIn(max = 1320.dp).fillMaxSize()) {
@@ -174,14 +177,24 @@ fun ProvidersScreen(
                 ListItem(
                     headlineContent = { Text(provider.displayName) },
                     supportingContent = {
-                        Text(providerSummary(diagnostics[provider], providerCounts[provider] ?: 0,
-                            provider in importEnabled, importing == provider))
+                        Column {
+                            Text(sourceStateLine(diagnostics[provider], coverage[provider],
+                                providerCounts[provider] ?: 0, provider in importEnabled, importing == provider))
+                            sourceRowHint(diagnostics[provider])?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
                     },
                     leadingContent = {
                         Image(painterResource(provider.iconRes), null,
                             Modifier.size(40.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
                     },
-                    trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                    trailingContent = {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            SourceStatePill(diagnostics[provider], provider in importEnabled, importing == provider)
+                            Icon(Icons.Default.ChevronRight, null)
+                        }
+                    },
                 )
             }
         }
@@ -228,28 +241,25 @@ fun ProvidersScreen(
     }
 
     if (expanded) {
-        Column(Modifier.weight(1f).imePadding().verticalScroll(rememberScrollState()).padding(16.dp)) {
+        Column(Modifier.weight(1f).imePadding().verticalScroll(rememberScrollState())) {
             val provider = selectedProvider ?: Provider.entries.first()
-            Text(provider.displayName, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
-            ProviderSettings(provider.displayName, provider in enabled, provider in importEnabled,
-                providerCounts[provider] ?: 0, diagnostics[provider], isImporting(provider),
-                { onEnabled(provider, it) }, { viewModel?.setImportEnabled(provider, it) }, { viewModel?.syncProvider(provider) }, busy = importBusy && !automaticImport, feedback = feedback(provider))
+            SourcePageContent(provider, provider in enabled, provider in importEnabled, providerCounts[provider] ?: 0,
+                diagnostics[provider], coverage[provider], isImporting(provider),
+                { onEnabled(provider, it) }, { viewModel?.setImportEnabled(provider, it) }, { viewModel?.syncProvider(provider) },
+                busy = importBusy && !automaticImport, feedback = feedback(provider))
         }
     }
     }
 
+    if (!expanded) {
+        BackHandler(enabled = selectedProvider != null) { selectedProvider = null }
+    }
     selectedProvider?.takeIf { !expanded }?.let { provider ->
-        SettingsDetailSheet(provider.displayName, { selectedProvider = null }) {
-            ProviderSettings(
-                sourceName = provider.displayName, enabled = provider in enabled, importEnabled = provider in importEnabled,
-                count = providerCounts[provider] ?: 0, diagnostic = diagnostics[provider],
-                importing = isImporting(provider),
-                busy = importBusy && !automaticImport, feedback = feedback(provider),
-                onEnabled = { onEnabled(provider, it) },
-                onImportEnabled = { viewModel?.setImportEnabled(provider, it) },
-                onImport = { viewModel?.syncProvider(provider) },
-            )
-        }
+        SourcePage(provider, provider in enabled, provider in importEnabled, providerCounts[provider] ?: 0,
+            diagnostics[provider], coverage[provider], isImporting(provider),
+            { onEnabled(provider, it) }, { viewModel?.setImportEnabled(provider, it) }, { viewModel?.syncProvider(provider) },
+            busy = importBusy && !automaticImport, feedback = feedback(provider),
+            onBack = { selectedProvider = null })
     }
     if (showWidgetHelp) {
         AlertDialog(onDismissRequest = { showWidgetHelp = false }, title = { Text("Widgets") },
@@ -316,19 +326,147 @@ private fun SettingsLink(title: String, summary: String?, icon: androidx.compose
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SettingsDetailSheet(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().imePadding()) {
-            Text(
-                title,
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 8.dp)
-            )
-            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
-                content()
+private fun SourceStatePill(diagnostic: ProviderDiagnostic?, importEnabled: Boolean, importing: Boolean) {
+    val status = diagnostic?.accountStatus ?: AccountStatus.UNKNOWN
+    val colors = when {
+        importing -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+        !importEnabled -> MaterialTheme.colorScheme.surfaceContainerHighest to MaterialTheme.colorScheme.onSurfaceVariant
+        status in PROBLEM_STATUSES -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+        status == AccountStatus.PARTIAL -> MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
+        else -> MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+    }
+    Surface(color = colors.first, contentColor = colors.second, shape = MaterialTheme.shapes.small) {
+        Text(sourceStatusLabel(status, importEnabled, importing),
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+    }
+}
+
+private val PROBLEM_STATUSES = setOf(
+    AccountStatus.NEEDS_LOGIN, AccountStatus.ERROR,
+    AccountStatus.RATE_LIMITED, AccountStatus.APP_NOT_INSTALLED,
+)
+
+/** One entry point for manual source sync; keeps the busy animation in one place. */
+@Composable
+private fun ImportNowButton(importing: Boolean, busy: Boolean, importEnabled: Boolean, onImport: () -> Unit) {
+    FilledTonalButton(
+        onClick = { if (!importing && !busy) onImport() },
+        enabled = importEnabled,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp).height(52.dp),
+    ) {
+        AnimatedContent(
+            targetState = importing,
+            label = "import_button_content",
+            transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(150)) },
+        ) { loading ->
+            if (loading) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.5.dp)
+                    Text("Syncing history...", style = MaterialTheme.typography.labelLarge)
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text(if (busy) "Sync in progress" else "Sync history", style = MaterialTheme.typography.labelLarge)
+                }
             }
+        }
+    }
+}
+
+/** Body shared by the wide pane and the phone source page; ordered status → data → last import → settings. */
+@Composable
+private fun SourcePageContent(
+    provider: Provider, enabled: Boolean, importEnabled: Boolean, count: Int,
+    diagnostic: ProviderDiagnostic?, coverage: SourceCoverage?, importing: Boolean,
+    onEnabled: (Boolean) -> Unit, onImportEnabled: (Boolean) -> Unit, onImport: () -> Unit,
+    busy: Boolean = false, feedback: String? = null,
+) {
+    val isEnabled = enabled && importEnabled
+    val status = diagnostic?.accountStatus ?: AccountStatus.UNKNOWN
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        ImportNowButton(importing, busy, importEnabled, onImport)
+        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            SourceStatePill(diagnostic, importEnabled, importing)
+            Text(sourceStateDescription(status, count > 0), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        }
+        Text(sourceStateLine(diagnostic, coverage, count, importEnabled, importing),
+            modifier = Modifier.padding(horizontal = 16.dp).semantics { liveRegion = LiveRegionMode.Polite },
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+
+    SettingsHeading("Data")
+    ListItem(headlineContent = { Text("Saved payments") }, trailingContent = { Text(count.toString()) })
+    coverage?.latest?.let { ListItem(headlineContent = { Text("Latest payment") }, trailingContent = { Text(formatSavedDay(it)) }) }
+    coverage?.earliest?.takeIf { coverage.latest != null && it != coverage.latest }?.let {
+        ListItem(headlineContent = { Text("Earliest payment") }, trailingContent = { Text(formatSavedDay(it)) })
+    }
+    diagnostic?.accountIdentifier?.takeIf { it.isNotBlank() }?.let {
+        ListItem(headlineContent = { Text("Account") }, supportingContent = { Text(it) })
+    }
+    diagnostic?.coverageHint?.takeIf { it.isNotBlank() }?.let { hint ->
+        Text(hint, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+
+    val hasImportDetails = diagnostic?.lastSyncSummary?.isNotBlank() == true || diagnostic?.lastImportWindow != null ||
+        diagnostic?.lastError?.isNotBlank() == true
+    if (hasImportDetails) {
+        SettingsHeading("Last import")
+        diagnostic?.lastImportWindow?.let { window ->
+            ListItem(headlineContent = { Text("Payments read") }, trailingContent = { Text(window.paymentCount.toString()) })
+            if (window.earliestMillis != null && window.latestMillis != null) {
+                val first = formatSavedDay(java.time.Instant.ofEpochMilli(window.earliestMillis))
+                val last = formatSavedDay(java.time.Instant.ofEpochMilli(window.latestMillis))
+                ListItem(headlineContent = { Text("Import range") },
+                    supportingContent = { Text(if (first == last) first else "$first to $last") })
+            }
+        }
+        diagnostic?.lastSyncSummary?.takeIf { it.isNotBlank() }?.let {
+            Text(it.replace(" \u00b7 ", ". "), Modifier.padding(horizontal = 16.dp, vertical = 2.dp), style = MaterialTheme.typography.bodySmall)
+        }
+        diagnostic?.lastError?.takeIf { it.isNotBlank() }?.let {
+            Text(it, Modifier.padding(horizontal = 16.dp, vertical = 2.dp), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error)
+        }
+    }
+
+    SettingsHeading("Settings")
+    SettingsSwitch(
+        title = "Enabled",
+        checked = isEnabled,
+        onChange = { checked -> onEnabled(checked); onImportEnabled(checked) },
+        summary = if (isEnabled) "New payments import in every sync" else "Imports are paused; saved payments stay",
+        sourceName = provider.displayName,
+    )
+    if (provider == Provider.GOJEK) {
+        Text("This source imports what the Gojek app loads on screen. Open GoPay's transaction history there and scroll a little; the next sync picks it up.",
+            Modifier.padding(horizontal = 16.dp, vertical = 2.dp), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    feedback?.let {
+        Text(it, Modifier.padding(horizontal = 16.dp).semantics { liveRegion = LiveRegionMode.Polite },
+            style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** Phone-sized source page: own header row because the shell's app bar already names the tab. */
+@Composable
+private fun SourcePage(
+    provider: Provider, enabled: Boolean, importEnabled: Boolean, count: Int,
+    diagnostic: ProviderDiagnostic?, coverage: SourceCoverage?, importing: Boolean,
+    onEnabled: (Boolean) -> Unit, onImportEnabled: (Boolean) -> Unit, onImport: () -> Unit,
+    busy: Boolean = false, feedback: String? = null, onBack: () -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+            Text(provider.displayName, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+        }
+        Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            SourcePageContent(provider, enabled, importEnabled, count, diagnostic, coverage, importing,
+                onEnabled, onImportEnabled, onImport, busy = busy, feedback = feedback)
         }
     }
 }
@@ -340,134 +478,75 @@ private fun SettingsSwitch(title: String, checked: Boolean, onChange: (Boolean) 
         trailingContent = { Switch(checked, onCheckedChange = null) })
 }
 
-private fun providerSummary(diagnostic: ProviderDiagnostic?, count: Int, importEnabled: Boolean, importing: Boolean): String = when {
-    importing -> "Importing"
-    !importEnabled -> "Import paused"
-    else -> when (diagnostic?.accountStatus ?: AccountStatus.UNKNOWN) {
-        AccountStatus.PARTIAL -> "Partial import"
-        AccountStatus.CONNECTED -> diagnostic?.lastSyncEpochMillis?.let { "Imported ${formatRelativeTime(it)}" }
-            ?: if (count > 0) "$count saved transactions" else "No saved history"
-        AccountStatus.NEEDS_LOGIN -> "Sign in required"
-        AccountStatus.APP_NOT_INSTALLED -> "App not installed"
-        AccountStatus.RATE_LIMITED -> "Rate limited"
-        AccountStatus.ERROR -> "Import failed"
-        AccountStatus.UNKNOWN -> if (count > 0) "$count saved transactions" else "Not imported"
+internal fun sourceStatusLabel(status: AccountStatus, importEnabled: Boolean, importing: Boolean): String = when {
+    importing -> "Syncing"
+    !importEnabled -> "Paused"
+    else -> when (status) {
+        AccountStatus.PARTIAL -> "Partial"
+        AccountStatus.NEEDS_LOGIN -> "Sign in"
+        AccountStatus.APP_NOT_INSTALLED -> "No app"
+        AccountStatus.RATE_LIMITED -> "Limited"
+        AccountStatus.ERROR -> "Error"
+        AccountStatus.UNKNOWN -> "New"
+        else -> "Connected"
     }
 }
 
-@Composable
-private fun ProviderSettings(
-    sourceName: String, enabled: Boolean, importEnabled: Boolean, count: Int, diagnostic: ProviderDiagnostic?, importing: Boolean,
-    onEnabled: (Boolean) -> Unit, onImportEnabled: (Boolean) -> Unit, onImport: () -> Unit,
-    busy: Boolean = false, feedback: String? = null,
-) {
-    val isEnabled = enabled && importEnabled
-    SettingsSwitch(
-        title = "Enabled",
-        checked = isEnabled,
-        onChange = { checked ->
-            onEnabled(checked)
-            onImportEnabled(checked)
-        },
-        summary = if (isEnabled) "Active and syncing transactions" else "Disabled",
-        sourceName = sourceName
-    )
-    ListItem(headlineContent = { Text("Saved transactions") }, trailingContent = { Text(count.toString()) })
-    diagnostic?.accountIdentifier?.let { ListItem(headlineContent = { Text("Account") }, supportingContent = { Text(it) }) }
-    val status = providerSummary(diagnostic, count, importEnabled, importing)
-    ListItem(headlineContent = { Text(status) }, supportingContent = diagnostic?.lastSyncEpochMillis
-        ?.takeIf { diagnostic.accountStatus != AccountStatus.CONNECTED }?.let { { Text("Last imported ${formatRelativeTime(it)}") } })
-    if (diagnostic?.accountStatus == AccountStatus.NEEDS_LOGIN) {
-        Text("Sign in in the source app, then import again", modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodyMedium)
-    }
-    FilledTonalButton(
-        onClick = { if (!importing && !busy) onImport() },
-        enabled = importEnabled,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(52.dp)
-            .padding(horizontal = 16.dp, vertical = 2.dp),
-    ) {
-        AnimatedContent(
-            targetState = importing,
-            label = "import_button_content",
-            transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(150)) },
-        ) { loading ->
-            if (loading) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.5.dp,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        trackColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.2f),
-                    )
-                    Text("Syncing history...", style = MaterialTheme.typography.labelLarge)
-                }
-            } else {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Sync,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Text(
-                        if (busy) "Sync in progress" else "Sync history",
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                }
-            }
-        }
-    }
-    feedback?.let { Text(it, modifier = Modifier.padding(horizontal = 16.dp).semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium) }
-    if (!diagnostic?.lastSyncSummary.isNullOrBlank() || !diagnostic?.coverageHint.isNullOrBlank() || diagnostic?.lastError != null || diagnostic?.lastImportWindow != null) {
-        var showDiagnostics by remember { mutableStateOf(false) }
-        TextButton(onClick = { showDiagnostics = !showDiagnostics }, modifier = Modifier.padding(horizontal = 8.dp)) {
-            Text(if (showDiagnostics) "Hide details" else "Import details")
-        }
-        if (showDiagnostics) {
-            diagnostic?.lastError?.let { Text(it,
-                modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall) }
-            diagnostic?.coverageHint?.let { Text(it,
-                modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall) }
-            diagnostic?.lastImportWindow?.let { window ->
-                Text("${window.paymentCount} payments read in the last import", modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
-                if (window.earliestMillis != null && window.latestMillis != null) {
-                    val formatter = java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale.US)
-                        .withZone(net.wastu.artha.core.model.AccountingTime.zone)
-                    val first = formatter.format(java.time.Instant.ofEpochMilli(window.earliestMillis))
-                    val last = formatter.format(java.time.Instant.ofEpochMilli(window.latestMillis))
-                    Text(if (first == last) "Payment dates: $first" else "Payment dates: $first to $last",
-                        modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            diagnostic?.lastSyncSummary?.let { Text(it.replace(" \u00b7 ", ". "),
-                modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall) }
-        }
-    }
+/** Sentence state description for the source page; problems carry their recovery step. */
+internal fun sourceStateDescription(status: AccountStatus, hasSavedRows: Boolean): String = when (status) {
+    AccountStatus.PARTIAL -> "This import captured only what the source offers; the details below say what stayed out."
+    AccountStatus.NEEDS_LOGIN -> "Sign in in the source app, then import again."
+    AccountStatus.APP_NOT_INSTALLED -> "Install the source app to import its history."
+    AccountStatus.RATE_LIMITED -> "The source is limiting imports. Wait a little, then import again."
+    AccountStatus.ERROR -> "The last import failed. The details below say why."
+    else -> if (hasSavedRows) "Imports are healthy. New payments appear after each sync." else "No history has been imported yet."
 }
 
+/** Row-level state summary: data freshness first, then sync recency. */
+internal fun sourceStateLine(
+    diagnostic: ProviderDiagnostic?,
+    coverage: SourceCoverage?,
+    count: Int,
+    importEnabled: Boolean,
+    importing: Boolean,
+): String = listOfNotNull(
+    when {
+        importing -> "Checking for new payments"
+        !importEnabled -> "Import paused"
+        coverage?.latest != null -> "Payments to ${formatSavedDay(coverage.latest)}"
+        count > 0 -> null
+        else -> "No saved payments yet"
+    },
+    diagnostic?.lastSyncEpochMillis?.takeIf { !importing }?.let { "synced ${it.formatRelativeTime()}" },
+).joinToString(" · ").ifBlank { "Not imported yet" }
 
-private fun formatRelativeTime(epochMillis: Long): String {
-    val diffMs = System.currentTimeMillis() - epochMillis
-    val diffSec = (diffMs / 1000).coerceAtLeast(0)
+/** Short recovery hint under problem rows; gets its own line so states stay scannable. */
+internal fun sourceRowHint(diagnostic: ProviderDiagnostic?): String? = when (diagnostic?.accountStatus) {
+    AccountStatus.NEEDS_LOGIN -> "Open the source app, sign in, then import again"
+    AccountStatus.APP_NOT_INSTALLED -> "Install the source app to import"
+    AccountStatus.ERROR -> diagnostic.lastError?.substringBefore(". ")?.takeIf(String::isNotBlank)
+    else -> null
+}
+
+private fun Long.formatRelativeTime(): String {
+    val diffSec = ((System.currentTimeMillis() - this) / 1000).coerceAtLeast(0)
     val diffMin = diffSec / 60
     val diffHours = diffMin / 60
     val diffDays = diffHours / 24
     return when {
-        diffSec < 60 -> "Just now"
+        diffSec < 60 -> "just now"
         diffMin < 60 -> "$diffMin min ago"
         diffHours < 24 -> "$diffHours hours ago"
-        diffDays == 1L -> "Yesterday"
+        diffDays == 1L -> "yesterday"
         else -> "$diffDays days ago"
     }
 }
+
+internal fun formatSavedDay(instant: java.time.Instant, zone: java.time.ZoneId = net.wastu.artha.core.model.AccountingTime.zone): String =
+    java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale.US).withZone(zone).format(instant)
+
+
+
 
 @Composable
 fun AiConfigDialog(currentConfig: AiConfig, onDismiss: () -> Unit, onSave: (AiConfig) -> Unit,

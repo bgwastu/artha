@@ -25,6 +25,16 @@ sealed interface LedgerState {
 
 data class ImportFeedback(val sequence: Long, val provider: Provider?, val message: String, val failed: Boolean = false)
 
+/** Saved payment date range for one provider, measured on the resolved ledger rows the UI shows. */
+data class SourceCoverage(val earliest: java.time.Instant?, val latest: java.time.Instant?) {
+    init { require(earliest != null || latest != null) }
+}
+
+/** Per-provider saved data coverage: pure so both the ViewModel and UI tests can use it. */
+internal fun sourceCoverage(rows: List<UnifiedTransaction>): Map<Provider, SourceCoverage> = rows
+    .groupBy { it.provider }
+    .mapValues { (_, providerRows) -> SourceCoverage(providerRows.minOf { it.occurredAt }, providerRows.maxOf { it.occurredAt }) }
+
 @OptIn(kotlinx.coroutines.FlowPreview::class)
 class ArthaViewModel(
     private val rootAccess: RootAccess,
@@ -52,6 +62,8 @@ class ArthaViewModel(
     private val _providerCounts = MutableStateFlow<Map<Provider, Int>>(emptyMap())
     val providerCounts = _providerCounts.asStateFlow()
     val analysisSnapshot = analysisStore?.snapshot ?: MutableStateFlow(initialSnapshot).asStateFlow()
+    private val _providerCoverage = MutableStateFlow<Map<Provider, SourceCoverage>>(emptyMap())
+    val providerCoverage = _providerCoverage.asStateFlow()
     private val _selectedMonth = MutableStateFlow(YearMonth.now(clock.withZone(AccountingTime.zone)))
     val selectedMonth = _selectedMonth.asStateFlow()
     private val _dateRangeFilter = MutableStateFlow<Pair<Long?, Long?>?>(null)
@@ -147,6 +159,7 @@ class ArthaViewModel(
                                 _ledgerLoadFailed.value = false
                                 hasSavedProjection = true
                                 _providerCounts.value = projection.providerCounts
+                                _providerCoverage.value = sourceCoverage(projection.transactions)
                                 _reconciledCache.value = projection.transactions
                                 visibleLedger(projection.transactions, enabled, dates, category)
                             }
