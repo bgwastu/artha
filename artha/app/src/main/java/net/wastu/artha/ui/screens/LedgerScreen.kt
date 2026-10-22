@@ -84,6 +84,8 @@ import net.wastu.artha.ui.LedgerState
 import net.wastu.artha.ui.formatMoney
 import net.wastu.artha.ui.paymentRowAmount
 import net.wastu.artha.ui.transactionHumanLine
+import net.wastu.artha.ui.transactionTags
+import net.wastu.artha.ui.TransactionTagKind
 import net.wastu.artha.ui.formatTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -181,6 +183,7 @@ fun LedgerScreen(
 ) {
     val dateRange by viewModel?.dateRangeFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val category by viewModel?.categoryFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val showCategory = analysisShown(viewModel)
     // Category drill-down is all-source confirmed spending; prior browsing choices stay intact for Back.
     val effectiveFilters = if (category == null) filters else TransactionFilters(direction = Direction.DEBIT)
     val visibleProviders = Provider.entries.filter { it in enabledProviders }
@@ -209,6 +212,7 @@ fun LedgerScreen(
             activeFilters = active, onClearFilters = ::clearAll,
             emptyTitle = if (active.isNotEmpty()) "No matching transactions" else "No saved payments",
             onImportHistory = if (active.isEmpty()) onImportHistory else null,
+            showCategory = showCategory,
         )
     }
     if (showFilter) {
@@ -335,6 +339,7 @@ fun SearchTransactionsScreen(
     var lastDay by rememberSaveable { mutableStateOf<Long?>(null) }
     var showFilter by rememberSaveable { mutableStateOf(false) }
     val dateRange = if (firstDay != null || lastDay != null) firstDay to lastDay else null
+    val showCategory = analysisShown(viewModel)
     val allTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle()
         ?: remember(ledgerState) { mutableStateOf((ledgerState as? LedgerState.Ready)?.transactions.orEmpty()) }
     val transactions = remember(allTransactions, filters, dateRange) { transactionSearchScope(allTransactions, filters, dateRange) }
@@ -345,7 +350,7 @@ fun SearchTransactionsScreen(
         dateRange?.let { add(ActiveTransactionFilter(rangeLabel(it)) { firstDay = null; lastDay = null }) }
     }
     // Build the search index off the main thread, outside composition and scrolling.
-    val index by produceState<List<SearchEntry>?>(null, transactions) {
+    val index by produceState<List<SearchEntry>?>(null, transactions, showCategory) {
         value = null
         value = withContext(Dispatchers.Default) {
             transactions.map { transaction ->
@@ -356,7 +361,7 @@ fun SearchTransactionsScreen(
                     transaction.provider.displayName,
                     transaction.cardLast4.orEmpty(),
                     transaction.userNote.orEmpty(),
-                    transaction.category.orEmpty(),
+                    if (showCategory) transaction.category.orEmpty() else "",
                     if (transaction.isQris) "QRIS" else "",
                     formatMoney(transaction.money),
                 ) + payloadTextValues(transaction.rawPayload))
@@ -431,6 +436,7 @@ fun SearchTransactionsScreen(
                     activeFilters = activeFilters,
                     onClearFilters = ::clearFilters,
                     resultCount = results!!.transactions.size,
+                    showCategory = showCategory,
                 )
             }
         }
@@ -459,6 +465,7 @@ private fun TransactionList(
     emptyTitle: String? = null,
     resultCount: Int? = null,
     onImportHistory: (() -> Unit)? = null,
+    showCategory: Boolean = true,
 ) {
     val listState = rememberLazyListState()
     var previousResetKey by rememberSaveable { mutableStateOf(resetKey?.toString()) }
@@ -530,6 +537,7 @@ private fun TransactionList(
                     transaction = transaction,
                     onClick = { onTransaction(transaction) },
                     highlightQuery = highlightQuery,
+                    showCategory = showCategory,
                 )
                 HorizontalDivider(
                     modifier = Modifier.padding(horizontal = 16.dp),
@@ -539,6 +547,11 @@ private fun TransactionList(
         }
     }
 }
+
+/** Categories come from analysis; with it off they are hidden rather than shown stale. */
+@Composable
+internal fun analysisShown(viewModel: ArthaViewModel?): Boolean =
+    viewModel?.analysisSnapshot?.collectAsStateWithLifecycle()?.value?.analysisEnabled ?: true
 
 @Composable
 private fun DateGroupHeader(date: LocalDate) {
@@ -617,14 +630,11 @@ fun HighlightedText(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlightQuery: String = "") {
+fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlightQuery: String = "", showCategory: Boolean = true) {
     val credit = transaction.direction == Direction.CREDIT
     val reversed = transaction.isReversal || transaction.description.contains("(Reversed)", ignoreCase = true)
-    val status = when {
-        reversed -> if (credit) "Incoming reversal" else "Reversed"
-        transaction.description.startsWith("Pocket Transfer:", ignoreCase = true) -> "Transfer"
-        else -> null
-    }
+    val tags = remember(transaction) { transactionTags(transaction) }
+    val movedMoney = tags.any { it.kind == TransactionTagKind.REVERSED || it.kind == TransactionTagKind.REFUND || it.kind == TransactionTagKind.TRANSFER }
     val title = transactionHumanLine(transaction)
     val amount = paymentRowAmount(transaction)
     val amountColor = when {
@@ -640,7 +650,7 @@ fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlig
             .firstOrNull { it.contains(highlightQuery, true) && !title.contains(it, true) }
     }
     val fontScale = LocalDensity.current.fontScale
-    Surface(onClick = onClick, color = MaterialTheme.colorScheme.surface, modifier = Modifier.semantics { stateDescription = status ?: if (credit) "Incoming payment" else "Outgoing payment" }) {
+    Surface(onClick = onClick, color = MaterialTheme.colorScheme.surface, modifier = Modifier.semantics { stateDescription = if (credit) "Incoming payment" else "Outgoing payment" }) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Image(painterResource(transaction.provider.iconRes), transaction.provider.displayName,
                 Modifier.size(36.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
@@ -649,27 +659,26 @@ fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlig
                     val stackAmount = fontScale >= 1.3f || maxWidth < 300.dp || amount.length > 16
                     if (stackAmount) {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            HighlightedText(title, highlightQuery, MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Medium, maxLines = 2)
+                            TaggedTitle(title, tags, MaterialTheme.typography.bodyLarge, highlightQuery = highlightQuery,
+                                fontWeight = FontWeight.Medium)
                             HighlightedText(amount, highlightQuery, MaterialTheme.typography.titleSmall,
                                 color = amountColor,
                                 fontWeight = FontWeight.SemiBold, maxLines = Int.MAX_VALUE)
                         }
                     } else Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        HighlightedText(title, highlightQuery, MaterialTheme.typography.bodyLarge,
-                            modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium, maxLines = 2)
+                        TaggedTitle(title, tags, MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f),
+                            highlightQuery = highlightQuery, fontWeight = FontWeight.Medium)
                         HighlightedText(amount, highlightQuery, MaterialTheme.typography.titleSmall,
                                 color = amountColor, fontWeight = FontWeight.SemiBold)
                     }
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(formatTime(transaction.occurredAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (!credit && status == null && !transaction.category.isNullOrBlank()) {
+                    if (showCategory && !credit && !movedMoney && !transaction.category.isNullOrBlank()) {
                         HighlightedText(transaction.category, highlightQuery, MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
                     }
                 }
-                status?.let { Text(it, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium) }
                 transaction.userNote?.takeIf { it.isNotBlank() }?.let {
                     HighlightedText(it, highlightQuery, MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

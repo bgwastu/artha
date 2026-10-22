@@ -122,7 +122,7 @@ class TransactionPresentationTest {
             rawPayload = """{"isQris":true,"paymentMethod":"QRIS","counterpart":"Bank Mandiri",
                 "localized":"CIRCLE K - JAK0922 - QRIS"}""",
         )
-        assertEquals("QRIS - Circle K - Jak0922", transactionHumanLine(jagoQris))
+        assertEquals("Circle K - Jak0922", transactionHumanLine(jagoQris))
     }
 
     @Test fun qrisRowWithAcquirerOnlyDescriptorStillShowsTheBank() {
@@ -132,7 +132,7 @@ class TransactionPresentationTest {
             rawPayload = """{"isQris":true,"paymentMethod":"QRIS","counterpart":"Bank Mandiri",
                 "localized":"Bank Mandiri - QRIS"}""",
         )
-        assertEquals("QRIS - Bank Mandiri", transactionHumanLine(jagoQris))
+        assertEquals("Bank Mandiri", transactionHumanLine(jagoQris))
     }
 
     @Test fun qrisAllCapsSellerDescriptorGetsTitleCaseWithoutGate() {
@@ -141,7 +141,7 @@ class TransactionPresentationTest {
             description = "WEI QIANG",
             rawPayload = """{"isQris":true,"paymentMethod":"QRIS","counterpart":"BCA","localized":"WEI QIANG"}""",
         )
-        assertEquals("QRIS - Wei Qiang", transactionHumanLine(jagoQris))
+        assertEquals("Wei Qiang", transactionHumanLine(jagoQris))
     }
 
     @Test fun qrisMixedCaseSellerDescriptorKeepsStoredCase() {
@@ -150,7 +150,7 @@ class TransactionPresentationTest {
             description = "Dunia Kedol",
             rawPayload = """{"isQris":true,"paymentMethod":"QRIS","counterpart":"GoPay","localized":"Dunia Kedol"}""",
         )
-        assertEquals("QRIS - Dunia Kedol", transactionHumanLine(jagoQris))
+        assertEquals("Dunia Kedol", transactionHumanLine(jagoQris))
     }
 
     private fun transaction(id: String, provider: Provider = Provider.JAGO, direction: Direction = Direction.DEBIT, confirmed: Boolean = true) =

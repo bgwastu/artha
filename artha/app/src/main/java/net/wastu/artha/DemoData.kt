@@ -22,7 +22,7 @@ internal fun demoModel(dispatcher: kotlinx.coroutines.CoroutineDispatcher = kotl
         clock = Clock.fixed(Instant.parse("2026-10-14T05:00:00Z"), ZoneOffset.UTC),
         computationDispatcher = dispatcher,
         spendingState = MutableStateFlow(SpendingState.Ready(rows, rows.groupingBy { it.provider }.eachCount())),
-        initialSnapshot = AnalysisSnapshot(monthlySummaries = sampleAnalyses(rows)),
+        initialSnapshot = AnalysisSnapshot(analysisEnabled = true, monthlySummaries = sampleAnalyses(rows)),
     )
 }
 

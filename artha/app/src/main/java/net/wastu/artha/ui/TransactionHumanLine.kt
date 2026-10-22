@@ -31,13 +31,8 @@ private fun lineFromPayload(payload: JSONObject): String? {
     val merchant = usableMerchant(payload.optString("merchantName"))
         ?: qrisMerchantHint(payload)
         ?: usableMerchant(payload.optString("counterpart"))
-    if (merchant != null) {
-        return if (payload.optBoolean("isQris") && !merchant.contains("QRIS", ignoreCase = true)) {
-            "QRIS$HUMAN_LINE_SEP$merchant"
-        } else {
-            merchant
-        }
-    }
+    // QRIS is a row tag, not part of the title.
+    if (merchant != null) return merchant
     payload.optString("orderDisplayDescription").trim().takeIf { it.isNotBlank() }?.let { return it }
     val shop = payload.optString("shopName").ifBlank { payload.optString("restaurantName") }
     val items = payload.optJSONArray("items")

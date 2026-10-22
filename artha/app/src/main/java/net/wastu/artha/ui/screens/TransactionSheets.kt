@@ -322,7 +322,7 @@ private fun TransactionDetailsBody(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                if (!credit) {
+                if (!credit && snapshot?.analysisEnabled != false) {
                     DetailEditRow(
                         label = "Category", value = currentCategory,
                         supporting = if (manualCategory) "Chosen by you" else null,
