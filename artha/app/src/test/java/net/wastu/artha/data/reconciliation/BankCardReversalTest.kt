@@ -67,4 +67,23 @@ class BankCardReversalTest {
             assertEquals(2, LedgerReconciler.reconcileLedger(listOf(debit, changed)).size)
         }
     }
+
+    @Test fun bankReferencePairsReversalWithoutTopLevelCode() {
+        // Cached Jago rows may miss the top-level `code`; their transaction code lives in f1.
+        fun hive(id: String, credit: Boolean, code: String, f6: String, counterpart: String) = UnifiedTransaction(
+            Provider.JAGO, id, if (credit) Direction.CREDIT else Direction.DEBIT, Money(1_000_000),
+            Instant.parse("2026-10-22T03:07:00Z").plusSeconds(if (credit) 65 else 0), "Shopee",
+            JSONObject().put("origin", "jago-local-hive")
+                .put("fields", JSONObject().put("f1", code).put("f6", f6)
+                    .put("f16", if (credit) JSONObject().put("code", "C054") else JSONObject())
+                    .put("f10", if (credit) "CREDIT" else "DEBIT")).toString(),
+            pocket = Pocket("fixture-pocket", "Main Pocket"),
+        )
+        val row = LedgerReconciler.reconcileLedger(listOf(
+            hive("jago:charge:2026-10-22T03:07:30.561Z", false, "PSD02", "629403258855", "Card ending 8384"),
+            hive("jago:credit:2026-10-22T03:08:35.683Z", true, "PSD02-R", "629403258855", "Jago"),
+        )).single()
+        assertTrue(row.isReversal)
+        assertEquals(2, JSONObject(row.rawPayload).getJSONArray("groupedTransactions").length())
+    }
 }

@@ -115,6 +115,44 @@ class TransactionPresentationTest {
         assertEquals(last, day(range.second))
     }
 
+    @Test fun qrisRowPrefersTheSellerDescriptorOverTheAcquirerBank() {
+        val jagoQris = transaction("qris").copy(
+            provider = Provider.JAGO,
+            description = "Circle K - Jak0922 - Qris",
+            rawPayload = """{"isQris":true,"paymentMethod":"QRIS","counterpart":"Bank Mandiri",
+                "localized":"CIRCLE K - JAK0922 - QRIS"}""",
+        )
+        assertEquals("QRIS - Circle K - Jak0922", transactionHumanLine(jagoQris))
+    }
+
+    @Test fun qrisRowWithAcquirerOnlyDescriptorStillShowsTheBank() {
+        val jagoQris = transaction("qris-bank").copy(
+            provider = Provider.JAGO,
+            description = "Bank Mandiri",
+            rawPayload = """{"isQris":true,"paymentMethod":"QRIS","counterpart":"Bank Mandiri",
+                "localized":"Bank Mandiri - QRIS"}""",
+        )
+        assertEquals("QRIS - Bank Mandiri", transactionHumanLine(jagoQris))
+    }
+
+    @Test fun qrisAllCapsSellerDescriptorGetsTitleCaseWithoutGate() {
+        val jagoQris = transaction("qris-caps").copy(
+            provider = Provider.JAGO,
+            description = "WEI QIANG",
+            rawPayload = """{"isQris":true,"paymentMethod":"QRIS","counterpart":"BCA","localized":"WEI QIANG"}""",
+        )
+        assertEquals("QRIS - Wei Qiang", transactionHumanLine(jagoQris))
+    }
+
+    @Test fun qrisMixedCaseSellerDescriptorKeepsStoredCase() {
+        val jagoQris = transaction("qris-dolia").copy(
+            provider = Provider.JAGO,
+            description = "Dunia Kedol",
+            rawPayload = """{"isQris":true,"paymentMethod":"QRIS","counterpart":"GoPay","localized":"Dunia Kedol"}""",
+        )
+        assertEquals("QRIS - Dunia Kedol", transactionHumanLine(jagoQris))
+    }
+
     private fun transaction(id: String, provider: Provider = Provider.JAGO, direction: Direction = Direction.DEBIT, confirmed: Boolean = true) =
         UnifiedTransaction(provider, id, direction, Money(10000), Instant.parse("2026-01-12T02:00:00Z"), "Fixture", "{}", isConfirmed = confirmed)
 }
