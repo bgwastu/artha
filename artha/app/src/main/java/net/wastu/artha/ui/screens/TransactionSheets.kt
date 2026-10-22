@@ -172,16 +172,19 @@ fun TransactionDetailsSheet(
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(
-        onDismissRequest = { state.dismiss(onDismiss) },
+        // Back from a record is handled inside the sheet, so a dismiss here is a swipe or scrim
+        // tap and closes everything; editors still step back first.
+        onDismissRequest = { if (state.editor == null) { state.recordIndex = -1; onDismiss() } else state.dismiss(onDismiss) },
         sheetState = rememberModalBottomSheetState(
             skipPartiallyExpanded = true,
             // Material hides the sheet before its Back callback. Keep it visible
-            // while that callback returns an editor to the transaction details.
+            // while that callback returns an editor (with unsaved drafts) to the details.
             confirmValueChange = { value ->
-                value != SheetValue.Hidden || (state.editor == null && state.recordIndex < 0 && !state.saving)
+                value != SheetValue.Hidden || (state.editor == null && !state.saving)
             },
         ),
     ) {
+        BackHandler(enabled = state.editor == null && state.recordIndex >= 0) { state.recordIndex = -1 }
         TransactionDetailsBody(transaction, viewModel, state, showRecordBack = true)
     }
 }
@@ -566,18 +569,24 @@ private fun GroupRecordsSection(records: List<GroupRecord>, parentTime: Instant,
 private fun GroupRecordDetails(item: GroupRecord, minHeight: androidx.compose.ui.unit.Dp, showBack: Boolean, onBack: () -> Unit) {
     val tx = item.transaction
     val payload = remember(tx.rawPayload) { runCatching { JSONObject(tx.rawPayload) }.getOrNull() }
+    Column(Modifier.fillMaxWidth().heightIn(min = minHeight)) {
+        // Pinned header; the 12dp start inset puts the arrow glyph on the 24dp content edge.
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = if (showBack) 12.dp else 24.dp, end = 24.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (showBack) {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to transaction") }
+                Spacer(Modifier.width(4.dp))
+            }
+            Text(item.role, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+        }
     SelectionContainer {
         Column(
-            Modifier.fillMaxWidth().heightIn(min = minHeight).verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 16.dp),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                .padding(start = 24.dp, end = 24.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            if (showBack) Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack, modifier = Modifier.padding(end = 4.dp)) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to transaction")
-                }
-                Text(item.role, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
-            } else Text(item.role, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
             SourceHeader(tx.provider, formatDate(tx.occurredAt))
             Text(item.signedAmount, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
                 color = if (tx.direction == Direction.CREDIT) incomeColor() else expenseColor())
@@ -591,6 +600,7 @@ private fun GroupRecordDetails(item: GroupRecord, minHeight: androidx.compose.ui
             tx.description.takeUnless { item.title.equals(it, ignoreCase = true) }?.let { DetailRow("Source description", it) }
             Spacer(Modifier.height(24.dp))
         }
+    }
     }
 }
 
