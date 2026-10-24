@@ -52,6 +52,11 @@ val INITIAL_DEFAULT_CATEGORIES = listOf(
     "Uncategorized",
 )
 class AnalysisStore(context: Context) {
+    companion object {
+        /** defaults shared with the pi.dev CLIProxyAPI gateway (see ~/.pi/agent/cliproxyapi.json). */
+        const val DEFAULT_AI_BASE_URL = "https://ai.wastu.net"
+        const val DEFAULT_AI_MODEL = "gemini-3.8-flash-high"
+    }
     private val appContext = context.applicationContext
     private val prefs: SharedPreferences = context.getSharedPreferences("artha_analysis_store", Context.MODE_PRIVATE)
 
@@ -65,9 +70,9 @@ class AnalysisStore(context: Context) {
         val reasonsJson = prefs.getString("reasons", "{}") ?: "{}"
         val summariesJson = prefs.getString("monthly_summaries", "{}") ?: "{}"
         val knowledge = prefs.getString("knowledge", "") ?: ""
-        val baseUrl = prefs.getString("ai_base_url", "") ?: ""
+        val baseUrl = prefs.getString("ai_base_url", "")?.takeUnless { it.isBlank() } ?: DEFAULT_AI_BASE_URL
         val apiKey = secret.read()
-        val model = prefs.getString("ai_model", "") ?: ""
+        val model = prefs.getString("ai_model", "")?.takeUnless { it.isBlank() } ?: DEFAULT_AI_MODEL
         val customCategoriesJson = prefs.getString("custom_categories", null)
         val customCategories = if (customCategoriesJson == null) {
             val seeded = JSONArray(INITIAL_DEFAULT_CATEGORIES).toString()
@@ -97,7 +102,7 @@ class AnalysisStore(context: Context) {
             analysisFingerprints = parseMap(fingerprintsJson),
             manualCategories = parseList(prefs.getString("manual_categories", "[]") ?: "[]").toSet(),
             aiCategoryFingerprints = parseMap(prefs.getString("ai_category_fingerprints", "{}") ?: "{}"),
-            analysisEnabled = prefs.getBoolean("analysis_enabled", false),
+            analysisEnabled = prefs.getBoolean("analysis_enabled", true),
         )
     }
 
