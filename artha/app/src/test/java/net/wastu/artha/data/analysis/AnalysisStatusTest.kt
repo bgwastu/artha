@@ -26,5 +26,7 @@ class AnalysisStatusTest {
         assertEquals("Re-analyze", analysisActionLabel(MonthAnalysisStatus.Outdated(null)))
         assertEquals(null, analysisActionLabel(MonthAnalysisStatus.Running(null)))
         assertEquals("Categorizing 32 of 140", categoryProgressLabel(CategoryProgress(CategoryAutomationState.WORKING, 32, 140)))
+        assertEquals("42 of 51 categorized", categoryProgressLabel(CategoryProgress(CategoryAutomationState.READY, 42, 51)))
+        assertEquals("All 51 categorized", categoryProgressLabel(CategoryProgress(CategoryAutomationState.READY, 51, 51)))
     }
 }

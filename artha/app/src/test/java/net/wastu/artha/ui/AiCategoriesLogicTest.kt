@@ -42,7 +42,7 @@ class AiCategoriesLogicTest {
             total = 10,
             paused = false,
         )
-        assertEquals("All 10 payments categorized", AiCategoriesLogic.statusSupportingText(progress))
+        assertEquals("All 10 categorized", AiCategoriesLogic.statusSupportingText(progress))
     }
 
     @Test
@@ -83,7 +83,7 @@ class AiCategoriesLogicTest {
         assertEquals("API limit reached", AiCategoriesLogic.headerStatusText(CategoryProgress(state = CategoryAutomationState.ERROR, error = "API limit reached")))
         assertEquals("Categorizing stopped", AiCategoriesLogic.headerStatusText(CategoryProgress(state = CategoryAutomationState.ERROR, error = null)))
         assertEquals("Categorizing 4 of 12", AiCategoriesLogic.headerStatusText(CategoryProgress(state = CategoryAutomationState.WORKING, labeled = 4, total = 12)))
-        assertEquals("All 12 payments categorized", AiCategoriesLogic.headerStatusText(CategoryProgress(state = CategoryAutomationState.READY, labeled = 12, total = 12)))
+        assertEquals("All 12 categorized", AiCategoriesLogic.headerStatusText(CategoryProgress(state = CategoryAutomationState.READY, labeled = 12, total = 12)))
         assertNull(AiCategoriesLogic.headerStatusText(CategoryProgress(state = CategoryAutomationState.NOT_CONFIGURED)))
     }
 

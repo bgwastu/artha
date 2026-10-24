@@ -117,6 +117,11 @@ fun analysisActionLabel(status: MonthAnalysisStatus): String? = when (status) {
 fun categoryProgressLabel(progress: CategoryProgress): String? = when (progress.state) {
     CategoryAutomationState.NOT_CONFIGURED -> null
     CategoryAutomationState.WORKING -> "Categorizing ${progress.labeled} of ${progress.total}"
-    CategoryAutomationState.READY -> if (progress.total == 0) null else "All ${progress.total} payments categorized"
+    CategoryAutomationState.READY -> when {
+        progress.stopped -> "Stopped"
+        progress.total == 0 -> null
+        progress.labeled >= progress.total -> "All ${progress.total} categorized"
+        else -> "${progress.labeled} of ${progress.total} categorized"
+    }
     CategoryAutomationState.ERROR -> progress.error ?: "Categorizing stopped"
 }
