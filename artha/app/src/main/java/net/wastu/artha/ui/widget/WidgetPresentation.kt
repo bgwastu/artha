@@ -13,7 +13,7 @@ import net.wastu.artha.core.model.Direction
 internal const val RECENT_PAYMENT_LIMIT = 40
 
 internal fun recentWidgetPayments(transactions: List<UnifiedTransaction>, enabled: Set<net.wastu.artha.core.model.Provider>): List<UnifiedTransaction> =
-    transactions.asSequence().filter { it.isConfirmed && it.provider in enabled }
+    transactions.asSequence().filter { it.isConfirmed && it.provider in enabled && it.direction == Direction.DEBIT }
         .sortedByDescending { it.occurredAt }.take(RECENT_PAYMENT_LIMIT).toList()
 
 internal sealed interface WidgetPaymentRow {

@@ -20,6 +20,8 @@ internal fun transactionTags(transaction: UnifiedTransaction): List<TransactionT
     val credit = transaction.direction == Direction.CREDIT
     val reversed = transaction.isReversedRecord
     val transfer = payload?.optBoolean("isPocketTransfer") == true ||
+        payload?.optBoolean("isWalletFunding") == true ||
+        payload?.optBoolean("isOwnTransfer") == true ||
         transaction.description.startsWith("Pocket Transfer:", ignoreCase = true)
     // Only the reference-matched refund path records refundedAmountMinor; amount guesses never do.
     val partialRefund = !reversed && !credit && (payload?.optLong("refundedAmountMinor") ?: 0L) > 0L

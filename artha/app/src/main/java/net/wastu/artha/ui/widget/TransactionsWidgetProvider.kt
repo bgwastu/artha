@@ -100,7 +100,7 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
         WidgetRefresh.schedule("transactions", pendingResult, onFailure = { status(failed = true) }) {
                 val app = context.applicationContext as net.wastu.artha.ArthaApplication
                 val enabled = app.providerPreferences.enabled.value
-                val allPayments = widgetSpending(context).transactions.filter { it.isConfirmed && it.provider in enabled }
+                val allPayments = widgetSpending(context).transactions.filter { it.isConfirmed && it.provider in enabled && it.direction == Direction.DEBIT }
                 val rows = groupedWidgetPayments(allPayments, enabled)
                 val updatedAt = System.currentTimeMillis()
 

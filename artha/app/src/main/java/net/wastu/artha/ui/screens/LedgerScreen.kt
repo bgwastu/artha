@@ -38,7 +38,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import net.wastu.artha.ui.theme.incomeColor
+import net.wastu.artha.core.model.Money
+import net.wastu.artha.data.analysis.BudgetAnalyzer
 import net.wastu.artha.ui.theme.expenseColor
 import androidx.compose.material3.Surface
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -99,8 +100,6 @@ import net.wastu.artha.data.analysis.paymentCategoryStateLabel
 
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.heading
@@ -110,10 +109,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.RadioButton
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.Role
 import net.wastu.artha.core.model.AccountingTime
 import java.time.Instant
 
@@ -161,12 +158,38 @@ enum class TransactionPeriod(val label: String) {
     }
 }
 
-private fun rangeLabel(range: Pair<Long?, Long?>): String {
+private fun formatAmountMinor(totalMinor: Long): String = formatMoney(Money(totalMinor))
+
+internal fun rangeLabel(range: Pair<Long?, Long?>): String {
     val formatter = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.US)
     fun date(value: Long?) = value?.let { Instant.ofEpochMilli(it).atZone(AccountingTime.zone).toLocalDate().format(formatter) }
     val start = date(range.first)
     val end = date(range.second)
     return if (start != null && end != null && start != end) "$start to $end" else start ?: end ?: "Dates"
+}
+
+internal data class PeriodSummary(val totalMinor: Long, val count: Int, val label: String)
+
+internal fun periodSummary(
+    rows: List<UnifiedTransaction>,
+    range: Pair<Long?, Long?>?,
+    today: LocalDate,
+    category: String? = null,
+): PeriodSummary {
+    val spending = rows.filter(BudgetAnalyzer::isSpending)
+    val totalMinor = spending.sumOf { it.money.amountMinor }
+    val count = spending.size
+    val label = when {
+        range != null -> when (range) {
+            TransactionPeriod.THIS_MONTH.range(today) -> TransactionPeriod.THIS_MONTH.label
+            TransactionPeriod.LAST_MONTH.range(today) -> TransactionPeriod.LAST_MONTH.label
+            TransactionPeriod.LAST_30_DAYS.range(today) -> TransactionPeriod.LAST_30_DAYS.label
+            else -> rangeLabel(range)
+        }
+        category != null -> category
+        else -> ""
+    }
+    return PeriodSummary(totalMinor, count, label)
 }
 
 private data class ActiveTransactionFilter(val label: String, val clear: () -> Unit)
@@ -190,7 +213,7 @@ fun LedgerScreen(
     val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(CategoryProgress()) }
     val showCategory = analysisShown(viewModel)
     // Category drill-down is all-source confirmed spending; prior browsing choices stay intact for Back.
-    val effectiveFilters = if (category == null) filters else TransactionFilters(direction = Direction.DEBIT)
+    val effectiveFilters = if (category == null) filters.copy(direction = null) else TransactionFilters()
     val visibleProviders = Provider.entries.filter { it in enabledProviders }
     LaunchedEffect(enabledProviders, filters.provider) {
         if (filters.provider != null && filters.provider !in enabledProviders) onFiltersChanged(filters.copy(provider = null))
@@ -203,31 +226,43 @@ fun LedgerScreen(
     val active = buildList {
         category?.let { add(ActiveTransactionFilter(it) { viewModel?.clearCategoryFilter() }) }
         effectiveFilters.provider?.let { add(ActiveTransactionFilter(it.displayName) { onFiltersChanged(filters.copy(provider = null)) }) }
-        if (category == null) effectiveFilters.direction?.let {
-            add(ActiveTransactionFilter(if (it == Direction.CREDIT) "Incoming" else "Outgoing") { onFiltersChanged(filters.copy(direction = null)) })
-        }
         dateRange?.let { add(ActiveTransactionFilter(rangeLabel(it)) { viewModel?.clearDateRangeFilter() }) }
     }
+    val today = remember { LocalDate.now(AccountingTime.clock.withZone(AccountingTime.zone)) }
+    val allDebitTransactions = remember(state) {
+        (state as? LedgerState.Ready)?.transactions.orEmpty().filter { it.direction == Direction.DEBIT }
+    }
+    val filteredTransactions = remember(allDebitTransactions, effectiveFilters) {
+        allDebitTransactions.filter(effectiveFilters::matches)
+    }
+    val periodSummary = if (dateRange != null || category != null) {
+        remember(filteredTransactions, dateRange, today, category) {
+            periodSummary(filteredTransactions, dateRange, today, category)
+        }
+    } else null
+
     when (state) {
         LedgerState.Loading -> LedgerFeedback(loading = true)
         LedgerState.Failed -> LedgerFeedback(title = "Couldn't load transactions", onRetry = onRetry)
         is LedgerState.Ready -> TransactionList(
-            transactions = remember(state.transactions, effectiveFilters) { state.transactions.filter(effectiveFilters::matches) },
+            transactions = filteredTransactions,
             onTransaction = onTransaction, resetKey = listOf(effectiveFilters, dateRange, category),
             activeFilters = active, onClearFilters = ::clearAll,
             emptyTitle = if (active.isNotEmpty()) "No matching transactions" else "No saved payments",
             onImportHistory = if (active.isEmpty()) onImportHistory else null,
             showCategory = showCategory,
             categoryProgress = categoryProgress,
+            periodSummary = periodSummary,
         )
     }
     if (showFilter) {
         TransactionFilterSheet(
+            transactions = allDebitTransactions,
             filters = effectiveFilters, range = dateRange, category = category,
             providers = visibleProviders,
             onDismiss = onDismissFilter,
             onApply = { updated, dates, clearCategory ->
-                if (category == null || clearCategory) onFiltersChanged(updated)
+                if (category == null || clearCategory) onFiltersChanged(updated.copy(direction = null))
                 if (clearCategory) viewModel?.clearCategoryFilter()
                 if (dates == null) viewModel?.clearDateRangeFilter() else viewModel?.setDateRangeFilter(dates.first, dates.second)
                 onDismissFilter()
@@ -239,6 +274,7 @@ fun LedgerScreen(
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun TransactionFilterSheet(
+    transactions: List<UnifiedTransaction>,
     filters: TransactionFilters, range: Pair<Long?, Long?>?, category: String?, providers: List<Provider>,
     onDismiss: () -> Unit,
     onApply: (TransactionFilters, Pair<Long?, Long?>?, Boolean) -> Unit,
@@ -247,9 +283,28 @@ private fun TransactionFilterSheet(
     var dates by remember { mutableStateOf(range) }
     var clearCategory by remember { mutableStateOf(false) }
     var pickingDates by remember { mutableStateOf(false) }
-    val today = LocalDate.now(AccountingTime.clock)
+    val today = remember { LocalDate.now(AccountingTime.clock.withZone(AccountingTime.zone)) }
     val selectedPeriod = if (dates == null) TransactionPeriod.ALL else
         TransactionPeriod.entries.firstOrNull { it != TransactionPeriod.CUSTOM && it.range(today) == dates } ?: TransactionPeriod.CUSTOM
+
+    val periodTotals = remember(transactions, today) {
+        listOf(
+            TransactionPeriod.THIS_MONTH,
+            TransactionPeriod.LAST_MONTH,
+            TransactionPeriod.LAST_30_DAYS,
+        ).associateWith { period ->
+            val periodRange = period.range(today)
+            val start = periodRange?.first
+            val endExclusive = periodRange?.second?.let(AccountingTime::dayAfter)
+            transactions.filter {
+                val millis = it.occurredAt.toEpochMilli()
+                BudgetAnalyzer.isSpending(it) &&
+                    (start == null || millis >= start) &&
+                    (endExclusive == null || millis < endExclusive)
+            }.sumOf { it.money.amountMinor }
+        }
+    }
+
     // The date picker replaces the filter sheet; changes remain staged until the sheet's Apply.
     if (pickingDates) {
         fun pickerDay(value: Long?) = value?.let {
@@ -282,30 +337,66 @@ private fun TransactionFilterSheet(
                             label = { Text(category) }, trailingIcon = { Icon(Icons.Default.Clear, "Remove category filter") })
                     }
                     if (category == null || clearCategory) {
-                        FilterOptions("Direction", listOf(null, Direction.DEBIT, Direction.CREDIT), draft.direction,
-                            { when (it) { Direction.DEBIT -> "Outgoing"; Direction.CREDIT -> "Incoming"; null -> "All" } }) { draft = draft.copy(direction = it) }
                         FilterOptions("Source", listOf(null) + providers, draft.provider, { it?.displayName ?: "All" }) { draft = draft.copy(provider = it) }
                     }
-                    Column(Modifier.selectableGroup()) {
-                        Text("Dates", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(bottom = 4.dp))
-                        TransactionPeriod.entries.forEach { period ->
-                            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(selectedPeriod == period, role = Role.RadioButton, onClick = {
-                                if (period == TransactionPeriod.CUSTOM) pickingDates = true else dates = period.range(today)
-                            }).padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(selected = selectedPeriod == period, onClick = null)
-                                Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                                    Text(period.label, style = MaterialTheme.typography.bodyLarge)
-                                    if (period == TransactionPeriod.CUSTOM && selectedPeriod == period) {
-                                        Text(rangeLabel(dates!!), style = MaterialTheme.typography.bodySmall)
-                                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Dates", style = MaterialTheme.typography.titleSmall)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TransactionPeriod.entries.forEach { period ->
+                                val total = periodTotals[period]
+                                FilterChip(
+                                    selected = selectedPeriod == period,
+                                    onClick = {
+                                        if (period == TransactionPeriod.CUSTOM) pickingDates = true else dates = period.range(today)
+                                    },
+                                    label = {
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text(period.label)
+                                            if (total != null && period != TransactionPeriod.ALL && period != TransactionPeriod.CUSTOM) {
+                                                Text(formatAmountMinor(total), style = MaterialTheme.typography.bodySmall)
+                                            }
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                        if (selectedPeriod == TransactionPeriod.CUSTOM && dates?.first != null && dates?.second != null) {
+                            val customRange = dates!!
+                            val (customTotal, customCount) = remember(transactions, customRange) {
+                                val start = customRange.first
+                                val endExclusive = customRange.second?.let(AccountingTime::dayAfter)
+                                val spending = transactions.filter {
+                                    val millis = it.occurredAt.toEpochMilli()
+                                    BudgetAnalyzer.isSpending(it) &&
+                                        (start == null || millis >= start) &&
+                                        (endExclusive == null || millis < endExclusive)
                                 }
+                                spending.sumOf { it.money.amountMinor } to spending.size
+                            }
+                            Row(
+                                modifier = Modifier.padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = formatAmountMinor(customTotal),
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                                Text(
+                                    text = "$customCount ${if (customCount == 1) "payment" else "payments"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
                         }
                     }
                 }
                 Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = onDismiss) { Text("Cancel") }
-                    FilledTonalButton(onClick = { onApply(draft, dates, clearCategory) }, modifier = Modifier.weight(1f)) { Text("Apply") }
+                    FilledTonalButton(onClick = { onApply(draft.copy(direction = null), dates, clearCategory) }, modifier = Modifier.weight(1f)) { Text("Apply") }
                 }
             }
         }
@@ -349,11 +440,12 @@ fun SearchTransactionsScreen(
     val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(CategoryProgress()) }
     val allTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle()
         ?: remember(ledgerState) { mutableStateOf((ledgerState as? LedgerState.Ready)?.transactions.orEmpty()) }
-    val transactions = remember(allTransactions, filters, dateRange) { transactionSearchScope(allTransactions, filters, dateRange) }
+    val debitTransactions = remember(allTransactions) { allTransactions.filter { it.direction == Direction.DEBIT } }
+    val effectiveFilters = remember(filters) { filters.copy(direction = null) }
+    val transactions = remember(debitTransactions, effectiveFilters, dateRange) { transactionSearchScope(debitTransactions, effectiveFilters, dateRange) }
     fun clearFilters() { filters = TransactionFilters(); firstDay = null; lastDay = null }
     val activeFilters = buildList {
-        filters.provider?.let { add(ActiveTransactionFilter(it.displayName) { filters = filters.copy(provider = null) }) }
-        filters.direction?.let { add(ActiveTransactionFilter(if (it == Direction.CREDIT) "Incoming" else "Outgoing") { filters = filters.copy(direction = null) }) }
+        effectiveFilters.provider?.let { add(ActiveTransactionFilter(it.displayName) { filters = filters.copy(provider = null) }) }
         dateRange?.let { add(ActiveTransactionFilter(rangeLabel(it)) { firstDay = null; lastDay = null }) }
     }
     // Build the search index off the main thread, outside composition and scrolling.
@@ -439,7 +531,7 @@ fun SearchTransactionsScreen(
                     transactions = results!!.transactions,
                     onTransaction = onTransaction,
                     highlightQuery = keyword,
-                    resetKey = listOf(keyword, filters, dateRange),
+                    resetKey = listOf(keyword, effectiveFilters, dateRange),
                     activeFilters = activeFilters,
                     onClearFilters = ::clearFilters,
                     resultCount = results!!.transactions.size,
@@ -450,10 +542,11 @@ fun SearchTransactionsScreen(
         }
     }
     if (showFilter) TransactionFilterSheet(
-        filters = filters, range = dateRange, category = null, providers = Provider.entries,
+        transactions = debitTransactions,
+        filters = effectiveFilters, range = dateRange, category = null, providers = Provider.entries,
         onDismiss = { showFilter = false },
         onApply = { updated, dates, _ ->
-            filters = updated
+            filters = updated.copy(direction = null)
             firstDay = dates?.first
             lastDay = dates?.second
             showFilter = false
@@ -462,6 +555,8 @@ fun SearchTransactionsScreen(
 }
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
+internal data class DayGroup(val date: LocalDate, val transactions: List<UnifiedTransaction>, val totalMinor: Long)
+
 @Composable
 private fun TransactionList(
     transactions: List<UnifiedTransaction>,
@@ -475,6 +570,7 @@ private fun TransactionList(
     onImportHistory: (() -> Unit)? = null,
     showCategory: Boolean = true,
     categoryProgress: CategoryProgress = CategoryProgress(),
+    periodSummary: PeriodSummary? = null,
 ) {
     val listState = rememberLazyListState()
     var previousResetKey by rememberSaveable { mutableStateOf(resetKey?.toString()) }
@@ -486,10 +582,15 @@ private fun TransactionList(
         }
     }
 
-    val groupedByDay by produceState<Map<LocalDate, List<UnifiedTransaction>>>(emptyMap(), transactions) {
+    val groupedByDay by produceState<List<DayGroup>>(emptyList(), transactions) {
         value = withContext(Dispatchers.Default) {
             val zone = net.wastu.artha.core.model.AccountingTime.zone
-            transactions.groupBy { it.occurredAt.atZone(zone).toLocalDate() }
+            transactions
+                .groupBy { it.occurredAt.atZone(zone).toLocalDate() }
+                .map { (date, dailyTxs) ->
+                    val total = dailyTxs.filter(BudgetAnalyzer::isSpending).sumOf { it.money.amountMinor }
+                    DayGroup(date, dailyTxs, total)
+                }
         }
     }
 
@@ -504,9 +605,35 @@ private fun TransactionList(
         modifier = Modifier.widthIn(max = 720.dp).fillMaxSize(),
         contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
     ) {
+        if (periodSummary != null) {
+            item(key = "period_summary") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(top = 8.dp),
+                ) {
+                    Text(
+                        text = formatAmountMinor(periodSummary.totalMinor),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "${periodSummary.label}, ${periodSummary.count} ${if (periodSummary.count == 1) "payment" else "payments"}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
         if (activeFilters.isNotEmpty()) {
             item(key = "active_filters") {
-                FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .padding(top = if (periodSummary != null) 8.dp else 0.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     activeFilters.forEach { filter ->
                         FilterChip(selected = true, onClick = filter.clear, label = { Text(filter.label) },
                             trailingIcon = { Icon(Icons.Default.Clear, "Remove ${filter.label} filter") })
@@ -533,12 +660,12 @@ private fun TransactionList(
                 }
             }
         }
-        groupedByDay.forEach { (date, dailyTransactions) ->
-            stickyHeader(key = "day_$date") {
-                DateGroupHeader(date = date)
+        groupedByDay.forEach { group ->
+            stickyHeader(key = "day_${group.date}") {
+                DateGroupHeader(date = group.date, totalMinor = group.totalMinor)
             }
             items(
-                dailyTransactions,
+                group.transactions,
                 key = { it.key },
                 contentType = { "transaction" },
             ) { transaction ->
@@ -564,8 +691,7 @@ internal fun analysisShown(viewModel: ArthaViewModel?): Boolean =
     viewModel?.analysisSnapshot?.collectAsStateWithLifecycle()?.value?.analysisEnabled ?: true
 
 @Composable
-private fun DateGroupHeader(date: LocalDate) {
-    val zone = net.wastu.artha.core.model.AccountingTime.zone
+private fun DateGroupHeader(date: LocalDate, totalMinor: Long = 0L) {
     val today = LocalDate.now(AccountingTime.clock)
     val dayLabel = when (date) {
         today -> "Today"
@@ -589,6 +715,14 @@ private fun DateGroupHeader(date: LocalDate) {
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
             )
+            if (totalMinor > 0L) {
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = formatAmountMinor(totalMinor),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -647,17 +781,12 @@ fun TransactionRow(
     showCategory: Boolean = true,
     categoryState: PaymentCategoryState = PaymentCategoryState.IDLE,
 ) {
-    val credit = transaction.direction == Direction.CREDIT
     val reversed = transaction.isReversedRecord
     val tags = remember(transaction) { transactionTags(transaction) }
     val movedMoney = tags.any { it.kind == TransactionTagKind.REVERSED || it.kind == TransactionTagKind.REFUND || it.kind == TransactionTagKind.TRANSFER }
     val title = remember(transaction) { transactionHumanLine(transaction) }
     val amount = remember(transaction) { paymentRowAmount(transaction) }
-    val amountColor = when {
-        !credit && reversed -> MaterialTheme.colorScheme.onSurfaceVariant
-        credit -> incomeColor()
-        else -> expenseColor()
-    }
+    val amountColor = if (reversed) MaterialTheme.colorScheme.onSurfaceVariant else expenseColor()
     val payloadValues by produceState(initialValue = emptyList<String>(), transaction.rawPayload, highlightQuery.isNotBlank()) {
         value = if (highlightQuery.isBlank()) emptyList() else withContext(Dispatchers.Default) { payloadTextValues(transaction.rawPayload) }
     }
@@ -666,7 +795,7 @@ fun TransactionRow(
             .firstOrNull { it.contains(highlightQuery, true) && !title.contains(it, true) }
     }
     val fontScale = LocalDensity.current.fontScale
-    Surface(onClick = onClick, color = MaterialTheme.colorScheme.surface, modifier = Modifier.semantics { stateDescription = if (credit) "Incoming payment" else "Outgoing payment" }) {
+    Surface(onClick = onClick, color = MaterialTheme.colorScheme.surface, modifier = Modifier.semantics { stateDescription = "Outgoing payment" }) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Image(painterResource(transaction.provider.iconRes), transaction.provider.displayName,
                 Modifier.size(36.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
@@ -690,7 +819,7 @@ fun TransactionRow(
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(formatTime(transaction.occurredAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (showCategory && !credit && !movedMoney) {
+                    if (showCategory && !movedMoney) {
                         val busyLabel = paymentCategoryStateLabel(categoryState)
                         if (categoryState != PaymentCategoryState.IDLE && busyLabel != null) {
                             Row(
