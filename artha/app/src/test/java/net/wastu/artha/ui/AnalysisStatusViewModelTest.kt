@@ -58,6 +58,7 @@ class AnalysisStatusViewModelTest {
         "analysis_enabled" to "true",
         "ai_base_url" to "https://ai.wastu.net",
         "ai_model" to "gemini-3.8-flash-high",
+        "custom_categories" to org.json.JSONArray(INITIAL_DEFAULT_CATEGORIES).toString(),
     )
 
     private fun readySpending(rows: List<UnifiedTransaction>): SpendingState =
@@ -282,9 +283,10 @@ class AnalysisStatusViewModelTest {
             clock = fixedClock,
             analysisStore = store,
             computationDispatcher = dispatcher,
+            ioDispatcher = dispatcher,
             spendingState = state,
             categorize = { _, _, batch ->
-                batch.associate { it.transaction.key to CategorySuggestion("Uncategorized", "AI suggestion: Food") }
+                batch.associate { it.transaction.key to CategorySuggestion("Groceries", "AI suggestion: Food") }
             },
         )
 

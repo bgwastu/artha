@@ -626,7 +626,10 @@ class ArthaViewModel(
         }.distinctBy { it.key }
         val total = curMonthEligible.size
         val needingCurrentMonth = curMonthEligible.count { isNeedingCategory(it, snapshot) }
-        val labeled = total - needingCurrentMonth
+        // Count what the user sees: grouped rows resolve their category from member records, not their own key.
+        val labeled = curMonthEligible.count { tx ->
+            (snapshot.categories[tx.key] ?: tx.category).let { !it.isNullOrBlank() && it != CategoryConstants.UNCATEGORIZED }
+        }
 
         val plan = lastPlan
         val reviewCount = plan?.review ?: rows.count { AiCategorization.isEligible(it, snapshot) && needsReviewAction(it, snapshot) }

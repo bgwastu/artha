@@ -316,20 +316,10 @@ fun AnalysisScreen(
                         modifier = Modifier.semantics { heading() },
                     )
                     Spacer(Modifier.weight(1f))
-                    BadgedBox(
-                        badge = {
-                            if (categoryProgress.review > 0) {
-                                Badge {
-                                    Text(categoryProgress.review.toString())
-                                }
-                            }
-                        }
-                    ) {
-                        IconButton(onClick = onOpenAiCategories) {
-                            Icon(
-                                imageVector = Icons.Outlined.AutoAwesome,
-                                contentDescription = "AI categories",
-                            )
+                    // Badge on the icon inside the button, so it sits within the button's bounds.
+                    IconButton(onClick = onOpenAiCategories) {
+                        BadgedBox(badge = { if (categoryProgress.review > 0) Badge { Text(categoryProgress.review.toString()) } }) {
+                            Icon(Icons.Outlined.AutoAwesome, contentDescription = "AI categories")
                         }
                     }
                 }
@@ -713,7 +703,7 @@ fun ManageCategoriesContent(
             }
             val titleStyle = if (!showCloseButton && !adding) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleLarge
             val titleModifier = if (!showCloseButton && !adding) {
-                Modifier.weight(1f).semantics { heading() }.padding(top = 16.dp, bottom = 8.dp)
+                Modifier.weight(1f).semantics { heading() }.padding(top = 4.dp, bottom = 8.dp)
             } else {
                 Modifier.weight(1f).semantics { heading() }
             }
