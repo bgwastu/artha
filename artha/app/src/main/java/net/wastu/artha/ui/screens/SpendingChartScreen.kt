@@ -231,7 +231,6 @@ private fun DonutChart(
             DonutSlice(name, amount, sliceColor(index))
         }
     }
-    val painters = items.map { rememberVectorPainter(categoryIconFor(it.name, icons)) }
     val explode = items.mapIndexed { index, _ ->
         animateFloatAsState(
             targetValue = if (selected == index) 1f else 0f,
@@ -263,7 +262,6 @@ private fun DonutChart(
     val labelSp = 12.sp
     val labelPx = with(LocalDensity.current) { labelSp.toPx() }
     val tapGapPx = with(LocalDensity.current) { 12.dp.toPx() }
-    val painterBase = with(LocalDensity.current) { 24.dp.toPx() }
     // Always-current selection for tap handlers (avoids stale closures).
     val currentSelection by rememberUpdatedState(selected)
     val holeIconSize = 22.dp
@@ -328,19 +326,6 @@ private fun DonutChart(
                         size = arcRect.size,
                         style = Stroke(width = ringWidth, cap = StrokeCap.Butt),
                     )
-                    // Category icon inside wide slices.
-                    if (rawSweep >= 40f) {
-                        val iconCenter = offsetCenter + dir * (holeRadius + ringWidth / 2f)
-                        val iconPx = min(holeRadius * 0.28f, 24.dp.toPx())
-                        withTransform({
-                            translate(iconCenter.x - iconPx / 2f, iconCenter.y - iconPx / 2f)
-                            scale(iconPx / painterBase, iconPx / painterBase, pivot = Offset.Zero)
-                        }) {
-                            with(painters[index]) {
-                                draw(Size(painterBase, painterBase), alpha = alpha[index], colorFilter = ColorFilter.tint(Color.White))
-                            }
-                        }
-                    }
                     if (rawSweep >= 12f || selected == index) {
                         val percent = "${slice.amountMinor * 100 / total}%"
                         val label = if (selected == index) "${slice.name} $percent" else percent
@@ -381,9 +366,9 @@ private fun DonutChart(
                 drawCircle(color = surfaceColor, radius = holeRadius, center = center)
             }
             val picked = selected?.let { items.getOrNull(it) }
-            Crossfade(targetState = picked, label = "hole") { state ->
+            Crossfade(targetState = picked, label = "hole", modifier = Modifier.align(Alignment.Center)) { state ->
                 Column(
-                    Modifier.align(Alignment.Center).widthIn(max = 150.dp),
+                    Modifier.widthIn(max = 150.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
