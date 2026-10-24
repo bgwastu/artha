@@ -161,7 +161,7 @@ fun AiCategoriesScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("AI categories") },
+                title = { Text("AI categorization") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

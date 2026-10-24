@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -40,6 +41,7 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -398,7 +400,7 @@ private fun TransactionDetailsBody(
                     .onSizeChanged { state.pageHeightPx = it.height }
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 24.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 SourceHeader(record.provider, formatDate(record.occurredAt))
                 Text(
@@ -417,141 +419,163 @@ private fun TransactionDetailsBody(
                     SaveFeedback(feedback, false)
                 }
                 Text(humanTitle, style = MaterialTheme.typography.titleLarge)
-                TagRow(tags)
-                if (records.isNotEmpty()) GroupRecordsSection(records, record.occurredAt, linkedRecordsExplanation(record)) { state.recordIndex = it }
+                DisableSelection {
+                    TagRow(tags)
+                    if (records.isNotEmpty()) GroupRecordsSection(records, record.occurredAt, linkedRecordsExplanation(record)) { state.recordIndex = it }
 
-                if (!credit && snapshot?.analysisEnabled != false) {
-                    DetailEditRow(
-                        label = "Category", value = currentCategory,
-                        supportingContent = if (isBusy && busyLabel != null) {
-                            {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                ) {
-                                    CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp)
-                                    Text(busyLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (!credit && snapshot?.analysisEnabled != false) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            DetailEditRow(
+                                label = "Category", value = currentCategory,
+                                supportingContent = if (isBusy && busyLabel != null) {
+                                    {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(13.dp),
+                                                strokeWidth = 1.5.dp,
+                                                color = MaterialTheme.colorScheme.primary,
+                                            )
+                                            Text(
+                                                busyLabel,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                            )
+                                        }
+                                    }
+                                } else when (categorySource) {
+                                    CategorySource.MANUAL -> ({
+                                        Text("Set by you", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    })
+                                    CategorySource.AI -> ({
+                                        Text("Suggested by AI", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    })
+                                    CategorySource.MERCHANT -> ({
+                                        Text("Same merchant", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    })
+                                    CategorySource.REVIEW -> ({
+                                        Text("Needs review", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+                                    })
+                                    CategorySource.FAILED -> ({
+                                        Text("Couldn't categorize", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                                    })
+                                    CategorySource.PENDING -> ({
+                                        Text("Waiting for AI", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    })
+                                    CategorySource.NONE -> null
+                                },
+                                icon = categoryIconFor(currentCategory, snapshot?.categoryIcons.orEmpty()),
+                                enabled = viewModel?.analysisStore != null && !isBusy,
+                            ) {
+                                if (!isBusy) {
+                                    state.categoryDraft = currentCategory; state.saveError = null; state.savedFeedback = null; state.editor = "category"
                                 }
                             }
-                        } else when (categorySource) {
-                            CategorySource.MANUAL -> ({
-                                Text("Set by you", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            })
-                            CategorySource.AI -> ({
-                                Text("Suggested by AI", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            })
-                            CategorySource.MERCHANT -> ({
-                                Text("Same merchant", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            })
-                            CategorySource.REVIEW -> ({
-                                Text("Needs review", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
-                            })
-                            CategorySource.FAILED -> ({
-                                Text("Couldn't categorize", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                            })
-                            CategorySource.PENDING -> ({
-                                Text("Waiting for AI", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            })
-                            CategorySource.NONE -> null
-                        },
-                        icon = categoryIconFor(currentCategory, snapshot?.categoryIcons.orEmpty()),
+                            if (snapshot?.analysisEnabled == true) {
+                                val reason = categoryReasonText(snapshot, record.key)
+                                FlowRow(
+                                    modifier = Modifier.padding(start = 36.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    if (reason != null) {
+                                        AssistChip(
+                                            onClick = { showWhyDialog = true },
+                                            enabled = !isBusy,
+                                            label = { Text("Why") },
+                                            leadingIcon = {
+                                                Icon(Icons.Outlined.Info, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize))
+                                            },
+                                        )
+                                    }
+                                    AssistChip(
+                                        onClick = {
+                                            if (categorySource == CategorySource.MANUAL) {
+                                                showReplaceManualDialog = true
+                                            } else {
+                                                viewModel?.recategorize(RecategorizeScope.Payment(record.key))
+                                            }
+                                        },
+                                        enabled = !isBusy,
+                                        label = { Text(if (isBusy) "Categorizing..." else "Re-categorize") },
+                                        leadingIcon = {
+                                            if (isBusy) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(AssistChipDefaults.IconSize),
+                                                    strokeWidth = 1.5.dp,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                )
+                                            } else {
+                                                Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize))
+                                            }
+                                        },
+                                    )
+                                    if (categorySource == CategorySource.REVIEW && !isBusy) {
+                                        SuggestionChip(
+                                            onClick = {
+                                                viewModel?.confirmCategory(record, currentCategory) { result ->
+                                                    if (result.isSuccess) {
+                                                        scope.launch {
+                                                            snackbarHostState.showSnackbar("Category saved")
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            label = { Text("Looks right") },
+                                            icon = {
+                                                Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(SuggestionChipDefaults.IconSize))
+                                            },
+                                        )
+                                    }
+                                }
+                                if (showWhyDialog && reason != null) {
+                                    AlertDialog(
+                                        onDismissRequest = { showWhyDialog = false },
+                                        title = { Text("Why $currentCategory") },
+                                        text = { Text(reason) },
+                                        confirmButton = {
+                                            TextButton(onClick = { showWhyDialog = false }) {
+                                                Text("Close")
+                                            }
+                                        },
+                                    )
+                                }
+                                if (showReplaceManualDialog) {
+                                    AlertDialog(
+                                        onDismissRequest = { showReplaceManualDialog = false },
+                                        title = { Text("Replace your pick?") },
+                                        text = { Text("AI will choose a new category for this payment.") },
+                                        confirmButton = {
+                                            TextButton(
+                                                onClick = {
+                                                    showReplaceManualDialog = false
+                                                    viewModel?.recategorize(RecategorizeScope.Payment(record.key, replaceManual = true))
+                                                },
+                                            ) {
+                                                Text("Replace")
+                                            }
+                                        },
+                                        dismissButton = {
+                                            TextButton(onClick = { showReplaceManualDialog = false }) {
+                                                Text("Cancel")
+                                            }
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    DetailEditRow(
+                        label = "Note", value = currentNote.ifBlank { "Add note" },
+                        icon = Icons.Default.EditNote,
                         enabled = viewModel?.analysisStore != null && !isBusy,
+                        supporting = paymentNoteRowSupporting(paymentState),
                     ) {
                         if (!isBusy) {
-                            state.categoryDraft = currentCategory; state.saveError = null; state.savedFeedback = null; state.editor = "category"
+                            state.noteDraft = currentNote; state.saveError = null; state.savedFeedback = null; state.editor = "note"
                         }
-                    }
-                    if (!isBusy && snapshot?.analysisEnabled == true) {
-                        val reason = categoryReasonText(snapshot, record.key)
-                        FlowRow(
-                            modifier = Modifier.padding(start = 36.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            if (reason != null) {
-                                AssistChip(
-                                    onClick = { showWhyDialog = true },
-                                    label = { Text("Why") },
-                                    leadingIcon = {
-                                        Icon(Icons.Outlined.Info, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize))
-                                    },
-                                )
-                            }
-                            AssistChip(
-                                onClick = {
-                                    if (categorySource == CategorySource.MANUAL) {
-                                        showReplaceManualDialog = true
-                                    } else {
-                                        viewModel?.recategorize(RecategorizeScope.Payment(record.key))
-                                    }
-                                },
-                                label = { Text("Re-categorize") },
-                                leadingIcon = {
-                                    Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize))
-                                },
-                            )
-                            if (categorySource == CategorySource.REVIEW) {
-                                SuggestionChip(
-                                    onClick = {
-                                        viewModel?.confirmCategory(record, currentCategory) { result ->
-                                            if (result.isSuccess) {
-                                                scope.launch {
-                                                    snackbarHostState.showSnackbar("Category saved")
-                                                }
-                                            }
-                                        }
-                                    },
-                                    label = { Text("Looks right") },
-                                    icon = {
-                                        Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(SuggestionChipDefaults.IconSize))
-                                    },
-                                )
-                            }
-                        }
-                        if (showWhyDialog && reason != null) {
-                            AlertDialog(
-                                onDismissRequest = { showWhyDialog = false },
-                                title = { Text("Why $currentCategory") },
-                                text = { Text(reason) },
-                                confirmButton = {
-                                    TextButton(onClick = { showWhyDialog = false }) {
-                                        Text("Close")
-                                    }
-                                },
-                            )
-                        }
-                        if (showReplaceManualDialog) {
-                            AlertDialog(
-                                onDismissRequest = { showReplaceManualDialog = false },
-                                title = { Text("Replace your pick?") },
-                                text = { Text("AI will choose a new category for this payment.") },
-                                confirmButton = {
-                                    TextButton(
-                                        onClick = {
-                                            showReplaceManualDialog = false
-                                            viewModel?.recategorize(RecategorizeScope.Payment(record.key, replaceManual = true))
-                                        },
-                                    ) {
-                                        Text("Replace")
-                                    }
-                                },
-                                dismissButton = {
-                                    TextButton(onClick = { showReplaceManualDialog = false }) {
-                                        Text("Cancel")
-                                    }
-                                },
-                            )
-                        }
-                    }
-                }
-                DetailEditRow(
-                    label = "Note", value = currentNote.ifBlank { "Add note" },
-                    icon = Icons.Default.EditNote,
-                    enabled = viewModel?.analysisStore != null && !isBusy,
-                    supporting = paymentNoteRowSupporting(paymentState),
-                ) {
-                    if (!isBusy) {
-                        state.noteDraft = currentNote; state.saveError = null; state.savedFeedback = null; state.editor = "note"
                     }
                 }
 
@@ -812,7 +836,7 @@ private fun GroupRecordDetails(item: GroupRecord, minHeight: androidx.compose.ui
             Text(item.signedAmount, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
                 color = if (tx.direction == Direction.CREDIT) incomeColor() else expenseColor())
             Text(item.title, style = MaterialTheme.typography.titleLarge)
-            TagRow(item.tags)
+            DisableSelection { TagRow(item.tags) }
             DetailRow("Reference", tx.providerTransactionId)
             (payload?.detailText("sourcePaymentMethod") ?: payload?.detailText("paymentMethod"))?.let { DetailRow("Payment method", it) }
             payload?.detailText("counterpart")?.takeUnless { item.title.contains(it, ignoreCase = true) }?.let { DetailRow("Counterpart", it) }
@@ -835,7 +859,7 @@ private fun DetailCard(title: String, content: @Composable ColumnScope.() -> Uni
 
 @Composable
 private fun DetailRow(label: String, value: String) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, style = MaterialTheme.typography.bodyMedium)
     }
@@ -849,7 +873,7 @@ private fun DetailEditRow(
     onClick: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(vertical = 12.dp),
+        Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -900,7 +924,7 @@ private fun CategoryPickerView(
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         // Header with Back button
         Row(
@@ -917,7 +941,12 @@ private fun CategoryPickerView(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
             )
-            if (saving) CircularProgressIndicator(Modifier.size(20.dp))
+        }
+        if (saving) {
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth().height(2.dp),
+                color = MaterialTheme.colorScheme.primary,
+            )
         }
 
         // Search field

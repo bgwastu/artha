@@ -1,7 +1,5 @@
 package net.wastu.artha.ui.screens
 
-import androidx.compose.foundation.layout.navigationBarsPadding
-
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -12,33 +10,46 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.Label
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -54,6 +65,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -76,6 +88,7 @@ import net.wastu.artha.data.analysis.categoryReasonText
 import net.wastu.artha.data.analysis.categorySource
 import net.wastu.artha.data.analysis.merchantKey
 import net.wastu.artha.ui.ArthaViewModel
+import net.wastu.artha.ui.categoryIconFor
 import net.wastu.artha.ui.formatDate
 import net.wastu.artha.ui.formatTime
 import net.wastu.artha.ui.paymentRowAmount
@@ -293,6 +306,7 @@ fun CategoryReviewScreen(
     var applyToSiblings by remember { mutableStateOf(true) }
     var showOtherCategoryDialog by remember { mutableStateOf(false) }
     var noteDraft by remember { mutableStateOf("") }
+    var showNoteInput by remember { mutableStateOf(false) }
 
     if (currentItem != null && currentItem.tx.key != currentItemKey) {
         currentItemKey = currentItem.tx.key
@@ -301,6 +315,7 @@ fun CategoryReviewScreen(
         applyToSiblings = true
         showOtherCategoryDialog = false
         noteDraft = currentItem.tx.userNote.orEmpty()
+        showNoteInput = currentItem.tx.userNote.isNullOrBlank().not()
     }
 
     // Auto-skip if the current item becomes busy
@@ -316,10 +331,20 @@ fun CategoryReviewScreen(
         topBar = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 TopAppBar(
-                    title = { Text("Review") },
+                    title = { Text("Categorization") },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.Default.Close, contentDescription = "Close")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        if (totalCount > 0 && currentQueue?.isNotEmpty() == true) {
+                            Text(
+                                text = "${(totalCount - (currentQueue?.size ?: 0) + 1).coerceAtMost(totalCount)} of $totalCount",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(end = 16.dp),
+                            )
                         }
                     },
                 )
@@ -332,51 +357,6 @@ fun CategoryReviewScreen(
                     progress = { progressFraction },
                     modifier = Modifier.fillMaxWidth(),
                 )
-            }
-        },
-        bottomBar = {
-            if (currentQueue != null && currentItem != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            val item = currentItem ?: return@OutlinedButton
-                            queue = queue?.filterNot { it.tx.key == item.tx.key }
-                            reviewedCount += 1
-                        },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Skip")
-                    }
-                    Button(
-                        onClick = {
-                            val item = currentItem ?: return@Button
-                            val targetCategory = selectedCategory
-                            viewModel.confirmCategory(item.tx, targetCategory) {}
-                            val siblings = currentQueue.filter { it.tx.key in item.siblingKeys }
-                            if (applyToSiblings && siblings.isNotEmpty()) {
-                                for (sibling in siblings) {
-                                    viewModel.confirmCategory(sibling.tx, targetCategory) {}
-                                }
-                                val keysToRemove = setOf(item.tx.key) + siblings.map { it.tx.key }
-                                queue = queue?.filterNot { it.tx.key in keysToRemove }
-                                reviewedCount += keysToRemove.size
-                            } else {
-                                queue = queue?.filterNot { it.tx.key == item.tx.key }
-                                reviewedCount += 1
-                            }
-                        },
-                        enabled = selectedCategory.isNotBlank(),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Confirm")
-                    }
-                }
             }
         },
     ) { padding ->
@@ -401,19 +381,28 @@ fun CategoryReviewScreen(
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier.padding(16.dp),
+                        modifier = Modifier
+                            .widthIn(max = 480.dp)
+                            .padding(24.dp),
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.CheckCircle,
                             contentDescription = null,
-                            modifier = Modifier.size(48.dp),
+                            modifier = Modifier.size(56.dp),
                             tint = MaterialTheme.colorScheme.primary,
                         )
                         Text(
                             text = if (totalCount == 0) "Nothing to review" else "All reviewed",
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
                         )
-                        TextButton(onClick = onBack) {
+                        Text(
+                            text = if (totalCount == 0) "No transactions need category review." else "All transactions have been categorized.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                        Button(onClick = onBack, modifier = Modifier.heightIn(min = 44.dp)) {
                             Text("Done")
                         }
                     }
@@ -432,170 +421,391 @@ fun CategoryReviewScreen(
                         .padding(padding),
                 ) { item ->
                     if (item != null) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState())
-                                .padding(top = 16.dp, bottom = 24.dp),
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.TopCenter,
                         ) {
-                            Text(
-                                text = item.merchant,
-                                style = MaterialTheme.typography.headlineSmall,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
+                            Column(
                                 modifier = Modifier
-                                    .padding(start = 16.dp, end = 16.dp, top = 12.dp)
-                                    .clickable { onOpenTransaction(item.tx) },
-                            )
-                            Row(
-                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = item.amountText,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                                Text(
-                                    text = item.dateText,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            if (!item.reason.isNullOrBlank()) {
-                                Text(
-                                    text = item.reason,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 3,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
-                                )
-                            }
-                            OutlinedTextField(
-                                value = noteDraft,
-                                onValueChange = { noteDraft = it },
-                                label = { Text("Note") },
-                                placeholder = { Text("Add a note for the AI, e.g. what this purchase was for") },
-                                supportingText = { Text("Notes re-run AI categorization when saved") },
-                                minLines = 1,
-                                maxLines = 3,
-                                modifier = Modifier
+                                    .widthIn(max = 600.dp)
                                     .fillMaxWidth()
-                                    .padding(start = 16.dp, end = 16.dp, top = 12.dp),
-                            )
-                            Row(
-                                horizontalArrangement = Arrangement.End,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 16.dp, end = 16.dp, top = 4.dp),
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
                             ) {
-                                TextButton(
-                                    enabled = noteDraft.isNotBlank(),
-                                    onClick = {
-                                        val item = currentItem ?: return@TextButton
-                                        viewModel.setUserNote(item.tx, noteDraft.trim()) {}
-                                        viewModel.recategorize(RecategorizeScope.Payment(item.tx.key, replaceManual = true))
-                                        queue = queue?.filterNot { it.tx.key == item.tx.key }
-                                        reviewedCount += 1
-                                    },
+                                // Transaction Card
+                                OutlinedCard(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = CardDefaults.outlinedCardColors(
+                                        containerColor = MaterialTheme.colorScheme.surface,
+                                    ),
                                 ) {
-                                    Text("Save & re-analyze")
+                                    Column(
+                                        modifier = Modifier.padding(16.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { onOpenTransaction(item.tx) },
+                                        ) {
+                                            Text(
+                                                text = item.merchant,
+                                                style = MaterialTheme.typography.titleLarge,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                            Icon(
+                                                Icons.Default.ChevronRight,
+                                                contentDescription = "View transaction",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(20.dp),
+                                            )
+                                        }
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            Text(
+                                                text = item.amountText,
+                                                style = MaterialTheme.typography.headlineSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                            )
+                                            Text(
+                                                text = "•",
+                                                color = MaterialTheme.colorScheme.outline,
+                                            )
+                                            Text(
+                                                text = item.dateText,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                        if (!item.reason.isNullOrBlank()) {
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                ) {
+                                                    Icon(
+                                                        Icons.Outlined.AutoAwesome,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.secondary,
+                                                        modifier = Modifier.size(16.dp),
+                                                    )
+                                                    Text(
+                                                        text = item.reason,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
-                            }
-                            Text(
-                                text = "Category",
-                                style = MaterialTheme.typography.labelLarge,
-                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 8.dp),
-                            )
-                            Column(modifier = Modifier.selectableGroup()) {
-                                val isAiSelected = selectedCategory == item.aiCategory
-                                ListItem(
-                                    headlineContent = { Text(item.aiCategory) },
-                                    supportingContent = { Text("AI pick") },
-                                    leadingContent = {
-                                        RadioButton(
-                                            selected = isAiSelected,
-                                            onClick = null,
+
+                                // Category Selection
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = "Category",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    OutlinedCard(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = CardDefaults.outlinedCardColors(
+                                            containerColor = MaterialTheme.colorScheme.surface,
+                                        ),
+                                    ) {
+                                        Column(modifier = Modifier.selectableGroup()) {
+                                            // AI Suggestion item
+                                            val isAiSelected = selectedCategory == item.aiCategory
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .selectable(
+                                                        selected = isAiSelected,
+                                                        role = Role.RadioButton,
+                                                        onClick = { selectedCategory = item.aiCategory },
+                                                    )
+                                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            ) {
+                                                RadioButton(
+                                                    selected = isAiSelected,
+                                                    onClick = null,
+                                                )
+                                                Icon(
+                                                    categoryIconFor(item.aiCategory, snapshot.categoryIcons),
+                                                    contentDescription = null,
+                                                    tint = if (isAiSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(24.dp),
+                                                )
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = item.aiCategory,
+                                                        style = MaterialTheme.typography.bodyLarge,
+                                                        fontWeight = if (isAiSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                                    )
+                                                    Text(
+                                                        text = "AI suggestion",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.primary,
+                                                    )
+                                                }
+                                            }
+
+                                            // Alternatives
+                                            item.alternatives.forEach { alt ->
+                                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                                val isAltSelected = selectedCategory == alt
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .selectable(
+                                                            selected = isAltSelected,
+                                                            role = Role.RadioButton,
+                                                            onClick = { selectedCategory = alt },
+                                                        )
+                                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                                ) {
+                                                    RadioButton(
+                                                        selected = isAltSelected,
+                                                        onClick = null,
+                                                    )
+                                                    Icon(
+                                                        categoryIconFor(alt, snapshot.categoryIcons),
+                                                        contentDescription = null,
+                                                        tint = if (isAltSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.size(24.dp),
+                                                    )
+                                                    Text(
+                                                        text = alt,
+                                                        style = MaterialTheme.typography.bodyLarge,
+                                                        fontWeight = if (isAltSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                                        modifier = Modifier.weight(1f),
+                                                    )
+                                                }
+                                            }
+
+                                            // Custom category if chosen
+                                            if (customCategory != null && customCategory != item.aiCategory && customCategory !in item.alternatives) {
+                                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                                val isCustomSelected = selectedCategory == customCategory
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .selectable(
+                                                            selected = isCustomSelected,
+                                                            role = Role.RadioButton,
+                                                            onClick = { selectedCategory = customCategory!! },
+                                                        )
+                                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                                ) {
+                                                    RadioButton(
+                                                        selected = isCustomSelected,
+                                                        onClick = null,
+                                                    )
+                                                    Icon(
+                                                        categoryIconFor(customCategory!!, snapshot.categoryIcons),
+                                                        contentDescription = null,
+                                                        tint = if (isCustomSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.size(24.dp),
+                                                    )
+                                                    Text(
+                                                        text = customCategory!!,
+                                                        style = MaterialTheme.typography.bodyLarge,
+                                                        fontWeight = if (isCustomSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                                        modifier = Modifier.weight(1f),
+                                                    )
+                                                }
+                                            }
+
+                                            // Other category button
+                                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable { showOtherCategoryDialog = true }
+                                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            ) {
+                                                Icon(
+                                                    Icons.AutoMirrored.Outlined.Label,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(24.dp),
+                                                )
+                                                Text(
+                                                    text = "Other category...",
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.weight(1f),
+                                                )
+                                                Icon(
+                                                    Icons.Default.ChevronRight,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(20.dp),
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // Sibling propagation
+                                    val siblingsStillInQueue = currentQueue.filter { it.tx.key in item.siblingKeys }
+                                    if (siblingsStillInQueue.isNotEmpty()) {
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 4.dp)
+                                                .toggleable(
+                                                    value = applyToSiblings,
+                                                    role = Role.Checkbox,
+                                                    onValueChange = { applyToSiblings = it },
+                                                ),
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                            ) {
+                                                Checkbox(
+                                                    checked = applyToSiblings,
+                                                    onCheckedChange = null,
+                                                )
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = "Also apply to ${siblingsStillInQueue.size} more payments",
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        fontWeight = FontWeight.Medium,
+                                                    )
+                                                    Text(
+                                                        text = item.merchant,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Optional Note Section
+                                if (!showNoteInput) {
+                                    TextButton(
+                                        onClick = { showNoteInput = true },
+                                        modifier = Modifier.align(Alignment.Start),
+                                    ) {
+                                        Icon(
+                                            Icons.Default.EditNote,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
                                         )
-                                    },
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(if (noteDraft.isBlank()) "Add note for AI" else "Edit note")
+                                    }
+                                } else {
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        OutlinedTextField(
+                                            value = noteDraft,
+                                            onValueChange = { noteDraft = it },
+                                            label = { Text("Note for AI") },
+                                            placeholder = { Text("e.g. what this purchase was for") },
+                                            supportingText = { Text("Saving note re-runs AI categorization") },
+                                            minLines = 1,
+                                            maxLines = 3,
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.fillMaxWidth(),
+                                        )
+                                        if (noteDraft.isNotBlank()) {
+                                            Row(
+                                                horizontalArrangement = Arrangement.End,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            ) {
+                                                TextButton(
+                                                    onClick = {
+                                                        val itm = currentItem ?: return@TextButton
+                                                        viewModel.setUserNote(itm.tx, noteDraft.trim()) {}
+                                                        viewModel.recategorize(RecategorizeScope.Payment(itm.tx.key, replaceManual = true))
+                                                        queue = queue?.filterNot { it.tx.key == itm.tx.key }
+                                                        reviewedCount += 1
+                                                    },
+                                                ) {
+                                                    Text("Save & re-analyze")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Action Buttons (Right below the form, NO wide gap!)
+                                Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .selectable(
-                                            selected = isAiSelected,
-                                            role = Role.RadioButton,
-                                            onClick = { selectedCategory = item.aiCategory },
-                                        ),
-                                )
-                                item.alternatives.forEach { alt ->
-                                    val isAltSelected = selectedCategory == alt
-                                    ListItem(
-                                        headlineContent = { Text(alt) },
-                                        leadingContent = {
-                                            RadioButton(
-                                                selected = isAltSelected,
-                                                onClick = null,
-                                            )
+                                        .navigationBarsPadding()
+                                        .padding(top = 8.dp, bottom = 24.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            val itm = currentItem ?: return@OutlinedButton
+                                            queue = queue?.filterNot { it.tx.key == itm.tx.key }
+                                            reviewedCount += 1
                                         },
                                         modifier = Modifier
-                                            .fillMaxWidth()
-                                            .selectable(
-                                                selected = isAltSelected,
-                                                role = Role.RadioButton,
-                                                onClick = { selectedCategory = alt },
-                                            ),
-                                    )
-                                }
-                                if (customCategory != null && customCategory != item.aiCategory && customCategory !in item.alternatives) {
-                                    val isCustomSelected = selectedCategory == customCategory
-                                    ListItem(
-                                        headlineContent = { Text(customCategory!!) },
-                                        leadingContent = {
-                                            RadioButton(
-                                                selected = isCustomSelected,
-                                                onClick = null,
-                                            )
+                                            .weight(1f)
+                                            .heightIn(min = 48.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                    ) {
+                                        Text("Skip")
+                                    }
+                                    Button(
+                                        onClick = {
+                                            val itm = currentItem ?: return@Button
+                                            val targetCategory = selectedCategory
+                                            viewModel.confirmCategory(itm.tx, targetCategory) {}
+                                            val siblings = currentQueue.filter { it.tx.key in itm.siblingKeys }
+                                            if (applyToSiblings && siblings.isNotEmpty()) {
+                                                for (sibling in siblings) {
+                                                    viewModel.confirmCategory(sibling.tx, targetCategory) {}
+                                                }
+                                                val keysToRemove = setOf(itm.tx.key) + siblings.map { it.tx.key }
+                                                queue = queue?.filterNot { it.tx.key in keysToRemove }
+                                                reviewedCount += keysToRemove.size
+                                            } else {
+                                                queue = queue?.filterNot { it.tx.key == itm.tx.key }
+                                                reviewedCount += 1
+                                            }
                                         },
+                                        enabled = selectedCategory.isNotBlank(),
                                         modifier = Modifier
-                                            .fillMaxWidth()
-                                            .selectable(
-                                                selected = isCustomSelected,
-                                                role = Role.RadioButton,
-                                                onClick = { selectedCategory = customCategory!! },
-                                            ),
-                                    )
+                                            .weight(1f)
+                                            .heightIn(min = 48.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                    ) {
+                                        Text(if (currentQueue.size <= 1) "Confirm" else "Next")
+                                    }
                                 }
-                                ListItem(
-                                    headlineContent = { Text("Other category") },
-                                    trailingContent = {
-                                        Icon(Icons.Default.ChevronRight, contentDescription = null)
-                                    },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { showOtherCategoryDialog = true },
-                                )
-                            }
-                            val siblingsStillInQueue = currentQueue.filter { it.tx.key in item.siblingKeys }
-                            if (siblingsStillInQueue.isNotEmpty()) {
-                                ListItem(
-                                    headlineContent = { Text("Also apply to ${siblingsStillInQueue.size} more") },
-                                    supportingContent = { Text(item.merchant) },
-                                    leadingContent = {
-                                        Checkbox(
-                                            checked = applyToSiblings,
-                                            onCheckedChange = null,
-                                        )
-                                    },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 16.dp)
-                                        .toggleable(
-                                            value = applyToSiblings,
-                                            role = Role.Checkbox,
-                                            onValueChange = { applyToSiblings = it },
-                                        ),
-                                )
                             }
                         }
                     }
