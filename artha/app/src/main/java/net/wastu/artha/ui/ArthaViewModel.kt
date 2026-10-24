@@ -50,6 +50,7 @@ class ArthaViewModel(
     private val spendingState: StateFlow<SpendingState>? = null,
     private val retrySpending: (() -> Unit)? = null,
     private val gojekHistoryWalk: (() -> Unit)? = null,
+    private val gojekFlashRefresh: (() -> Unit)? = null,
     private val categorize: suspend (AiConfig, AnalysisSnapshot, List<CategoryCandidate>) -> Map<String, CategorySuggestion> = AiCategorization::classify,
     initialSnapshot: AnalysisSnapshot = AnalysisSnapshot(),
 ) : ViewModel() {
@@ -105,6 +106,8 @@ class ArthaViewModel(
     val ingestionStatus = _ingestionStatus.asStateFlow()
     val enabledProviders = preferences?.enabled ?: MutableStateFlow(Provider.entries.toSet()).asStateFlow()
     val importEnabled = preferences?.importEnabled ?: MutableStateFlow(Provider.entries.toSet()).asStateFlow()
+    /** Fresh exposure of the last invisible GoPay refresh, surfaced on the GOJEK provider card. */
+    val gojekFlash = preferences?.gojekFlash ?: MutableStateFlow<net.wastu.artha.data.providers.GojekFlashRecord?>(null).asStateFlow()
     val providerDiagnostics = preferences?.diagnostics ?: MutableStateFlow(emptyMap<Provider, net.wastu.artha.data.providers.ProviderDiagnostic>()).asStateFlow()
     private var observerJob: Job? = null
     private var ingestionJob: Job? = null
@@ -264,6 +267,8 @@ class ArthaViewModel(
     fun syncProvider(provider: Provider) { importHistory(provider) }
     /** Gojek needs its visible history walked first; the host decides how (root UI automation). */
     fun requestGojekWalk() { (gojekHistoryWalk ?: { syncProvider(Provider.GOJEK) }).invoke() }
+    /** Manual GOJEK refresh: invisible flash + import now; when the screen is on it defers to the next idle window. */
+    fun requestGojekRefresh() { (gojekFlashRefresh ?: { syncProvider(Provider.GOJEK) }).invoke() }
     private fun importHistory(provider: Provider?, automatic: Boolean = false) {
         if (automatic && preferences != null && importEnabled.value.none { preferences.isStale(it, clock.millis()) }) return
         val previous = ingestionJob?.takeIf { it.isActive }

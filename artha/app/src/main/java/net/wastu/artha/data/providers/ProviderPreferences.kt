@@ -36,9 +36,22 @@ data class ProviderImportWindow(val paymentCount: Int, val earliestMillis: Long?
     }
 }
 
+/** Latest invisible GoPay flash trigger outcome for the provider screen. */
+data class GojekFlashRecord(val millis: Long?, val result: String)
+
 class ProviderPreferences(context: Context) {
     private val preferences = context.getSharedPreferences("provider_visibility", Context.MODE_PRIVATE)
 
+    /** Outcome of the last invisible GoPay flash, so sleep-time syncs stay observable in the UI. */
+    private val _gojekFlash = MutableStateFlow(
+        GojekFlashRecord(preferences.getLong("GOJEK_flash_ms", 0L).takeIf { it > 0L },
+            preferences.getString("GOJEK_flash_result", null).orEmpty()))
+    val gojekFlash = _gojekFlash.asStateFlow()
+
+    fun recordGojekFlash(result: String, now: Long = System.currentTimeMillis()) {
+        preferences.edit { putLong("GOJEK_flash_ms", now).putString("GOJEK_flash_result", result) }
+        _gojekFlash.value = GojekFlashRecord(now, result)
+    }
     init {
         val obsoleteKeys = preferences.all.keys.filter { it.startsWith("TOKOPEDIA") }
         if (obsoleteKeys.isNotEmpty()) {
@@ -56,6 +69,7 @@ class ProviderPreferences(context: Context) {
 
     @Synchronized
     fun setImportEnabled(provider: Provider, enabled: Boolean) {
+
         preferences.edit { putBoolean("${provider.name}_import", enabled) }
         _importEnabled.value = if (enabled) _importEnabled.value + provider else _importEnabled.value - provider
     }

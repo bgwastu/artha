@@ -1,6 +1,10 @@
 package net.wastu.artha
 
 import android.app.Application
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import net.wastu.artha.core.root.LibsuRootAccess
 import net.wastu.artha.data.ingestion.IngestionCoordinator
 import net.wastu.artha.data.ledger.LedgerDatabase
@@ -105,6 +109,41 @@ class ArthaApplication : Application() {
         }
     }
 
+    /**
+     * Manual GOJEK refresh: refreshes GoPay invisibly via the deep-link flash and imports right
+     * away. When the screen is awake the flash refuses to launch, so the refresh answers with
+     * the next idle window instead of opening Gojek visibly.
+     */
+    fun syncGojekFlashNow(onResult: (String) -> Unit) {
+        applicationScope.launch {
+            try {
+                if (!rootAccess.verify()) {
+                    onResult("Root access unavailable. Allow root, then try again")
+                    return@launch
+                }
+                val goesEnabled = providerPreferences.importEnabled.value.contains(Provider.GOJEK)
+                val flash = net.wastu.artha.data.sync.GojekFlashSync(
+                    net.wastu.artha.data.ingestion.RootFileReader(this@ArthaApplication)).run(goesEnabled)
+                providerPreferences.recordGojekFlash(flash.name, System.currentTimeMillis())
+                onResult(when (flash) {
+                    net.wastu.artha.data.sync.GojekFlashSync.Result.FLASHED ->
+                        joinThenSummary(syncInBackground(Provider.GOJEK, force = true)) ?: "GoPay refreshed"
+                    net.wastu.artha.data.sync.GojekFlashSync.Result.QUIET ->
+                        (joinThenSummary(syncInBackground(Provider.GOJEK, force = true)) ?: "").let { if (it.isBlank()) "GoPay up to date" else it }
+                    net.wastu.artha.data.sync.GojekFlashSync.Result.SKIPPED_SCREEN_ON ->
+                        "GoPay syncs automatically in the background; the next refresh happens after the screen turns off"
+                    net.wastu.artha.data.sync.GojekFlashSync.Result.SKIPPED ->
+                        "Gojek import is disabled. Enable it in provider details"
+                    net.wastu.artha.data.sync.GojekFlashSync.Result.ROOT_UNAVAILABLE ->
+                        "Root access unavailable. Allow root, then try again"
+                })
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                onResult("GoPay refresh failed. Try again")
+            }
+        }
+    }
     private suspend fun joinThenSummary(job: kotlinx.coroutines.Job): String? {
         job.join()
         return try {
@@ -128,9 +167,44 @@ class ArthaApplication : Application() {
         }
     }
 
+    /**
+     * Refreshes GoPay as soon as the screen sleeps, instead of waiting for the next job slot.
+     * Registers dynamically (this action cannot be declared in the manifest), debounced so the
+     * many screen-off events of a night only cost one attempt per ten minutes. The flash stays
+     * bounded (~15 s); the import runs through the regular background job.
+     */
+    private fun registerScreenOffListener() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action != Intent.ACTION_SCREEN_OFF) return
+                val pending = goAsync()
+                applicationScope.launch {
+                    try {
+                        val last = providerPreferences.gojekFlash.value.millis ?: 0L
+                        if (System.currentTimeMillis() - last < 10 * 60_000L) return@launch
+                        if (!rootAccess.verify()) return@launch
+                        val enabled = providerPreferences.importEnabled.value.contains(Provider.GOJEK)
+                        val flash = net.wastu.artha.data.sync.GojekFlashSync(
+                            net.wastu.artha.data.ingestion.RootFileReader(this@ArthaApplication)).run(enabled)
+                        providerPreferences.recordGojekFlash(flash.name, System.currentTimeMillis())
+                        if (flash == net.wastu.artha.data.sync.GojekFlashSync.Result.FLASHED) {
+                            syncInBackground(Provider.GOJEK, force = true)
+                        }
+                    } catch (_: Exception) {
+                    } finally {
+                        pending.finish()
+                    }
+                }
+            }
+        }
+        runCatching {
+            registerReceiver(receiver, IntentFilter(Intent.ACTION_SCREEN_OFF))
+        }
+    }
     override fun onCreate() {
         super.onCreate()
         BackgroundSyncScheduler.schedule(this)
+        registerScreenOffListener()
         applicationScope.launch {
             spending.state
                 .filterIsInstance<SpendingState.Ready>()

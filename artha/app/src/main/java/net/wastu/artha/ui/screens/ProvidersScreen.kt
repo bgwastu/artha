@@ -166,11 +166,12 @@ fun ProvidersScreen(
     val requestedProvider by viewModel?.requestedImportProvider?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<Provider?>(null) }
     val importFeedback by viewModel?.importFeedback?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val coverage by viewModel?.providerCoverage?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap<Provider, SourceCoverage>()) }
+    val gojekFlash by viewModel?.gojekFlash?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<net.wastu.artha.data.providers.GojekFlashRecord?>(null) }
     fun isImporting(provider: Provider) = importBusy && (importing == provider || requestedProvider == provider)
     fun feedback(provider: Provider) = importFeedback?.takeIf { it.provider == null || it.provider == provider }?.message
-    // Gojek walks its visible history before importing; every other source burns straight through.
+    // Gojek refreshes invisibly through the flash sync; the visible walk stays on deep backfill.
     val syncAction: (Provider) -> Unit = { target ->
-        if (target == Provider.GOJEK) viewModel?.requestGojekWalk() else viewModel?.syncProvider(target)
+        if (target == Provider.GOJEK) viewModel?.requestGojekRefresh() else viewModel?.syncProvider(target)
     }
     BoxWithConstraints(Modifier.widthIn(max = 1320.dp).fillMaxSize()) {
     val expanded = maxWidth >= 840.dp && maxHeight >= 480.dp
@@ -258,7 +259,8 @@ fun ProvidersScreen(
             SourcePageContent(provider, provider in enabled, provider in importEnabled, providerCounts[provider] ?: 0,
                 diagnostics[provider], coverage[provider], isImporting(provider),
                 { onEnabled(provider, it) }, { viewModel?.setImportEnabled(provider, it) }, { syncAction(provider) },
-                busy = importBusy && !automaticImport, feedback = feedback(provider))
+                busy = importBusy && !automaticImport, feedback = feedback(provider),
+                flash = gojekFlash.takeIf { provider == Provider.GOJEK })
         }
     }
     }
@@ -271,6 +273,7 @@ fun ProvidersScreen(
             diagnostics[provider], coverage[provider], isImporting(provider),
             { onEnabled(provider, it) }, { viewModel?.setImportEnabled(provider, it) }, { syncAction(provider) },
             busy = importBusy && !automaticImport, feedback = feedback(provider),
+            flash = gojekFlash.takeIf { provider == Provider.GOJEK },
             onBack = { selectedProvider = null })
     }
     if (showWidgetHelp) {
@@ -317,6 +320,15 @@ fun ProvidersScreen(
     }
 }
 
+/** Human wording for the last invisible GoPay flash outcome, shown on the provider card. */
+private fun flashExplanation(result: String): String = when (result) {
+    "FLASHED" -> "captured page one while the screen slept"
+    "QUIET" -> "screen slept; Gojek served no fresh history page"
+    "SKIPPED_SCREEN_ON" -> "deferred; the screen was on"
+    "SKIPPED" -> "not run; Gojek import is disabled or missing"
+    "ROOT_UNAVAILABLE" -> "not run; root access was unavailable"
+    else -> result
+}
 
 @Composable
 private fun SettingsHeading(title: String) {
@@ -375,6 +387,7 @@ private fun SourcePageContent(
     diagnostic: ProviderDiagnostic?, coverage: SourceCoverage?, importing: Boolean,
     onEnabled: (Boolean) -> Unit, onImportEnabled: (Boolean) -> Unit, onImport: () -> Unit,
     busy: Boolean = false, feedback: String? = null,
+    flash: net.wastu.artha.data.providers.GojekFlashRecord? = null,
 ) {
     val isEnabled = enabled && importEnabled
     val status = diagnostic?.accountStatus ?: AccountStatus.UNKNOWN
@@ -436,7 +449,16 @@ private fun SourcePageContent(
         sourceName = provider.displayName,
     )
     if (provider == Provider.GOJEK) {
-        Text("Sync history opens Gojek and scrolls its transaction history for you; imports capture what the app loads. Leave the screen alone until it finishes.",
+        flash?.let { record ->
+            val stamp = record.millis?.let { ms ->
+                java.time.format.DateTimeFormatter.ofPattern("d MMM, HH:mm")
+                    .format(java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault()))
+            } ?: "never"
+            Text("GoPay background refresh: $stamp — ${flashExplanation(record.result)}",
+                Modifier.padding(horizontal = 16.dp, vertical = 2.dp), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text("Refresh runs invisibly: Artha opens Gojek's history once the screen is off, captures the update, and imports it. Deep backfill opens Gojek visibly and scrolls older history in.",
             Modifier.padding(horizontal = 16.dp, vertical = 2.dp), style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -453,6 +475,7 @@ private fun SourcePage(
     diagnostic: ProviderDiagnostic?, coverage: SourceCoverage?, importing: Boolean,
     onEnabled: (Boolean) -> Unit, onImportEnabled: (Boolean) -> Unit, onImport: () -> Unit,
     busy: Boolean = false, feedback: String? = null, onBack: () -> Unit,
+    flash: net.wastu.artha.data.providers.GojekFlashRecord? = null,
 ) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
     androidx.compose.material3.Scaffold(
@@ -470,11 +493,12 @@ private fun SourcePage(
             Modifier.fillMaxSize().imePadding().padding(padding).verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
         ) {
             SourcePageContent(provider, enabled, importEnabled, count, diagnostic, coverage, importing,
-                onEnabled, onImportEnabled, onImport, busy = busy, feedback = feedback)
+                onEnabled, onImportEnabled, onImport, busy = busy, feedback = feedback,
+                flash = flash)
         }
     }
     }
-}
+    }
 
 @Composable
 private fun SettingsSwitch(title: String, checked: Boolean, onChange: (Boolean) -> Unit, summary: String? = null, sourceName: String? = null) {

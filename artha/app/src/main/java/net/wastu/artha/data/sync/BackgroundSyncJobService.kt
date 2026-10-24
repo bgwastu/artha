@@ -27,6 +27,13 @@ class BackgroundSyncJobService : JobService() {
             var allProvidersHealthy = true
             try {
                 if (app.rootAccess.verify()) {
+                    // Refresh GoPay invisibly while the phone sleeps, so the import below sees a
+                    // fresh capture instead of yesterday's pages.
+                    val gojekImportEnabled = app.providerPreferences.importEnabled.value
+                        .contains(net.wastu.artha.core.model.Provider.GOJEK)
+                    val flash = GojekFlashSync(net.wastu.artha.data.ingestion.RootFileReader(app))
+                        .run(gojekImportEnabled)
+                    app.providerPreferences.recordGojekFlash(flash.name, System.currentTimeMillis())
                     val summaries = app.ingestion.ingestAll(force = false)
                     // A provider that could not be read must not silently wait a full hour:
                     // rescheduling lets the job retry the whole batch sooner.
@@ -50,20 +57,24 @@ class BackgroundSyncJobService : JobService() {
 
 object BackgroundSyncScheduler {
     const val JOB_ID = 20261017
-    private const val INTERVAL_MILLIS = 60 * 60 * 1000L // 1 hour
 
+    // Frequent attempts make "synced after the screen turns off" land within minutes; when the
+    // display is awake each run costs one dumpsys read and the flash defers.
+    private const val INTERVAL_MILLIS = 15 * 60 * 1000L // 15 minutes
     fun schedule(context: Context) {
         val scheduler = context.getSystemService(JobScheduler::class.java) ?: return
         val existing = scheduler.getPendingJob(JOB_ID)
-        if (existing != null) return
+        // A persisted job keeps its old interval across updates; reschedule when it drifted.
+        if (existing != null && existing.intervalMillis == INTERVAL_MILLIS) return
 
         val component = ComponentName(context, BackgroundSyncJobService::class.java)
         val builder = JobInfo.Builder(JOB_ID, component)
             .setPeriodic(INTERVAL_MILLIS)
             .setPersisted(true)
-            // Failed background batches retry sooner instead of waiting another full hour.
+            // Failed background batches retry sooner instead of waiting another full period.
             .setBackoffCriteria(10 * 60 * 1000L, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
             .setRequiresBatteryNotLow(true)
+        scheduler.cancel(JOB_ID)
         scheduler.schedule(builder.build())
     }
 }

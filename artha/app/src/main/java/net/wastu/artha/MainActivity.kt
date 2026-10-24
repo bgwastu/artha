@@ -57,6 +57,11 @@ class MainActivity : ComponentActivity() {
                             spendingState = application.spending.state,
                             retrySpending = application.spending::retry,
                             gojekHistoryWalk = { application.syncGojekWithHistoryWalk() },
+                            gojekFlashRefresh = { application.syncGojekFlashNow { message ->
+                                android.os.Handler(application.mainLooper).post {
+                                    android.widget.Toast.makeText(application, message, android.widget.Toast.LENGTH_LONG).show()
+                                }
+                            } },
                         ).also {
                             if (initialDest != null) it.setTargetDestination(initialDest)
                         }
