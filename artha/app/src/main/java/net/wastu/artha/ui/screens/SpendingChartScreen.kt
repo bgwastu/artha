@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +42,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.translate
@@ -48,7 +52,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.size
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -210,26 +214,37 @@ private fun DonutChart(
             label = "explode$index",
         ).value
     }
-    val selection = selected
-    val surfaceColor = MaterialTheme.colorScheme.surface
+    val colors = MaterialTheme.colorScheme
+    val surfaceColor = colors.surface
+    val labelTextColor = colors.onSurfaceVariant
+    val percentPaint = remember {
+        android.graphics.Paint().apply {
+            isAntiAlias = true
+            textAlign = android.graphics.Paint.Align.CENTER
+            isFakeBoldText = true
+        }
+    }
+    // Always-current selection for tap handlers (avoids stale closures).
+    val currentSelection by rememberUpdatedState(selected)
 
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.fillMaxWidth().height(240.dp)) {
+        Box(Modifier.fillMaxWidth().height(260.dp)) {
             Canvas(
                 Modifier
                     .fillMaxSize()
-                    .pointerInput(items) {
+                    .pointerInput(items, total) {
                         detectTapGestures { tap ->
                             val size = this.size
                             val center = Offset(size.width / 2f, size.height / 2f)
+                            val outerRadius = min(size.width, size.height) / 2f * 0.80f
                             val dx = tap.x - center.x
                             val dy = tap.y - center.y
                             val radius = kotlin.math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
-                            val maxRadius = min(size.width, size.height) / 2f
-                            if (radius < maxRadius * 0.58f) {
-                                // Tapping the hole clears the selection.
-                                onSelect(null)
-                            } else if (radius <= maxRadius) {
+                            val selection = currentSelection
+                            if (radius < outerRadius * 0.60f) {
+                                // The hole clears the selection.
+                                if (selection != null) onSelect(null)
+                            } else if (radius <= outerRadius + 12.dp.toPx()) {
                                 var degrees = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble()))
                                 degrees = ((degrees + 90) + 360) % 360
                                 var running = 0.0
@@ -245,10 +260,11 @@ private fun DonutChart(
                         }
                     },
             ) {
-                val strokeWidthWhitespace = 2.dp.toPx()
-                val outerRadius = min(size.width, size.height) / 2f - 4f
-                val holeRadius = outerRadius * 0.58f
                 val center = Offset(size.width / 2f, size.height / 2f)
+                val outerRadius = min(size.width, size.height) / 2f * 0.80f
+                val holeRadius = outerRadius * 0.60f
+                val ringWidth = outerRadius - holeRadius
+                val percentTextSize = 12.sp.toPx()
                 var startDegrees = -90f
                 items.forEachIndexed { index, slice ->
                     val sweep = slice.amountMinor * 360f / total
@@ -270,12 +286,26 @@ private fun DonutChart(
                         useCenter = false,
                         topLeft = arcRect.topLeft,
                         size = arcRect.size,
-                        style = Stroke(width = outerRadius - holeRadius, cap = StrokeCap.Butt),
+                        style = Stroke(width = ringWidth, cap = StrokeCap.Butt),
                     )
+                    if (sweep >= 14f || currentSelection == index) {
+                        val labelRadius = outerRadius + holeRadius * 0.34f + explode[index] * push
+                        val label = Offset(
+                            center.x + dir.x * labelRadius,
+                            center.y + dir.y * labelRadius,
+                        )
+                        percentPaint.color = labelTextColor.toArgb()
+                        percentPaint.textSize = percentTextSize
+                        drawContext.canvas.nativeCanvas.drawText(
+                            "${slice.amountMinor * 100 / total}%",
+                            label.x,
+                            label.y,
+                            percentPaint,
+                        )
+                    }
                     startDegrees += sweep
                 }
-                // The hole drawn on top so exploded slices never overflow into it.
-                drawCircle(color = surfaceColor, radius = holeRadius - strokeWidthWhitespace / 2f, center = center)
+                drawCircle(color = surfaceColor, radius = holeRadius, center = center)
             }
             Column(
                 Modifier.align(Alignment.Center).widthIn(max = 140.dp),

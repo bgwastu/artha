@@ -41,6 +41,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material.icons.filled.Add
@@ -226,6 +227,9 @@ fun AnalysisScreen(
                     )
                     Spacer(Modifier.weight(1f))
                     // Badge on the icon inside the button, so it sits within the button's bounds.
+                    IconButton(onClick = onOpenChart, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Outlined.BarChart, contentDescription = "Chart")
+                    }
                     IconButton(onClick = onOpenAiCategories, modifier = Modifier.size(40.dp)) {
                         BadgedBox(badge = { if (categoryProgress.review > 0) Badge { Text(categoryProgress.review.toString()) } }) {
                             Icon(Icons.Outlined.AutoAwesome, contentDescription = "AI categories")
