@@ -23,10 +23,18 @@ data class CategoryProgress(
     val labeled: Int = 0,
     val total: Int = 0,
     val error: String? = null,
+    /** Payments marked "Needs review". */
+    val review: Int = 0,
+    /** Payments the AI gave up on. */
+    val failed: Int = 0,
+    /** Auto-categorize switched off; manual runs still work. */
+    val paused: Boolean = false,
+    /** Payment keys in a request right now, for per-payment spinners. */
+    val activeKeys: Set<String> = emptySet(),
 )
 
 /** Where a payment's category came from, for the transaction detail. */
-enum class CategorySource { MANUAL, AI, PENDING, NONE }
+enum class CategorySource { MANUAL, AI, MERCHANT, REVIEW, FAILED, PENDING, NONE }
 
 /** Pure derivation so the ViewModel and tests agree on precedence. */
 fun monthAnalysisStatus(

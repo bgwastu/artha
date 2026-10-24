@@ -342,6 +342,7 @@ private fun TransactionDetailsBody(
                             CategorySource.PENDING -> ({
                                 Text("Waiting for AI", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             })
+                            CategorySource.MERCHANT, CategorySource.REVIEW, CategorySource.FAILED -> null
                             CategorySource.NONE -> null
                         },
                         icon = categoryIconFor(currentCategory, snapshot?.categoryIcons.orEmpty()),

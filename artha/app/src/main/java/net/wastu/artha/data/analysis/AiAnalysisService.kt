@@ -98,18 +98,19 @@ object AiAnalysisService {
         transactions: List<UnifiedTransaction>, availableCategories: List<String> = INITIAL_DEFAULT_CATEGORIES,
         monthlyUserNote: String = "",
         onProgress: (AnalysisStage) -> Unit = {},
-    ): MonthAnalysisResult = withTimeout(90_000) {
+    ): MonthAnalysisResult = withTimeout(240_000) {
         onProgress(AnalysisStage.COMPARING)
         val agent = withContext(Dispatchers.Default) {
             SpendingAnalysisAgent(YearMonth.parse(monthLabel), transactions, LocalDate.now(AccountingTime.clock))
         }
-        agent.run(knowledge, monthlyUserNote, onProgress) { messages, tools, choice -> chat(config, messages, tools, choice) }
+        agent.run(knowledge, monthlyUserNote, onProgress) { messages, tools, choice -> chat(config, messages, tools, choice, readTimeoutMs = 90_000) }
     }
 
     internal suspend fun call(config: AiConfig, prompt: String): String =
         chat(config, JSONArray().put(JSONObject().put("role", "user").put("content", prompt))).getString("content")
 
-    internal suspend fun chat(config: AiConfig, messages: JSONArray, tools: JSONArray? = null, toolChoice: String? = null): JSONObject = suspendCancellableCoroutine { continuation ->
+    internal suspend fun chat(config: AiConfig, messages: JSONArray, tools: JSONArray? = null, toolChoice: String? = null,
+        readTimeoutMs: Int = 30_000): JSONObject = suspendCancellableCoroutine { continuation ->
         val connection = URL(endpoint(config.baseUrl)).openConnection() as HttpURLConnection
         continuation.invokeOnCancellation { disconnectScope.launch { connection.disconnect() } }
         // HttpURLConnection may block inside disconnect on some runtimes. Keep transport
@@ -117,7 +118,7 @@ object AiAnalysisService {
         disconnectScope.launch {
             if (!continuation.isActive) { connection.disconnect(); return@launch }
             try {
-                connection.requestMethod = "POST"; connection.connectTimeout = 15_000; connection.readTimeout = 30_000
+                connection.requestMethod = "POST"; connection.connectTimeout = 15_000; connection.readTimeout = readTimeoutMs
                 connection.instanceFollowRedirects = false
                 connection.doOutput = true
                 connection.setRequestProperty("Authorization", "Bearer ${config.apiKey}")

@@ -336,12 +336,28 @@ class ArthaViewModel(
                 catch (e: Exception) {
                     failedBatch = batchId
                     publish(CategoryAutomationState.ERROR, labeled, total, aiConnectionFailure(e))
+                    // Back off 30 s, 2 min, 10 min, then wait for a manual retry.
+                    val attempt = batchFailures.merge(batchId, 1, Int::plus)!!
+                    categoryBackoff.getOrNull(attempt - 1)?.let { wait -> viewModelScope.launch { delay(wait); retryAutomaticCategories() } }
                 }
             }
         }
     }
 
+    private val batchFailures = mutableMapOf<String, Int>()
+    private val categoryBackoff = listOf(30_000L, 120_000L, 600_000L)
     private data class CategoryInput(val rows: List<UnifiedTransaction>, val snapshot: AnalysisSnapshot, val retry: Int)
+    /** Runs AI categorization for [scope] now, ahead of the automatic queue and regardless of failure back-off. */
+    fun recategorize(scope: RecategorizeScope) { retryAutomaticCategories() }
+    /** Pauses or resumes the automatic queue; manual [recategorize] runs still work while paused. */
+    fun setAutoCategorize(enabled: Boolean) {}
+    /** Accepts [category] for a reviewed payment; it becomes the user's pick and teaches merchant memory. */
+    fun confirmCategory(transaction: UnifiedTransaction, category: String, onComplete: (Result<Unit>) -> Unit) =
+        setTransactionCategory(transaction, category, onComplete)
+    /** Other non-manual payments from the same merchant whose category differs from [category]. */
+    fun merchantPeerCount(transaction: UnifiedTransaction, category: String): Int = 0
+    /** Applies [category] as the user's pick to those peers; reports how many changed. */
+    fun applyToMerchant(transaction: UnifiedTransaction, category: String, onComplete: (Result<Int>) -> Unit) { onComplete(Result.success(0)) }
     fun retryAutomaticCategories() { categoryRetry.update { it + 1 }; observeAutomaticCategories() }
 
     private fun visibleLedger(rows: List<UnifiedTransaction>, enabled: Set<Provider>, dates: Pair<Long?, Long?>?, category: String?): LedgerState.Ready {

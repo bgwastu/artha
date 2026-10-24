@@ -267,7 +267,7 @@ class TransactionEditFeedbackTest {
             vm = ArthaViewModel(RootAccess { true }, { error("Uses fixture state") }, analysisStore = store,
                 ingest = { CompletableDeferred<Unit>().await(); emptyMap() },
                 computationDispatcher = dispatcher, spendingState = state, categorize = { _, _, batch ->
-                    calls++; if (calls == 2) called.complete(Unit)
+                    calls++; if (calls == 5) called.complete(Unit)
                     batch.associate { it.transaction.key to CategorySuggestion("Uncategorized", "AI suggestion: Fixture") }
                 })
             vm.enterForeground(); called.await()
@@ -275,13 +275,13 @@ class TransactionEditFeedbackTest {
             store.snapshot.first { it.aiCategoryFingerprints.size == 33 }
             vm.categoryAutomation.first { it == CategoryAutomationState.READY }
             advanceUntilIdle()
-            assertEquals(2, calls)
+            assertEquals(5, calls)
             assertEquals(CategoryAutomationState.READY, vm.categoryAutomation.value)
             assertTrue(vm.refreshing.value) // Saved payments are categorized while the provider is still blocked.
             store.setClassification(payment().key, "Manual", "", true)
             store.setUserNote(payment().key, "New context")
             advanceUntilIdle()
-            assertEquals(2, calls)
+            assertEquals(5, calls)
             assertEquals("Manual", store.snapshot.value.categories[payment().key])
         } finally { vm?.lock(); Dispatchers.resetMain() }
     }

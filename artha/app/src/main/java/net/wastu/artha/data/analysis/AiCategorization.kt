@@ -11,11 +11,19 @@ import kotlinx.coroutines.delay
 internal class InvalidCategoryResponseException(cause: Exception) : IllegalStateException("AI returned invalid categories", cause)
 
 enum class CategoryAutomationState { NOT_CONFIGURED, WORKING, READY, ERROR }
-data class CategorySuggestion(val category: String, val reason: String)
+data class CategorySuggestion(
+    val category: String,
+    val reason: String,
+    val confidence: CategoryConfidence = CategoryConfidence.HIGH,
+    /** The model judged that this merchant always means this category (not a marketplace, wallet or mixed store). */
+    val merchantConsistent: Boolean = false,
+)
 data class CategoryCandidate(val transaction: UnifiedTransaction, val fingerprint: String)
 
 object AiCategorization {
-    private const val TARGET_BATCH_BYTES = 128 * 1024
+    // Reasoning models need ~3 s per payment; small batches finish well inside the read timeout.
+    private const val TARGET_BATCH_BYTES = 48 * 1024
+    const val MAX_BATCH = 8
     private const val REASON_PREFIX = "AI suggestion: "
 
     /** UI decoration and commentary updates must not cancel a category request. */
@@ -69,7 +77,7 @@ object AiCategorization {
             if (batch.isNotEmpty() && bytes.toLong() + contextBytes > TARGET_BATCH_BYTES) break
             batch += candidate
             bytes += contextBytes
-            if (batch.size == 32) break
+            if (batch.size == MAX_BATCH) break
         }
         return batch
     }
@@ -121,7 +129,7 @@ object AiCategorization {
         }))
 
     suspend fun classify(config: AiConfig, snapshot: AnalysisSnapshot, candidates: List<CategoryCandidate>): Map<String, CategorySuggestion> {
-        require(candidates.size in 1..32)
+        require(candidates.size in 1..MAX_BATCH)
         val instructions = """
             Categorize each recorded payment using exactly one label from allowedCategories.
             Read its complete transaction and sourceData, including nested groupedTransactions and their source JSON.
@@ -136,7 +144,7 @@ object AiCategorization {
         """.trimIndent()
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", instructions))
             .put(JSONObject().put("role", "user").put("content", requestData(snapshot, candidates).toString()))
-        val result = AiAnalysisService.chat(config, messages).getString("content")
+        val result = AiAnalysisService.chat(config, messages, readTimeoutMs = 150_000).getString("content")
         return parse(result, candidates, categories(snapshot))
     }
 }

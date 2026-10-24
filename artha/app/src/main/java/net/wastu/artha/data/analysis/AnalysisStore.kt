@@ -36,6 +36,11 @@ data class AnalysisSnapshot(
     val manualCategories: Set<String> = emptySet(),
     val aiCategoryFingerprints: Map<String, String> = emptyMap(),
     val analysisEnabled: Boolean = false,
+    /** AI confidence per payment key; LOW (and MEDIUM without item details) means "Needs review". */
+    val aiConfidence: Map<String, CategoryConfidence> = emptyMap(),
+    /** Payments the AI gave up on after retries, with the user-facing reason. Local cache, not backup content. */
+    val categoryFailures: Map<String, String> = emptyMap(),
+    val autoCategorize: Boolean = true,
 )
 
 val INITIAL_DEFAULT_CATEGORIES = listOf(
