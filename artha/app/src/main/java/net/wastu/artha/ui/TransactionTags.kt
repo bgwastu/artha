@@ -4,7 +4,7 @@ import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.UnifiedTransaction
 import org.json.JSONObject
 
-enum class TransactionTagKind { REVERSED, REFUND, TRANSFER, PARTIAL_REFUND, GROUPED, QRIS, CARD }
+enum class TransactionTagKind { REVERSED, REFUND, TRANSFER, PARTIAL_REFUND, GROUPED, CARD }
 
 data class TransactionTag(val kind: TransactionTagKind, val label: String) {
     /** Spoken form; the card tag is only digits on screen. */
@@ -35,7 +35,6 @@ internal fun transactionTags(transaction: UnifiedTransaction): List<TransactionT
             partialRefund -> add(TransactionTag(TransactionTagKind.PARTIAL_REFUND, "Partial refund"))
             grouped -> add(TransactionTag(TransactionTagKind.GROUPED, "Grouped"))
         }
-        if (transaction.isQris || payload?.optBoolean("isQris") == true) add(TransactionTag(TransactionTagKind.QRIS, "QRIS"))
         card?.let { add(TransactionTag(TransactionTagKind.CARD, it)) }
     }
 }

@@ -59,13 +59,13 @@ private fun tagLabelStyle(): TextStyle = MaterialTheme.typography.labelSmall.cop
 @Composable
 fun TransactionTagPill(tag: TransactionTag, modifier: Modifier = Modifier, compact: Boolean = true) {
     val showLabel = !(compact && tag.iconOnly)
-    val outlined = tag.kind == TransactionTagKind.QRIS || tag.kind == TransactionTagKind.CARD
+    val outlined = tag.kind == TransactionTagKind.CARD
     val colors = MaterialTheme.colorScheme
     val (container, content) = when (tag.kind) {
         TransactionTagKind.REVERSED, TransactionTagKind.REFUND, TransactionTagKind.PARTIAL_REFUND ->
             colors.tertiaryContainer to colors.onTertiaryContainer
         TransactionTagKind.TRANSFER, TransactionTagKind.GROUPED -> colors.secondaryContainer to colors.onSecondaryContainer
-        TransactionTagKind.QRIS, TransactionTagKind.CARD -> Color.Transparent to colors.onSurfaceVariant
+        TransactionTagKind.CARD -> Color.Transparent to colors.onSurfaceVariant
     }
     val shape = MaterialTheme.shapes.extraSmall
     Surface(

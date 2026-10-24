@@ -13,7 +13,7 @@ class TransactionTagsTest {
 
     @Test fun reversalReplacesGroupedAndKeepsPaymentFacts() {
         val tx = transaction("""{$twoRecords,"isQris":true}""").copy(isReversal = true, cardLast4 = "4821")
-        assertEquals(listOf("Reversed", "QRIS", "4821"), transactionTags(tx).map { it.label })
+        assertEquals(listOf("Reversed", "4821"), transactionTags(tx).map { it.label })
         assertEquals("Card ending 4821", transactionTags(tx).last().description)
     }
 
