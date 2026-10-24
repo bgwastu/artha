@@ -349,6 +349,7 @@ fun HomeScreen(
                 CategoryReviewScreen(
                     viewModel = viewModel,
                     onBack = { showCategoryReview = false },
+                    onOpenTransaction = { selectedKey = it.key; selectedFallback = it },
                 )
             }
         }

@@ -93,7 +93,6 @@ dependencies {
     ksp(libs.room.compiler)
     implementation(libs.coroutines.android)
     implementation(libs.libsu.core)
-    implementation(libs.vico.compose.m3)
     implementation("org.brotli:dec:0.1.2")
 
     testImplementation(libs.junit)

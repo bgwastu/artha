@@ -36,6 +36,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -68,6 +69,7 @@ import net.wastu.artha.data.analysis.AnalysisSnapshot
 import net.wastu.artha.data.analysis.BudgetAnalyzer
 import net.wastu.artha.data.analysis.CategoryConstants
 import net.wastu.artha.data.analysis.CategorySource
+import net.wastu.artha.data.analysis.RecategorizeScope
 import net.wastu.artha.data.analysis.MERCHANT_REASON_PREFIX
 import net.wastu.artha.data.analysis.MerchantMemory
 import net.wastu.artha.data.analysis.categoryReasonText
@@ -256,6 +258,7 @@ internal fun buildReviewQueue(
 fun CategoryReviewScreen(
     viewModel: ArthaViewModel,
     onBack: () -> Unit,
+    onOpenTransaction: (UnifiedTransaction) -> Unit = {},
 ) {
     val snapshot by viewModel.analysisSnapshot.collectAsStateWithLifecycle()
     val categoryProgress by viewModel.categoryProgress.collectAsStateWithLifecycle()
@@ -289,6 +292,7 @@ fun CategoryReviewScreen(
     var customCategory by remember { mutableStateOf<String?>(null) }
     var applyToSiblings by remember { mutableStateOf(true) }
     var showOtherCategoryDialog by remember { mutableStateOf(false) }
+    var noteDraft by remember { mutableStateOf("") }
 
     if (currentItem != null && currentItem.tx.key != currentItemKey) {
         currentItemKey = currentItem.tx.key
@@ -296,6 +300,7 @@ fun CategoryReviewScreen(
         customCategory = null
         applyToSiblings = true
         showOtherCategoryDialog = false
+        noteDraft = currentItem.tx.userNote.orEmpty()
     }
 
     // Auto-skip if the current item becomes busy
@@ -438,7 +443,9 @@ fun CategoryReviewScreen(
                                 style = MaterialTheme.typography.headlineSmall,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(horizontal = 16.dp),
+                                modifier = Modifier
+                                    .padding(start = 16.dp, end = 16.dp, top = 12.dp)
+                                    .clickable { onOpenTransaction(item.tx) },
                             )
                             Row(
                                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp),
@@ -465,6 +472,37 @@ fun CategoryReviewScreen(
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
                                 )
+                            }
+                            OutlinedTextField(
+                                value = noteDraft,
+                                onValueChange = { noteDraft = it },
+                                label = { Text("Note") },
+                                placeholder = { Text("Add a note for the AI, e.g. what this purchase was for") },
+                                supportingText = { Text("Notes re-run AI categorization when saved") },
+                                minLines = 1,
+                                maxLines = 3,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 16.dp, end = 16.dp, top = 12.dp),
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.End,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 16.dp, end = 16.dp, top = 4.dp),
+                            ) {
+                                TextButton(
+                                    enabled = noteDraft.isNotBlank(),
+                                    onClick = {
+                                        val item = currentItem ?: return@TextButton
+                                        viewModel.setUserNote(item.tx, noteDraft.trim()) {}
+                                        viewModel.recategorize(RecategorizeScope.Payment(item.tx.key, replaceManual = true))
+                                        queue = queue?.filterNot { it.tx.key == item.tx.key }
+                                        reviewedCount += 1
+                                    },
+                                ) {
+                                    Text("Save & re-analyze")
+                                }
                             }
                             Text(
                                 text = "Category",
