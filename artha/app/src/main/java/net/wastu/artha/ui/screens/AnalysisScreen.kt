@@ -40,7 +40,10 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import net.wastu.artha.data.analysis.relativeTime
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Clear
@@ -151,6 +154,14 @@ fun AnalysisScreen(
     var showMonthlyNoteDialog by remember { mutableStateOf(false) }
     var showScopeDialog by remember { mutableStateOf(false) }
 
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000L)
+            now = System.currentTimeMillis()
+        }
+    }
+
     if (!analysisEnabled) {
         Column(
             Modifier.fillMaxSize().padding(24.dp),
@@ -201,105 +212,135 @@ fun AnalysisScreen(
                 monthlyNote = snapshot.monthlyNotes[selectedMonth.toString()],
                 onEditNote = { showMonthlyNoteDialog = true },
                 onOpenCategories = onOpenCategoriesSheet, onOpenScope = { showScopeDialog = true },
-                onOpenAiCategories = onOpenAiCategories,
                 onOpenLargestPayment = largest?.let { { onOpenTransaction(it) } },
                 onPreviousMonth = { viewModel.setAnalysisMonth(selectedMonth.minusMonths(1)) },
                 onNextMonth = { viewModel.setAnalysisMonth(selectedMonth.plusMonths(1)) },
             )
         }
-        item(key = "ai_insights") {
-            AiInsightsCard(
-                status = analysisStatus,
-                summary = snapshot.monthlySummaries[net.wastu.artha.data.analysis.analysisKey(selectedMonth)],
-                categoryProgress = categoryProgress,
-                readOnly = viewModel.analysisStore == null,
-                onAction = { viewModel.analyzeMonth(selectedMonth, forceReanalyze = true) },
-                onConfigure = { viewModel.setTargetDestination("SETTINGS") },
-                onRetryCategories = { viewModel.retryAutomaticCategories() },
-                onOpenKnowledge = onOpenKnowledgeEditor,
-                month = selectedMonth,
-                onCancelPendingAnalysis = { viewModel.cancelPendingAnalysis() },
-            )
-        }
-        item(key = "ai_categories") {
-            val progressSupporting = AiCategoriesLogic.statusSupportingText(categoryProgress)
-            val reviewLine = AiCategoriesLogic.reviewLine(categoryProgress)
-            val failedLine = AiCategoriesLogic.failedLine(categoryProgress)
-            val isWorking = categoryProgress.state == CategoryAutomationState.WORKING
-            val isError = categoryProgress.state == CategoryAutomationState.ERROR
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            ) {
-                ListItem(
-                    headlineContent = { Text("AI categories") },
-                    supportingContent = {
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            if (progressSupporting != null) {
-                                Text(
-                                    text = progressSupporting,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            if (reviewLine != null) {
-                                Text(
-                                    text = reviewLine,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.tertiary,
-                                    modifier = Modifier.clickable { onOpenCategoryReview() },
-                                )
-                            }
-                            if (failedLine != null) {
-                                Text(
-                                    text = failedLine,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                            }
-                        }
-                    },
-                    leadingContent = {
-                        Icon(
-                            imageVector = Icons.Default.Category,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
+        val status = analysisStatus
+        val showInsights = status !is MonthAnalysisStatus.Off && status !is MonthAnalysisStatus.NoSpending
+        if (showInsights) {
+            item(key = "insights") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "Insights",
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.semantics { heading() },
                         )
-                    },
-                    trailingContent = {
-                        if (isWorking) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            ) {
+                        Spacer(Modifier.weight(1f))
+                        when (status) {
+                            is MonthAnalysisStatus.Running -> {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(20.dp),
                                     strokeWidth = 2.dp,
                                 )
-                                TextButton(onClick = { viewModel.stopCategorization() }) {
-                                    Text("Stop")
+                            }
+                            is MonthAnalysisStatus.Waiting -> {
+                                if (status.reason == AnalysisWait.CATEGORIES) {
+                                    TextButton(onClick = { viewModel.cancelPendingAnalysis() }) {
+                                        Text("Cancel")
+                                    }
                                 }
                             }
-                        } else if (categoryProgress.state == CategoryAutomationState.ERROR || categoryProgress.stopped) {
-                            TextButton(onClick = { viewModel.retryAutomaticCategories() }) {
-                                Text("Retry")
+                            MonthAnalysisStatus.NotConfigured -> {
+                                TextButton(onClick = { viewModel.setTargetDestination("SETTINGS") }) {
+                                    Text("Set up")
+                                }
                             }
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.ChevronRight,
-                                contentDescription = "Open AI categories",
-                            )
+                            MonthAnalysisStatus.NeverRun -> {
+                                TextButton(onClick = { viewModel.analyzeMonth(selectedMonth, forceReanalyze = true) }) {
+                                    Text("Analyze")
+                                }
+                            }
+                            is MonthAnalysisStatus.UpToDate, is MonthAnalysisStatus.Outdated -> {
+                                TextButton(onClick = { viewModel.analyzeMonth(selectedMonth, forceReanalyze = true) }) {
+                                    Text("Re-analyze")
+                                }
+                            }
+                            is MonthAnalysisStatus.Failed -> {
+                                TextButton(onClick = { viewModel.analyzeMonth(selectedMonth, forceReanalyze = true) }) {
+                                    Text("Retry")
+                                }
+                            }
+                            MonthAnalysisStatus.Off, MonthAnalysisStatus.NoSpending -> Unit
                         }
-                    },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    modifier = Modifier.clickable(onClick = onOpenAiCategories),
-                )
+                    }
+                    val statusLine: String? = when (status) {
+                        is MonthAnalysisStatus.Running -> status.stage?.label ?: "Preparing analysis"
+                        is MonthAnalysisStatus.Waiting -> "Waiting for categories"
+                        is MonthAnalysisStatus.UpToDate -> status.savedAt?.let { "Updated ${relativeTime(it, now)}" } ?: "Updated"
+                        is MonthAnalysisStatus.Outdated -> "Out of date"
+                        is MonthAnalysisStatus.Failed -> status.message
+                        MonthAnalysisStatus.NotConfigured -> "AI is not set up"
+                        MonthAnalysisStatus.NeverRun, MonthAnalysisStatus.Off, MonthAnalysisStatus.NoSpending -> null
+                    }
+                    if (statusLine != null) {
+                        Text(
+                            text = statusLine,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (status is MonthAnalysisStatus.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    val summary = snapshot.monthlySummaries[net.wastu.artha.data.analysis.analysisKey(selectedMonth)]
+                    if (!summary.isNullOrBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        net.wastu.artha.ui.AnalysisListContent(summary)
+                    }
+                }
             }
         }
         item(key = "category_header") {
-            Text("Categories", style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.semantics { heading() }.padding(top = 12.dp, bottom = 4.dp), fontWeight = FontWeight.SemiBold)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 16.dp, bottom = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Categories",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.semantics { heading() },
+                    )
+                    Spacer(Modifier.weight(1f))
+                    BadgedBox(
+                        badge = {
+                            if (categoryProgress.review > 0) {
+                                Badge {
+                                    Text(categoryProgress.review.toString())
+                                }
+                            }
+                        }
+                    ) {
+                        IconButton(onClick = onOpenAiCategories) {
+                            Icon(
+                                imageVector = Icons.Outlined.AutoAwesome,
+                                contentDescription = "AI categories",
+                            )
+                        }
+                    }
+                }
+                if (categoryProgress.state == CategoryAutomationState.WORKING) {
+                    val fraction = AiCardLogic.categoryProgressFraction(categoryProgress.labeled, categoryProgress.total)
+                    LinearProgressIndicator(
+                        progress = { fraction },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
         }
         if (analysis.categories.isEmpty()) item(key = "empty_categories") {
             Text("No confirmed spending this month", style = MaterialTheme.typography.bodyMedium,
@@ -361,7 +402,6 @@ fun AnalysisScreen(
 private fun MonthSummaryCard(
     month: YearMonth, analysis: MonthSpendingAnalysis, monthlyNote: String?, editable: Boolean = true,
     onEditNote: () -> Unit, onOpenCategories: () -> Unit, onOpenScope: () -> Unit,
-    onOpenAiCategories: () -> Unit = {},
     onOpenLargestPayment: (() -> Unit)?,
     onPreviousMonth: () -> Unit, onNextMonth: () -> Unit,
 ) {
@@ -380,7 +420,6 @@ private fun MonthSummaryCard(
             IconButton(onClick = onPreviousMonth) { Icon(Icons.Default.ChevronLeft, "Previous month") }
             Text(monthTitle, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
             IconButton(onClick = onNextMonth, enabled = canGoNext) { Icon(Icons.Default.ChevronRight, "Next month") }
-            IconButton(onClick = onOpenAiCategories) { Icon(Icons.Default.Category, contentDescription = "AI categories") }
             Box {
                 IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Month options") }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
@@ -388,7 +427,6 @@ private fun MonthSummaryCard(
                         DropdownMenuItem(text = { Text("Largest payment") }, onClick = { showMenu = false; open() })
                     }
                     DropdownMenuItem(enabled = editable, text = { Text("Monthly note") }, onClick = { showMenu = false; onEditNote() })
-                    DropdownMenuItem(text = { Text("AI categories") }, onClick = { showMenu = false; onOpenAiCategories() })
                     DropdownMenuItem(enabled = editable, text = { Text("Manage categories") }, onClick = { showMenu = false; onOpenCategories() })
                     DropdownMenuItem(text = { Text("Spending scope") }, onClick = { showMenu = false; onOpenScope() })
                 }
@@ -460,139 +498,8 @@ fun MonthlyNoteDialog(
 }
 
 internal object AiCardLogic {
-    fun shouldExpandByDefault(hasSummary: Boolean): Boolean = hasSummary
-    fun shouldShowActionRow(hasSummary: Boolean, expanded: Boolean, readOnly: Boolean): Boolean =
-        !readOnly && (expanded || !hasSummary)
     fun categoryProgressFraction(labeled: Int, total: Int): Float =
         if (total > 0) (labeled.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0f
-    fun isConfigureAction(status: MonthAnalysisStatus): Boolean =
-        status is MonthAnalysisStatus.NotConfigured
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-internal fun AiInsightsCard(
-    status: MonthAnalysisStatus,
-    summary: String?,
-    categoryProgress: CategoryProgress,
-    readOnly: Boolean = false,
-    onAction: () -> Unit,
-    onConfigure: () -> Unit,
-    onRetryCategories: () -> Unit,
-    onOpenKnowledge: () -> Unit,
-    onCancelPendingAnalysis: () -> Unit = {},
-    month: YearMonth? = null,
-    modifier: Modifier = Modifier,
-) {
-    val hasSummary = !summary.isNullOrBlank()
-    var expanded by rememberSaveable(month, hasSummary) {
-        mutableStateOf(AiCardLogic.shouldExpandByDefault(hasSummary))
-    }
-    var now by remember { mutableStateOf(System.currentTimeMillis()) }
-
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(60_000L)
-            now = System.currentTimeMillis()
-        }
-    }
-
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-    ) {
-        Column(Modifier.fillMaxWidth()) {
-            val statusLabel = analysisStatusLabel(status, now)
-            val isFailed = status is MonthAnalysisStatus.Failed
-
-            ListItem(
-                headlineContent = { Text("AI analysis") },
-                leadingContent = {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                },
-                supportingContent = {
-                    Text(
-                        text = statusLabel,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (isFailed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                    )
-                },
-                trailingContent = {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (status is MonthAnalysisStatus.Running) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                            )
-                        }
-                        Icon(
-                            imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = if (expanded) "Collapse AI analysis" else "Expand AI analysis",
-                        )
-                    }
-                },
-                colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                modifier = Modifier
-                    .clickable { expanded = !expanded }
-                    .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" },
-            )
-
-            val showActionRow = AiCardLogic.shouldShowActionRow(hasSummary, expanded, readOnly)
-
-            if (expanded || showActionRow) {
-                Column(
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    if (expanded) {
-                        if (hasSummary) {
-                            net.wastu.artha.ui.AnalysisListContent(summary!!)
-                        } else {
-                            Text(
-                                text = "Get findings and next steps for this month.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-
-
-                    if (showActionRow) {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            if (status is MonthAnalysisStatus.Waiting && status.reason == AnalysisWait.CATEGORIES) {
-                                TextButton(onClick = onCancelPendingAnalysis) {
-                                    Text("Cancel")
-                                }
-                            } else {
-                                val actionLabel = analysisActionLabel(status)
-                                if (actionLabel != null) {
-                                    FilledTonalButton(
-                                        onClick = if (AiCardLogic.isConfigureAction(status)) onConfigure else onAction,
-                                    ) {
-                                        Text(actionLabel)
-                                    }
-                                }
-                            }
-                            TextButton(onClick = onOpenKnowledge) {
-                                Text("Personal context")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
@@ -804,8 +711,13 @@ fun ManageCategoriesContent(
             if (adding) IconButton(onClick = { focus.clearFocus(); adding = false }, enabled = !saving) {
                 Icon(Icons.Default.ChevronLeft, "Back to categories")
             }
-            Text(if (adding) "Add category" else "Categories", style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.weight(1f).semantics { heading() })
+            val titleStyle = if (!showCloseButton && !adding) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleLarge
+            val titleModifier = if (!showCloseButton && !adding) {
+                Modifier.weight(1f).semantics { heading() }.padding(top = 16.dp, bottom = 8.dp)
+            } else {
+                Modifier.weight(1f).semantics { heading() }
+            }
+            Text(if (adding) "Add category" else "Categories", style = titleStyle, modifier = titleModifier)
             if (!adding && showCloseButton) {
                 Box {
                     IconButton(onClick = { headerMenu = true }) { Icon(Icons.Default.MoreVert, "Category options") }
@@ -841,25 +753,6 @@ fun ManageCategoriesContent(
                     modifier = Modifier.heightIn(min = 48.dp)) { Text(if (saving) "Adding" else "Add") }
             }
         } else {
-            automationState?.let { state ->
-                Row(Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Text(when (state) {
-                        CategoryAutomationState.NOT_CONFIGURED -> "AI not configured"
-                        CategoryAutomationState.WORKING -> "AI categorizing"
-                        CategoryAutomationState.READY -> "AI automatic"
-                        CategoryAutomationState.ERROR -> "AI unavailable"
-                    }, modifier = Modifier.weight(1f).padding(vertical = 8.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (state == CategoryAutomationState.ERROR) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (state == CategoryAutomationState.ERROR) {
-                        TextButton(onClick = { focus.clearFocus(); onRetryAi() }, modifier = Modifier.heightIn(min = 48.dp)) {
-                            Text("Retry")
-                        }
-                    }
-                }
-            }
             OutlinedTextField(query, { query = it }, label = { Text("Search categories") }, singleLine = true,
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 trailingIcon = if (query.isNotEmpty()) ({

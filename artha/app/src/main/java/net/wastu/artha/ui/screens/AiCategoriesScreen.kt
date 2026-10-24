@@ -2,9 +2,8 @@ package net.wastu.artha.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,15 +11,25 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
+import androidx.compose.material.icons.automirrored.outlined.Label
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Badge
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -28,8 +37,9 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -38,14 +48,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import net.wastu.artha.core.model.AccountingTime
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.analysis.BudgetAnalyzer
@@ -57,9 +72,7 @@ import net.wastu.artha.data.analysis.RecategorizeScope
 import net.wastu.artha.data.analysis.categoryProgressLabel
 import net.wastu.artha.data.analysis.categorySource
 import net.wastu.artha.data.analysis.paymentCategoryState
-import net.wastu.artha.data.analysis.paymentCategoryStateLabel
 import net.wastu.artha.data.analysis.recategorizeConfirmation
-import net.wastu.artha.data.analysis.recategorizeLabel
 import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.formatMoney
 import net.wastu.artha.ui.transactionHumanLine
@@ -68,20 +81,6 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 internal object AiCategoriesLogic {
-    fun statusSupportingText(progress: CategoryProgress): String? {
-        if (progress.stopped) return "Stopped"
-        if (progress.paused) return "Paused"
-        return categoryProgressLabel(progress)
-    }
-
-    fun reviewLine(progress: CategoryProgress): String? {
-        return if (progress.review > 0) "${progress.review} to review" else null
-    }
-
-    fun failedLine(progress: CategoryProgress): String? {
-        return if (progress.failed > 0) "${progress.failed} couldn't be categorized" else null
-    }
-
     fun headerStatusText(progress: CategoryProgress): String? = when {
         progress.stopped -> "Stopped"
         progress.state == CategoryAutomationState.ERROR -> progress.error ?: "Categorizing stopped"
@@ -98,24 +97,27 @@ internal object AiCategoriesLogic {
     fun showCategorizeNewAction(progress: CategoryProgress, newCount: Int): Boolean =
         progress.state != CategoryAutomationState.WORKING && newCount > 0
 
-    fun rowSourceLabel(source: CategorySource): String? = when (source) {
-        CategorySource.MANUAL -> "Set by you"
-        CategorySource.AI -> "Suggested by AI"
-        CategorySource.MERCHANT -> "Same merchant"
-        CategorySource.REVIEW -> "Needs review"
-        CategorySource.FAILED -> "Couldn't categorize"
-        CategorySource.PENDING -> null
-        CategorySource.NONE -> null
-    }
-
-    fun paymentRowStateText(state: PaymentCategoryState, source: CategorySource): String? = when (state) {
+    fun iconContentDescription(state: PaymentCategoryState, source: CategorySource): String = when (state) {
         PaymentCategoryState.CATEGORIZING -> "Categorizing"
         PaymentCategoryState.QUEUED -> "Queued"
-        PaymentCategoryState.IDLE -> rowSourceLabel(source)
+        PaymentCategoryState.IDLE -> when (source) {
+            CategorySource.MANUAL -> "Set by you"
+            CategorySource.AI -> "Suggested by AI"
+            CategorySource.MERCHANT -> "Same merchant"
+            CategorySource.REVIEW -> "Needs review"
+            CategorySource.FAILED -> "Couldn't categorize"
+            CategorySource.PENDING, CategorySource.NONE -> "Not categorized"
+        }
+    }
+
+    fun paymentRowSupportingText(state: PaymentCategoryState, category: String?): String = when (state) {
+        PaymentCategoryState.CATEGORIZING -> "Categorizing"
+        PaymentCategoryState.QUEUED -> "Queued"
+        PaymentCategoryState.IDLE -> category ?: "Uncategorized"
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AiCategoriesScreen(
     viewModel: ArthaViewModel,
@@ -130,13 +132,15 @@ fun AiCategoriesScreen(
 
     val currentMonth = remember { YearMonth.now(AccountingTime.zone) }
     val newScope = remember(currentMonth) { RecategorizeScope.New(currentMonth) }
-    // Counts scan every saved payment; recompute only when payments or labels change, not on every progress tick.
     val newCount = remember(allTransactions, snapshot, newScope) { viewModel.recategorizeCount(newScope) }
 
-    val isWorking = categoryProgress.state == CategoryAutomationState.WORKING
+    val working = categoryProgress.state == CategoryAutomationState.WORKING
     val isError = categoryProgress.state == CategoryAutomationState.ERROR
 
     var pendingConfirmScope by remember { mutableStateOf<RecategorizeScope?>(null) }
+    var showOverflowMenu by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
 
     val monthSpending = remember(allTransactions, selectedMonth) {
         allTransactions
@@ -147,6 +151,13 @@ fun AiCategoriesScreen(
             .sortedByDescending { it.occurredAt }
     }
 
+    val monthScope = remember(selectedMonth) { RecategorizeScope.Month(selectedMonth) }
+    val monthCount = remember(allTransactions, snapshot, monthScope) { viewModel.recategorizeCount(monthScope) }
+    val uncategorizedScope = RecategorizeScope.Uncategorized
+    val uncategorizedCount = remember(allTransactions, snapshot, uncategorizedScope) { viewModel.recategorizeCount(uncategorizedScope) }
+    val allScope = RecategorizeScope.All
+    val allCount = remember(allTransactions, snapshot, allScope) { viewModel.recategorizeCount(allScope) }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -156,277 +167,289 @@ fun AiCategoriesScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
+                actions = {
+                    if (working) {
+                        IconButton(onClick = { viewModel.stopCategorization() }) {
+                            Icon(Icons.Default.Stop, contentDescription = "Stop")
+                        }
+                    }
+                    Box {
+                        IconButton(onClick = { showOverflowMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                        }
+                        DropdownMenu(
+                            expanded = showOverflowMenu,
+                            onDismissRequest = { showOverflowMenu = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Re-categorize this month") },
+                                enabled = !working && monthCount > 0,
+                                onClick = {
+                                    showOverflowMenu = false
+                                    pendingConfirmScope = monthScope
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Re-categorize uncategorized") },
+                                enabled = !working && uncategorizedCount > 0,
+                                onClick = {
+                                    showOverflowMenu = false
+                                    pendingConfirmScope = uncategorizedScope
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Re-categorize all") },
+                                enabled = !working && allCount > 0,
+                                onClick = {
+                                    showOverflowMenu = false
+                                    pendingConfirmScope = allScope
+                                },
+                            )
+                        }
+                    }
+                },
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
-        LazyColumn(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            item(key = "header_card") {
-                val statusText = AiCategoriesLogic.headerStatusText(categoryProgress)
+            if (working) {
                 val fraction = if (categoryProgress.total > 0) {
                     (categoryProgress.labeled.toFloat() / categoryProgress.total.toFloat()).coerceIn(0f, 1f)
                 } else 0f
-
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        if (statusText != null) {
-                            Text(
-                                text = statusText,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                        if (isWorking) {
-                            LinearProgressIndicator(
-                                progress = { fraction },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                        Text(
-                            text = "${categoryProgress.labeled} of ${categoryProgress.total} payments this month categorized",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-
-                        val showStop = AiCategoriesLogic.showStopAction(categoryProgress)
-                        val showRetry = AiCategoriesLogic.showRetryAction(categoryProgress)
-                        val showCategorizeNew = AiCategoriesLogic.showCategorizeNewAction(categoryProgress, newCount)
-
-                        if (showStop || showRetry || showCategorizeNew) {
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp),
-                            ) {
-                                if (showStop) {
-                                    OutlinedButton(onClick = { viewModel.stopCategorization() }) {
-                                        Text("Stop")
-                                    }
-                                }
-                                if (showRetry) {
-                                    FilledTonalButton(onClick = { viewModel.retryAutomaticCategories() }) {
-                                        Text("Retry")
-                                    }
-                                }
-                                if (showCategorizeNew) {
-                                    Button(onClick = { viewModel.recategorize(newScope) }) {
-                                        Text("Categorize new payments")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            item(key = "auto_categorize_switch") {
-                ListItem(
-                    headlineContent = { Text("Auto-categorize new payments") },
-                    supportingContent = { Text("Only this month's new payments") },
-                    trailingContent = {
-                        Switch(
-                            checked = snapshot.autoCategorize,
-                            onCheckedChange = { viewModel.setAutoCategorize(it) },
-                        )
-                    },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                LinearProgressIndicator(
+                    progress = { fraction },
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
+                item(key = "progress_status") {
+                    val progressHeadline = AiCategoriesLogic.headerStatusText(categoryProgress)
+                    val showRetry = AiCategoriesLogic.showRetryAction(categoryProgress)
+                    val showCategorizeNew = !showRetry && AiCategoriesLogic.showCategorizeNewAction(categoryProgress, newCount)
 
-            item(key = "divider_actions") {
-                HorizontalDivider()
-            }
-
-            item(key = "recategorize_month") {
-                val monthScope = remember(selectedMonth) { RecategorizeScope.Month(selectedMonth) }
-                val count = remember(allTransactions, snapshot, monthScope) { viewModel.recategorizeCount(monthScope) }
-                val enabled = !isWorking && count > 0
-                ListItem(
-                    headlineContent = {
-                        Text(
-                            text = recategorizeLabel(monthScope),
-                            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                        )
-                    },
-                    modifier = Modifier.clickable(enabled = enabled) {
-                        pendingConfirmScope = monthScope
-                    },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
-
-            item(key = "recategorize_uncategorized") {
-                val uncategorizedScope = RecategorizeScope.Uncategorized
-                val count = remember(allTransactions, snapshot, uncategorizedScope) { viewModel.recategorizeCount(uncategorizedScope) }
-                val enabled = !isWorking && count > 0
-                ListItem(
-                    headlineContent = {
-                        Text(
-                            text = recategorizeLabel(uncategorizedScope),
-                            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                        )
-                    },
-                    modifier = Modifier.clickable(enabled = enabled) {
-                        pendingConfirmScope = uncategorizedScope
-                    },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
-
-            item(key = "recategorize_all") {
-                val allScope = RecategorizeScope.All
-                val count = remember(allTransactions, snapshot, allScope) { viewModel.recategorizeCount(allScope) }
-                val enabled = !isWorking && count > 0
-                ListItem(
-                    headlineContent = {
-                        Text(
-                            text = recategorizeLabel(allScope),
-                            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                        )
-                    },
-                    modifier = Modifier.clickable(enabled = enabled) {
-                        pendingConfirmScope = allScope
-                    },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
-
-            item(key = "review_row") {
-                val reviewCount = categoryProgress.review
-                val reviewEnabled = reviewCount > 0
-                ListItem(
-                    headlineContent = {
-                        Text(
-                            text = "Review $reviewCount",
-                            color = if (reviewEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                        )
-                    },
-                    modifier = Modifier.clickable(enabled = reviewEnabled, onClick = onOpenReview),
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
-
-            if (categoryProgress.failed > 0) {
-                item(key = "failed_row") {
                     ListItem(
                         headlineContent = {
                             Text(
-                                text = "${categoryProgress.failed} couldn't be categorized",
-                                color = MaterialTheme.colorScheme.error,
+                                text = progressHeadline.orEmpty(),
+                                color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                             )
                         },
                         trailingContent = {
-                            TextButton(onClick = { viewModel.recategorize(RecategorizeScope.NeedsReview) }) {
-                                Text("Retry")
+                            if (showRetry) {
+                                TextButton(onClick = { viewModel.retryAutomaticCategories() }) {
+                                    Text("Retry")
+                                }
+                            } else if (showCategorizeNew) {
+                                TextButton(onClick = { viewModel.recategorize(newScope) }) {
+                                    Text("Categorize new")
+                                }
                             }
                         },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     )
                 }
-            }
 
-            item(key = "this_month_header") {
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                Text(
-                    text = "This month",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-            }
-
-            if (monthSpending.isEmpty()) {
-                item(key = "this_month_empty") {
-                    Text(
-                        text = "No spending payments this month",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                item(key = "auto_categorize") {
+                    ListItem(
+                        headlineContent = { Text("Auto-categorize") },
+                        supportingContent = { Text("New payments this month") },
+                        trailingContent = {
+                            Switch(
+                                checked = snapshot.autoCategorize,
+                                onCheckedChange = null,
+                            )
+                        },
+                        modifier = Modifier.toggleable(
+                            value = snapshot.autoCategorize,
+                            role = Role.Switch,
+                            onValueChange = { viewModel.setAutoCategorize(it) },
+                        ),
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     )
                 }
-            } else {
-                items(monthSpending, key = { it.key }) { tx ->
-                    val catState = paymentCategoryState(tx.key, categoryProgress)
-                    ListItem(
-                        headlineContent = {
-                            Text(
-                                text = transactionHumanLine(tx),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        trailingContent = {
-                            Text(
-                                text = formatMoney(tx.money),
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        },
-                        supportingContent = {
-                            if (catState != PaymentCategoryState.IDLE) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp,
-                                    )
-                                    Text(
-                                        text = paymentCategoryStateLabel(catState) ?: "",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            } else {
-                                val source = categorySource(tx, snapshot)
-                                val sourceText = AiCategoriesLogic.rowSourceLabel(source)
-                                val categoryName = tx.category ?: "Uncategorized"
+
+                if (categoryProgress.review > 0) {
+                    item(key = "needs_review") {
+                        ListItem(
+                            headlineContent = { Text("Needs review") },
+                            trailingContent = {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    Text(
-                                        text = categoryName,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    Badge {
+                                        Text(categoryProgress.review.toString())
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.ChevronRight,
+                                        contentDescription = null,
                                     )
-                                    if (sourceText != null) {
-                                        Text(
-                                            text = sourceText,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = if (source == CategorySource.FAILED) MaterialTheme.colorScheme.error
-                                            else if (source == CategorySource.REVIEW) MaterialTheme.colorScheme.tertiary
-                                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
+                                }
+                            },
+                            modifier = Modifier.clickable(onClick = onOpenReview),
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        )
+                    }
+                }
+
+                if (categoryProgress.failed > 0) {
+                    item(key = "failed") {
+                        ListItem(
+                            leadingContent = {
+                                Icon(
+                                    imageVector = Icons.Outlined.ErrorOutline,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                )
+                            },
+                            headlineContent = { Text("Couldn't categorize") },
+                            trailingContent = {
+                                Badge {
+                                    Text(categoryProgress.failed.toString())
+                                }
+                            },
+                            modifier = Modifier.clickable {
+                                viewModel.recategorize(RecategorizeScope.NeedsReview)
+                            },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        )
+                    }
+                }
+
+                item(key = "month_divider_and_header") {
+                    Column(Modifier.fillMaxWidth()) {
+                        HorizontalDivider()
+                        Text(
+                            text = selectedMonth.format(DateTimeFormatter.ofPattern("MMMM", Locale.US)),
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier
+                                .semantics { heading() }
+                                .padding(start = 16.dp, top = 16.dp, bottom = 8.dp),
+                        )
+                    }
+                }
+
+                if (monthSpending.isEmpty()) {
+                    item(key = "empty_month") {
+                        ListItem(
+                            headlineContent = { Text("No payments this month") },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        )
+                    }
+                } else {
+                    items(monthSpending, key = { it.key }) { tx ->
+                        val catState = paymentCategoryState(tx.key, categoryProgress)
+                        val source = categorySource(tx, snapshot)
+                        val desc = AiCategoriesLogic.iconContentDescription(catState, source)
+
+                        ListItem(
+                            leadingContent = {
+                                Box(
+                                    modifier = Modifier.size(24.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    when (catState) {
+                                        PaymentCategoryState.CATEGORIZING -> {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier
+                                                    .size(20.dp)
+                                                    .semantics { contentDescription = desc },
+                                                strokeWidth = 2.dp,
+                                            )
+                                        }
+                                        PaymentCategoryState.QUEUED -> {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Schedule,
+                                                contentDescription = desc,
+                                                modifier = Modifier.size(24.dp),
+                                            )
+                                        }
+                                        PaymentCategoryState.IDLE -> {
+                                            when (source) {
+                                                CategorySource.MANUAL -> {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.Person,
+                                                        contentDescription = desc,
+                                                        modifier = Modifier.size(24.dp),
+                                                    )
+                                                }
+                                                CategorySource.AI -> {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.AutoAwesome,
+                                                        contentDescription = desc,
+                                                        modifier = Modifier.size(24.dp),
+                                                    )
+                                                }
+                                                CategorySource.MERCHANT -> {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.Storefront,
+                                                        contentDescription = desc,
+                                                        modifier = Modifier.size(24.dp),
+                                                    )
+                                                }
+                                                CategorySource.REVIEW -> {
+                                                    Icon(
+                                                        imageVector = Icons.AutoMirrored.Outlined.HelpOutline,
+                                                        contentDescription = desc,
+                                                        tint = MaterialTheme.colorScheme.tertiary,
+                                                        modifier = Modifier.size(24.dp),
+                                                    )
+                                                }
+                                                CategorySource.FAILED -> {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.ErrorOutline,
+                                                        contentDescription = desc,
+                                                        tint = MaterialTheme.colorScheme.error,
+                                                        modifier = Modifier.size(24.dp),
+                                                    )
+                                                }
+                                                CategorySource.PENDING, CategorySource.NONE -> {
+                                                    Icon(
+                                                        imageVector = Icons.AutoMirrored.Outlined.Label,
+                                                        contentDescription = desc,
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.size(24.dp),
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                 }
-                            }
-                        },
-                        modifier = Modifier.clickable { onOpenTransaction(tx) },
-                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    )
+                            },
+                            headlineContent = {
+                                Text(
+                                    text = transactionHumanLine(tx),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                            supportingContent = {
+                                Text(
+                                    text = AiCategoriesLogic.paymentRowSupportingText(catState, tx.category),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            },
+                            trailingContent = {
+                                Text(
+                                    text = formatMoney(tx.money),
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            },
+                            modifier = Modifier.clickable { onOpenTransaction(tx) },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        )
+                    }
                 }
-            }
-
-            item(key = "footnote") {
-                Text(
-                    text = "Your own picks are never changed.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(16.dp),
-                )
             }
         }
     }
@@ -446,7 +469,10 @@ fun AiCategoriesScreen(
                         onClick = {
                             pendingConfirmScope = null
                             viewModel.recategorize(scope)
-                        },
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar("Re-categorizing $count payments")
+                            }
+                        }
                     ) {
                         Text("Re-categorize")
                     }
@@ -455,7 +481,7 @@ fun AiCategoriesScreen(
                     TextButton(onClick = { pendingConfirmScope = null }) {
                         Text("Cancel")
                     }
-                },
+                }
             )
         }
     }
