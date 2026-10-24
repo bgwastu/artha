@@ -61,6 +61,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -104,6 +105,12 @@ import net.wastu.artha.data.analysis.CategoryAutomationState
 import net.wastu.artha.data.analysis.CategorySpending
 import net.wastu.artha.ui.MarkdownText
 import net.wastu.artha.data.analysis.MonthSpendingAnalysis
+import kotlinx.coroutines.delay
+import net.wastu.artha.data.analysis.CategoryProgress
+import net.wastu.artha.data.analysis.MonthAnalysisStatus
+import net.wastu.artha.data.analysis.analysisActionLabel
+import net.wastu.artha.data.analysis.analysisStatusLabel
+import net.wastu.artha.data.analysis.categoryProgressLabel
 import net.wastu.artha.ui.categoryIconFor
 import net.wastu.artha.ui.formatDate
 import java.time.YearMonth
@@ -126,11 +133,9 @@ fun AnalysisScreen(
     val savedTransactions by viewModel.allTransactions.collectAsStateWithLifecycle()
     val snapshot by viewModel.analysisSnapshot.collectAsStateWithLifecycle()
     val categoryAutomation by viewModel.categoryAutomation.collectAsStateWithLifecycle()
-    val analysisStages by viewModel.analysisStages.collectAsStateWithLifecycle()
-    val analyzingMonths by viewModel.analyzingMonths.collectAsStateWithLifecycle()
+    val analysisStatus by viewModel.analysisStatus.collectAsStateWithLifecycle()
+    val categoryProgress by viewModel.categoryProgress.collectAsStateWithLifecycle()
     val selectedMonth by viewModel.selectedMonth.collectAsStateWithLifecycle()
-    val analysisErrors by viewModel.analysisErrors.collectAsStateWithLifecycle()
-    val isMonthAnalyzing = selectedMonth in analyzingMonths
     val analysisEnabled = snapshot.analysisEnabled
 
     var showMonthlyNoteDialog by remember { mutableStateOf(false) }
@@ -191,6 +196,19 @@ fun AnalysisScreen(
                 onNextMonth = { viewModel.setAnalysisMonth(selectedMonth.plusMonths(1)) },
             )
         }
+        item(key = "ai_insights") {
+            AiInsightsCard(
+                status = analysisStatus,
+                summary = snapshot.monthlySummaries[net.wastu.artha.data.analysis.analysisKey(selectedMonth)],
+                categoryProgress = categoryProgress,
+                readOnly = viewModel.analysisStore == null,
+                onAction = { viewModel.analyzeMonth(selectedMonth, forceReanalyze = true) },
+                onConfigure = { viewModel.setTargetDestination("SETTINGS") },
+                onRetryCategories = { viewModel.retryAutomaticCategories() },
+                onOpenKnowledge = onOpenKnowledgeEditor,
+                month = selectedMonth,
+            )
+        }
         item(key = "category_header") {
             Text("Categories", style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.semantics { heading() }.padding(top = 12.dp, bottom = 4.dp), fontWeight = FontWeight.SemiBold)
@@ -200,15 +218,6 @@ fun AnalysisScreen(
                 modifier = Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else items(analysis.categories, key = { it.category }) { category ->
             CategorySpendingRow(category, snapshot.categoryIcons, viewModel::openCategoryTransactions)
-        }
-        item(key = "ai_insights_bottom") {
-            AiInsightsCard(
-                summary = snapshot.monthlySummaries[net.wastu.artha.data.analysis.analysisKey(selectedMonth)], stage = analysisStages[selectedMonth], isAnalyzing = isMonthAnalyzing, readOnly = viewModel.analysisStore == null,
-                onReanalyze = { viewModel.analyzeMonth(selectedMonth, forceReanalyze = true) },
-                error = analysisErrors[selectedMonth], savedAt = snapshot.updatedAt["monthSummary:${net.wastu.artha.data.analysis.analysisKey(selectedMonth)}"],
-                configured = snapshot.aiConfig.baseUrl.isNotBlank() && snapshot.aiConfig.model.isNotBlank() && snapshot.aiConfig.apiKey.isNotBlank(),
-                onConfigure = { viewModel.setTargetDestination("SETTINGS") }, onOpenKnowledge = onOpenKnowledgeEditor,
-            )
         }
     }
     if (showScopeDialog) AlertDialog(
@@ -359,48 +368,170 @@ fun MonthlyNoteDialog(
     )
 }
 
+internal object AiCardLogic {
+    fun shouldExpandByDefault(hasSummary: Boolean): Boolean = hasSummary
+    fun shouldShowActionRow(hasSummary: Boolean, expanded: Boolean, readOnly: Boolean): Boolean =
+        !readOnly && (expanded || !hasSummary)
+    fun categoryProgressFraction(labeled: Int, total: Int): Float =
+        if (total > 0) (labeled.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0f
+    fun isConfigureAction(status: MonthAnalysisStatus): Boolean =
+        status is MonthAnalysisStatus.NotConfigured
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AiInsightsCard(
+internal fun AiInsightsCard(
+    status: MonthAnalysisStatus,
     summary: String?,
-    stage: net.wastu.artha.data.analysis.AnalysisStage?, isAnalyzing: Boolean, readOnly: Boolean = false, onReanalyze: () -> Unit,
-    onOpenKnowledge: () -> Unit, error: String?, savedAt: Long?,
-    configured: Boolean, onConfigure: () -> Unit,
+    categoryProgress: CategoryProgress,
+    readOnly: Boolean = false,
+    onAction: () -> Unit,
+    onConfigure: () -> Unit,
+    onRetryCategories: () -> Unit,
+    onOpenKnowledge: () -> Unit,
+    month: YearMonth? = null,
+    modifier: Modifier = Modifier,
 ) {
-    var expanded by rememberSaveable { mutableStateOf(readOnly && !summary.isNullOrBlank()) }
-    Column(Modifier.fillMaxWidth()) {
-        ListItem(
-            headlineContent = { Text("AI analysis") },
-            leadingContent = { Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-            supportingContent = if (isAnalyzing || error != null) ({
-                Text(if (isAnalyzing) stage?.label ?: "Preparing analysis" else "Analysis unavailable",
-                    style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-            }) else null,
-            trailingContent = {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (isAnalyzing) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
+    val hasSummary = !summary.isNullOrBlank()
+    var expanded by rememberSaveable(month, hasSummary) {
+        mutableStateOf(AiCardLogic.shouldExpandByDefault(hasSummary))
+    }
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000L)
+            now = System.currentTimeMillis()
+        }
+    }
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            val statusLabel = analysisStatusLabel(status, now)
+            val isFailed = status is MonthAnalysisStatus.Failed
+
+            ListItem(
+                headlineContent = { Text("AI analysis") },
+                leadingContent = {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                },
+                supportingContent = {
+                    Text(
+                        text = statusLabel,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isFailed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                },
+                trailingContent = {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (status is MonthAnalysisStatus.Running) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        }
+                        Icon(
+                            imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = if (expanded) "Collapse AI analysis" else "Expand AI analysis",
+                        )
+                    }
+                },
+                colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                modifier = Modifier
+                    .clickable { expanded = !expanded }
+                    .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" },
+            )
+
+            val showActionRow = AiCardLogic.shouldShowActionRow(hasSummary, expanded, readOnly)
+            val categoryLabel = categoryProgressLabel(categoryProgress)
+            val showCategoryLine = categoryLabel != null && (expanded || !hasSummary)
+
+            if (expanded || showActionRow || showCategoryLine) {
+                Column(
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (expanded) {
+                        if (hasSummary) {
+                            net.wastu.artha.ui.AnalysisListContent(summary!!)
+                        } else {
+                            Text(
+                                text = "Get findings and next steps for this month.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+
+                    if (categoryLabel != null && (expanded || !hasSummary)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            if (categoryProgress.state == CategoryAutomationState.ERROR) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = categoryLabel,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.weight(1f, fill = false),
+                                    )
+                                    TextButton(onClick = onRetryCategories) {
+                                        Text("Retry")
+                                    }
+                                }
+                            } else {
+                                Text(
+                                    text = categoryLabel,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                if (categoryProgress.state == CategoryAutomationState.WORKING) {
+                                    val progressFraction = AiCardLogic.categoryProgressFraction(
+                                        categoryProgress.labeled,
+                                        categoryProgress.total,
+                                    )
+                                    LinearProgressIndicator(
+                                        progress = { progressFraction },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (showActionRow) {
+                        val actionLabel = analysisActionLabel(status)
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            if (actionLabel != null) {
+                                FilledTonalButton(
+                                    onClick = if (AiCardLogic.isConfigureAction(status)) onConfigure else onAction,
+                                ) {
+                                    Text(actionLabel)
+                                }
+                            }
+                            TextButton(onClick = onOpenKnowledge) {
+                                Text("Personal context")
+                            }
+                        }
+                    }
                 }
-            },
-            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-            modifier = Modifier.clickable { expanded = !expanded }.semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" },
-        )
-        if (expanded) Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (!summary.isNullOrBlank()) net.wastu.artha.ui.AnalysisListContent(summary)
-            else Text(if (configured) "Analyze spending and find practical next steps." else "Set up AI for analysis and recommendations.", style = MaterialTheme.typography.bodySmall)
-            if (error != null) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            if (!readOnly) FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                FilledTonalButton(onClick = if (configured) onReanalyze else onConfigure, enabled = !isAnalyzing) {
-                    Text(if (isAnalyzing) "Analyzing" else if (configured) "Analyze" else "Set up AI")
-                }
-                TextButton(onClick = onOpenKnowledge) { Text("Personal context") }
             }
-            if (savedAt != null) Text("Saved ${formatDate(java.time.Instant.ofEpochMilli(savedAt))}",
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
