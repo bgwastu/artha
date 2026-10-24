@@ -14,6 +14,11 @@ data class AiConfig(
     val apiKey: String = "",
     val model: String = "",
 )
+data class AnalysisFailure(
+    val message: String,
+    val at: Long,
+    val fingerprint: String,
+)
 
 data class AnalysisSnapshot(
     val userNotes: Map<String, String> = emptyMap(),
@@ -63,6 +68,8 @@ class AnalysisStore(context: Context) {
     private val secret = StoredSecret(prefs, "artha_ai_config_key", "ai_api_key")
     private val _snapshot = MutableStateFlow(loadSnapshot())
     val snapshot: StateFlow<AnalysisSnapshot> = _snapshot.asStateFlow()
+    private val _analysisFailures = MutableStateFlow(loadAnalysisFailures())
+    val analysisFailures: StateFlow<Map<String, AnalysisFailure>> = _analysisFailures.asStateFlow()
 
     private fun loadSnapshot(): AnalysisSnapshot {
         val notesJson = prefs.getString("user_notes", "{}") ?: "{}"
@@ -233,7 +240,56 @@ class AnalysisStore(context: Context) {
             putString("updated_at_map", JSONObject(times as Map<*, *>).toString())
         }
         _snapshot.value = current.copy(monthlySummaries = summaries, analysisFingerprints = fingerprints, updatedAt = times)
+        clearAnalysisFailure(month)
         return true
+    }
+
+    @Synchronized
+    fun recordAnalysisFailure(key: String, message: String, fingerprint: String) {
+        val now = System.currentTimeMillis()
+        val current = _analysisFailures.value.toMutableMap()
+        current[key] = AnalysisFailure(message, now, fingerprint)
+        persistAnalysisFailures(current)
+        _analysisFailures.value = current
+    }
+
+    @Synchronized
+    fun clearAnalysisFailure(key: String) {
+        val current = _analysisFailures.value.toMutableMap()
+        if (current.remove(key) != null) {
+            persistAnalysisFailures(current)
+            _analysisFailures.value = current
+        }
+    }
+
+    private fun loadAnalysisFailures(): Map<String, AnalysisFailure> {
+        val json = prefs.getString("analysis_failures", "{}") ?: "{}"
+        val obj = runCatching { JSONObject(json) }.getOrNull() ?: return emptyMap()
+        val map = mutableMapOf<String, AnalysisFailure>()
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            val entry = obj.optJSONObject(k) ?: continue
+            val message = entry.optString("message")
+            val at = entry.optLong("at", 0L)
+            val fingerprint = entry.optString("fingerprint")
+            if (message.isNotBlank() && fingerprint.isNotBlank()) {
+                map[k] = AnalysisFailure(message, at, fingerprint)
+            }
+        }
+        return map
+    }
+
+    private fun persistAnalysisFailures(failures: Map<String, AnalysisFailure>) {
+        val obj = JSONObject()
+        for ((k, v) in failures) {
+            val entry = JSONObject()
+            entry.put("message", v.message)
+            entry.put("at", v.at)
+            entry.put("fingerprint", v.fingerprint)
+            obj.put(k, entry)
+        }
+        prefs.edit { putString("analysis_failures", obj.toString()) }
     }
 
     @Synchronized

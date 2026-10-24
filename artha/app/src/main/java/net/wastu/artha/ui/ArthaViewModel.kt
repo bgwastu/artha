@@ -52,6 +52,17 @@ class ArthaViewModel(
     private val gojekHistoryWalk: (() -> Unit)? = null,
     private val gojekFlashRefresh: (() -> Unit)? = null,
     private val categorize: suspend (AiConfig, AnalysisSnapshot, List<CategoryCandidate>) -> Map<String, CategorySuggestion> = AiCategorization::classify,
+    private val analyzeMonthAction: suspend (
+        config: AiConfig,
+        knowledge: String,
+        monthLabel: String,
+        transactions: List<UnifiedTransaction>,
+        availableCategories: List<String>,
+        monthlyUserNote: String,
+        onProgress: (AnalysisStage) -> Unit,
+    ) -> MonthAnalysisResult = { config, knowledge, monthLabel, transactions, availableCategories, monthlyUserNote, onProgress ->
+        AiAnalysisService.analyzeMonth(config, knowledge, monthLabel, transactions, availableCategories, monthlyUserNote, onProgress)
+    },
     initialSnapshot: AnalysisSnapshot = AnalysisSnapshot(),
 ) : ViewModel() {
     private val _rootGate = MutableStateFlow(RootGateState.LOCKED)
@@ -94,7 +105,28 @@ class ArthaViewModel(
     private val _categoryProgress = MutableStateFlow(CategoryProgress())
     val categoryProgress = _categoryProgress.asStateFlow()
     private val monthJobs = mutableMapOf<YearMonth, Job>()
-    private val failedFingerprints = mutableMapOf<YearMonth, String>()
+    private val fallbackFailures = MutableStateFlow<Map<String, AnalysisFailure>>(emptyMap())
+    private val analysisFailures: StateFlow<Map<String, AnalysisFailure>> =
+        analysisStore?.analysisFailures ?: fallbackFailures.asStateFlow()
+
+    private fun recordAnalysisFailure(key: String, message: String, fingerprint: String) {
+        val store = analysisStore
+        if (store != null) {
+            store.recordAnalysisFailure(key, message, fingerprint)
+        } else {
+            val now = System.currentTimeMillis()
+            fallbackFailures.update { it + (key to AnalysisFailure(message, now, fingerprint)) }
+        }
+    }
+
+    private fun clearAnalysisFailure(key: String) {
+        val store = analysisStore
+        if (store != null) {
+            store.clearAnalysisFailure(key)
+        } else {
+            fallbackFailures.update { it - key }
+        }
+    }
     private val _refreshing = MutableStateFlow(false)
     val refreshing = _refreshing.asStateFlow()
     private val _automaticImportActive = MutableStateFlow(false)
@@ -192,6 +224,60 @@ class ArthaViewModel(
                         input?.let { (month, _) -> analyzeMonth(month, debounceMs = 0) }
                     }
                 }
+                launch(computationDispatcher) {
+                    combine(
+                        combine(_reconciledCache, _selectedMonth, analysisSnapshot) { rows, month, snapshot ->
+                            AnalysisStatusData(rows, month, snapshot)
+                        },
+                        combine(_refreshing, _categoryAutomation) { importing, catState ->
+                            importing to catState
+                        },
+                        combine(_analyzingMonths, _analysisStages, analysisFailures) { running, stages, failures ->
+                            AnalysisStatusExecution(running, stages, failures)
+                        }
+                    ) { data, (importing, catState), exec ->
+                        val month = data.month
+                        val snapshot = data.snapshot
+                        val rows = data.rows
+                        val key = analysisKey(month)
+                        val config = snapshot.aiConfig
+                        val configured = config.baseUrl.isNotBlank() && config.model.isNotBlank() && config.apiKey.isNotBlank()
+                        val hasSpending = rows.any {
+                            YearMonth.from(it.occurredAt.atZone(AccountingTime.zone)) <= month && BudgetAnalyzer.isSpending(it)
+                        }
+                        val summary = snapshot.monthlySummaries[key]
+                        val hasSummary = !summary.isNullOrBlank()
+                        val savedAt = snapshot.updatedAt["monthSummary:$key"]
+                        val currentFp = fingerprint(month, rows, snapshot)
+                        val upToDate = snapshot.analysisFingerprints[key] == currentFp
+                        val running = month in exec.running
+                        val stage = exec.stages[month]
+                        val waiting = when {
+                            importing -> AnalysisWait.IMPORT
+                            catState == CategoryAutomationState.WORKING -> AnalysisWait.CATEGORIES
+                            else -> null
+                        }
+                        val failureEntry = exec.failures[key]
+                        val failure = if (failureEntry != null && failureEntry.fingerprint == currentFp) {
+                            failureEntry.message to failureEntry.at
+                        } else null
+
+                        monthAnalysisStatus(
+                            enabled = snapshot.analysisEnabled,
+                            configured = configured,
+                            hasSpending = hasSpending,
+                            hasSummary = hasSummary,
+                            savedAt = savedAt,
+                            upToDate = upToDate,
+                            running = running,
+                            stage = stage,
+                            waiting = waiting,
+                            failure = failure,
+                        )
+                    }.distinctUntilChanged().collect {
+                        _analysisStatus.value = it
+                    }
+                }
             }
         }
     }
@@ -203,6 +289,15 @@ class ArthaViewModel(
             var failedBatch: String? = null
             var previousConfig: AiConfig? = null
             var previousRetry = 0
+
+            suspend fun publishProgress(state: CategoryAutomationState, rows: List<UnifiedTransaction> = _reconciledCache.value, snapshot: AnalysisSnapshot = analysisSnapshot.value, error: String? = null) {
+                val (labeled, total) = withContext(computationDispatcher) {
+                    AiCategorization.progress(rows, snapshot)
+                }
+                _categoryAutomation.value = state
+                _categoryProgress.value = CategoryProgress(state, labeled, total, error)
+            }
+
             combine(_reconciledCache, analysisSnapshot.map(AiCategorization::requestSnapshot).distinctUntilChanged(), categoryRetry) { rows, snapshot, retry ->
                 CategoryInput(rows, snapshot, retry)
             }.debounce(1000).collectLatest { input ->
@@ -210,21 +305,21 @@ class ArthaViewModel(
                 if (config != previousConfig || input.retry != previousRetry) failedBatch = null
                 previousConfig = config; previousRetry = input.retry
                 if (!input.snapshot.analysisEnabled) {
-                    _categoryAutomation.value = CategoryAutomationState.NOT_CONFIGURED
+                    publishProgress(CategoryAutomationState.NOT_CONFIGURED, input.rows, input.snapshot)
                     return@collectLatest
                 }
                 if (config.baseUrl.isBlank() || config.apiKey.isBlank() || config.model.isBlank()) {
-                    _categoryAutomation.value = CategoryAutomationState.NOT_CONFIGURED
+                    publishProgress(CategoryAutomationState.NOT_CONFIGURED, input.rows, input.snapshot)
                     return@collectLatest
                 }
                 val batch = withContext(computationDispatcher) { AiCategorization.nextBatch(input.rows, input.snapshot) }
                 if (batch.isEmpty()) {
-                    _categoryAutomation.value = CategoryAutomationState.READY
+                    publishProgress(CategoryAutomationState.READY, input.rows, input.snapshot)
                     return@collectLatest
                 }
                 val batchId = batch.joinToString(":") { it.fingerprint }
                 if (failedBatch == batchId) return@collectLatest
-                _categoryAutomation.value = CategoryAutomationState.WORKING
+                publishProgress(CategoryAutomationState.WORKING, input.rows, input.snapshot)
                 try {
                     val suggestions = AiCategorization.requestWithRetry { categorize(config, input.snapshot, batch) }
                     ensureActive()
@@ -235,9 +330,17 @@ class ArthaViewModel(
                         } == true
                     }
                     withContext(Dispatchers.IO) { store.commitCategorySuggestions(unchanged, suggestions, input.snapshot) }
-                    _categoryAutomation.value = CategoryAutomationState.READY
+                    val (labeled, total) = withContext(computationDispatcher) {
+                        AiCategorization.progress(input.rows, analysisSnapshot.value)
+                    }
+                    _categoryProgress.value = CategoryProgress(_categoryAutomation.value, labeled, total, null)
+                    publishProgress(CategoryAutomationState.READY, input.rows, analysisSnapshot.value)
                 } catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) { failedBatch = batchId; _categoryAutomation.value = CategoryAutomationState.ERROR }
+                catch (e: Exception) {
+                    failedBatch = batchId
+                    val errorMsg = aiConnectionFailure(e)
+                    publishProgress(CategoryAutomationState.ERROR, error = errorMsg)
+                }
             }
         }
     }
@@ -395,14 +498,18 @@ class ArthaViewModel(
     fun setCategoryIcon(category: String, iconKey: String?) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setCategoryIcon(category, iconKey) } }
     fun setMonthlyNote(month: String, note: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setMonthlyNote(month, note) } }
 
-    private fun fingerprint(month: YearMonth, rows: List<UnifiedTransaction>, snapshot: AnalysisSnapshot): String =
-        BudgetAnalyzer.computeMonthFingerprint(rows.filter {
-            YearMonth.from(it.occurredAt.atZone(AccountingTime.zone)) <= month &&
-                BudgetAnalyzer.isSpending(it)
-        }, snapshot.monthlyNotes[month.toString()].orEmpty(),
-            snapshot.knowledge + "\nresearch-v6\n${snapshot.aiConfig.baseUrl}\n${snapshot.aiConfig.model}\n${snapshot.aiConfig.apiKey}\n${if (month == YearMonth.now(clock.withZone(AccountingTime.zone))) java.time.LocalDate.now(clock.withZone(AccountingTime.zone)) else month}", snapshot.customCategories)
+    internal fun fingerprint(month: YearMonth, rows: List<UnifiedTransaction>, snapshot: AnalysisSnapshot): String =
+        BudgetAnalyzer.computeMonthFingerprint(
+            rows.filter {
+                YearMonth.from(it.occurredAt.atZone(AccountingTime.zone)) <= month &&
+                    BudgetAnalyzer.isSpending(it)
+            },
+            snapshot.monthlyNotes[month.toString()].orEmpty(),
+            snapshot.knowledge + "\nresearch-v7\n${snapshot.aiConfig.baseUrl}\n${snapshot.aiConfig.model}",
+            snapshot.customCategories,
+        )
 
-    fun analyzeMonth(month: YearMonth, forceReanalyze: Boolean = false, debounceMs: Long = 600) {
+    fun analyzeMonth(month: YearMonth, forceReanalyze: Boolean = false, debounceMs: Long = 600, allowRetry: Boolean = true) {
         if (!analysisSnapshot.value.analysisEnabled) return
         if ((_refreshing.value || _categoryAutomation.value == CategoryAutomationState.WORKING) && !forceReanalyze) return
         val config = analysisSnapshot.value.aiConfig
@@ -410,38 +517,66 @@ class ArthaViewModel(
         monthJobs[month]?.cancel()
         val key = analysisKey(month)
         val job = viewModelScope.launch {
+            var shouldRetry = false
             try {
                 if (debounceMs > 0) delay(debounceMs)
                 val snapshot = analysisSnapshot.value
                 val rows = _reconciledCache.value
                 if (withContext(computationDispatcher) { rows.none { YearMonth.from(it.occurredAt.atZone(AccountingTime.zone)) <= month && BudgetAnalyzer.isSpending(it) } }) return@launch
                 val fp = withContext(computationDispatcher) { fingerprint(month, rows, snapshot) }
-                if (!forceReanalyze && (failedFingerprints[month] == fp || snapshot.analysisFingerprints[key] == fp)) return@launch
+                val failure = analysisFailures.value[key]
+                if (!forceReanalyze && (failure?.fingerprint == fp || snapshot.analysisFingerprints[key] == fp)) return@launch
                 _analyzingMonths.update { it + month }; _analysisErrors.update { it - month }
                 try {
-                    val result = AiAnalysisService.analyzeMonth(snapshot.aiConfig, snapshot.knowledge, month.toString(), rows,
-                        snapshot.customCategories, snapshot.monthlyNotes[month.toString()].orEmpty(),
-                        onProgress = { stage -> _analysisStages.update { it + (month to stage) } })
+                    val result = analyzeMonthAction(snapshot.aiConfig, snapshot.knowledge, month.toString(), rows,
+                        snapshot.customCategories, snapshot.monthlyNotes[month.toString()].orEmpty()) { stage ->
+                        _analysisStages.update { it + (month to stage) }
+                    }
                     ensureActive()
-                    if (withContext(computationDispatcher) { fingerprint(month, _reconciledCache.value, analysisSnapshot.value) } != fp) return@launch
+                    if (withContext(computationDispatcher) { fingerprint(month, _reconciledCache.value, analysisSnapshot.value) } != fp) {
+                        if (allowRetry) shouldRetry = true
+                        return@launch
+                    }
                     _analysisStages.update { it + (month to AnalysisStage.SAVING) }
                     val committed = withContext(Dispatchers.IO) { analysisStore.commitMonthSummary(key, result.monthlySummary, fp, snapshot) }
-                    if (committed) failedFingerprints.remove(month)
+                    if (!committed) {
+                        if (allowRetry) shouldRetry = true
+                        return@launch
+                    }
+                    clearAnalysisFailure(key)
                 } catch (timeout: TimeoutCancellationException) {
-                    failedFingerprints[month] = fp
-                    _analysisErrors.update { it + (month to "Analysis timed out. Try again") }
+                    val msg = "Analysis timed out. Try again"
+                    recordAnalysisFailure(key, msg, fp)
+                    _analysisErrors.update { it + (month to msg) }
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (e: Exception) {
-                    failedFingerprints[month] = fp
-                    _analysisErrors.update { it + (month to "Analysis unavailable. Try again") }
+                    val msg = aiConnectionFailure(e)
+                    recordAnalysisFailure(key, msg, fp)
+                    _analysisErrors.update { it + (month to msg) }
                 }
             } finally {
                 if (monthJobs[month] === coroutineContext[Job]) {
                     monthJobs.remove(month); _analyzingMonths.update { it - month }; _analysisStages.update { it - month }
                 }
+                if (shouldRetry) {
+                    analyzeMonth(month, forceReanalyze = false, allowRetry = false)
+                }
             }
         }
         monthJobs[month] = job
     }
+
     fun analyzeCurrentMonth() { analyzeMonth(_selectedMonth.value, forceReanalyze = true) }
 }
+
+private data class AnalysisStatusData(
+    val rows: List<UnifiedTransaction>,
+    val month: YearMonth,
+    val snapshot: AnalysisSnapshot,
+)
+
+private data class AnalysisStatusExecution(
+    val running: Set<YearMonth>,
+    val stages: Map<YearMonth, AnalysisStage>,
+    val failures: Map<String, AnalysisFailure>,
+)

@@ -27,6 +27,7 @@ internal fun aiConnectionFailure(error: Exception): String = when (error) {
     is java.net.SocketTimeoutException -> "Connection timed out. Try again"
     is java.io.IOException -> "Couldn’t connect. Try again"
     is EmptyAiResponseException -> "The model returned no reply"
+    is org.json.JSONException, is IllegalArgumentException, is IllegalStateException -> "The model returned an unusable reply. Try again"
     else -> "Test failed. Try again"
 }
 

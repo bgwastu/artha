@@ -40,13 +40,31 @@ object AiCategorization {
         return MessageDigest.getInstance("SHA-256").digest(CategoryContext.canonical(input).toByteArray(Charsets.UTF_8)).toLowerHex()
     }
 
+    internal fun isEligible(tx: UnifiedTransaction, snapshot: AnalysisSnapshot): Boolean =
+        BudgetAnalyzer.isSpending(tx) && !tx.classificationIsManual && tx.key !in snapshot.manualCategories
+
+    internal fun needsLabel(candidate: CategoryCandidate, snapshot: AnalysisSnapshot): Boolean =
+        snapshot.aiCategoryFingerprints[candidate.transaction.key] != candidate.fingerprint ||
+            snapshot.reasons[candidate.transaction.key]?.startsWith(REASON_PREFIX) != true
+
+    fun progress(rows: List<UnifiedTransaction>, snapshot: AnalysisSnapshot): Pair<Int, Int> {
+        val eligible = rows.asSequence()
+            .filter { isEligible(it, snapshot) }
+            .distinctBy { it.key }
+            .map { CategoryCandidate(it, fingerprint(it, snapshot)) }
+            .toList()
+        val total = eligible.size
+        val pending = eligible.count { needsLabel(it, snapshot) }
+        val labeled = (total - pending).coerceAtLeast(0)
+        return labeled to total
+    }
+
     fun nextBatch(rows: List<UnifiedTransaction>, snapshot: AnalysisSnapshot): List<CategoryCandidate> {
         val pending = rows.asSequence()
-            .filter { BudgetAnalyzer.isSpending(it) && !it.classificationIsManual && it.key !in snapshot.manualCategories }
+            .filter { isEligible(it, snapshot) }
             .sortedByDescending { it.occurredAt }.distinctBy { it.key }
             .map { CategoryCandidate(it, fingerprint(it, snapshot)) }
-            .filter { snapshot.aiCategoryFingerprints[it.transaction.key] != it.fingerprint ||
-                snapshot.reasons[it.transaction.key]?.startsWith(REASON_PREFIX) != true }
+            .filter { needsLabel(it, snapshot) }
         val batch = mutableListOf<CategoryCandidate>()
         var bytes = snapshot.knowledge.toByteArray(Charsets.UTF_8).size
         for (candidate in pending) {
