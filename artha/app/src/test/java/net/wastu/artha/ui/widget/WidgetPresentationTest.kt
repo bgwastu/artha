@@ -78,4 +78,26 @@ class WidgetPresentationTest {
         assertFalse(showAnalysisDetails(180, 110, 2f))
         assertTrue(showAnalysisDetails(320, 400, 2f))
     }
+
+    @Test fun widgetCategoryTextShowsCategorizingWhenBusyOtherwiseCategoryTag() {
+        val busyKey = "JAGO:busy-1"
+        val payment = UnifiedTransaction(
+            Provider.JAGO, "busy-1", Direction.DEBIT, Money(50000),
+            Instant.parse("2026-10-14T10:00:00Z"), "Coffee", "{}", category = "Food",
+        )
+        assertEquals("Categorizing", widgetCategoryText(payment, setOf(busyKey)))
+        assertEquals("Food", widgetCategoryText(payment, emptySet()))
+
+        val uncategorized = payment.copy(providerTransactionId = "idle-1", category = null)
+        assertEquals("Categorizing", widgetCategoryText(uncategorized, setOf("JAGO:idle-1")))
+        assertNull(widgetCategoryText(uncategorized, emptySet()))
+
+        val credit = payment.copy(providerTransactionId = "credit-1", direction = Direction.CREDIT)
+        assertNull(widgetCategoryText(credit, emptySet()))
+        assertEquals("Categorizing", widgetCategoryText(credit, setOf("JAGO:credit-1")))
+
+        val reversed = payment.copy(providerTransactionId = "rev-1", isReversal = true)
+        assertNull(widgetCategoryText(reversed, emptySet()))
+        assertEquals("Categorizing", widgetCategoryText(reversed, setOf("JAGO:rev-1")))
+    }
 }

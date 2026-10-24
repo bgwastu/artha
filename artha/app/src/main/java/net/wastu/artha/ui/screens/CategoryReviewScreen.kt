@@ -47,6 +47,11 @@ import net.wastu.artha.data.analysis.AI_REASON_PREFIX
 import net.wastu.artha.data.analysis.AnalysisSnapshot
 import net.wastu.artha.data.analysis.CategorySource
 import net.wastu.artha.data.analysis.categorySource
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.size
+import net.wastu.artha.data.analysis.PaymentCategoryState
+import net.wastu.artha.data.analysis.paymentCategoryState
+import net.wastu.artha.data.analysis.paymentCategoryStateLabel
 import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.formatDate
 import net.wastu.artha.ui.paymentRowAmount
@@ -157,6 +162,7 @@ fun CategoryReviewScreen(
 ) {
     val allTransactions by viewModel.allTransactions.collectAsStateWithLifecycle()
     val snapshot by viewModel.analysisSnapshot.collectAsStateWithLifecycle()
+    val categoryProgress by viewModel.categoryProgress.collectAsStateWithLifecycle()
     var confirmedKeys by remember { mutableStateOf(setOf<String>()) }
     var pickMoreTransaction by remember { mutableStateOf<UnifiedTransaction?>(null) }
 
@@ -206,7 +212,8 @@ fun CategoryReviewScreen(
             ) {
                 groupedByMerchant.forEach { (merchant, txs) ->
                     stickyHeader(key = "header_$merchant") {
-                        val (canConfirm, sharedCat) = CategoryReviewLogic.canConfirmAll(txs, snapshot)
+                        val nonBusyTxs = txs.filter { paymentCategoryState(it.key, categoryProgress) == PaymentCategoryState.IDLE }
+                        val (canConfirm, sharedCat) = CategoryReviewLogic.canConfirmAll(nonBusyTxs, snapshot)
                         Surface(
                             color = MaterialTheme.colorScheme.surfaceContainer,
                             modifier = Modifier.fillMaxWidth(),
@@ -224,12 +231,12 @@ fun CategoryReviewScreen(
                                     fontWeight = FontWeight.SemiBold,
                                     modifier = Modifier.weight(1f, fill = false),
                                 )
-                                if (canConfirm && sharedCat != null) {
+                                if (canConfirm && sharedCat != null && nonBusyTxs.isNotEmpty()) {
                                     TextButton(
                                         onClick = {
-                                            val keysToConfirm = txs.map { it.key }.toSet()
+                                            val keysToConfirm = nonBusyTxs.map { it.key }.toSet()
                                             confirmedKeys = confirmedKeys + keysToConfirm
-                                            txs.forEach { tx ->
+                                            nonBusyTxs.forEach { tx ->
                                                 viewModel.confirmCategory(tx, sharedCat) {}
                                             }
                                         },
@@ -260,12 +267,16 @@ fun CategoryReviewScreen(
                                 currentCategory = currentCategory,
                                 alternatives = alternatives,
                                 reason = reason,
+                                categoryState = paymentCategoryState(tx.key, categoryProgress),
                                 onSelectCategory = { chosenCategory ->
+                                    if (paymentCategoryState(tx.key, categoryProgress) != PaymentCategoryState.IDLE) return@ReviewPaymentRow
                                     confirmedKeys = confirmedKeys + tx.key
                                     viewModel.confirmCategory(tx, chosenCategory) {}
                                 },
                                 onOpenMore = {
-                                    pickMoreTransaction = tx
+                                    if (paymentCategoryState(tx.key, categoryProgress) == PaymentCategoryState.IDLE) {
+                                        pickMoreTransaction = tx
+                                    }
                                 },
                             )
                         }
@@ -276,6 +287,10 @@ fun CategoryReviewScreen(
     }
 
     pickMoreTransaction?.let { tx ->
+        if (paymentCategoryState(tx.key, categoryProgress) != PaymentCategoryState.IDLE) {
+            pickMoreTransaction = null
+            return@let
+        }
         val currentCategory = snapshot.categories[tx.key] ?: tx.category ?: "Uncategorized"
         CategoryPickerDialog(
             currentCategory = currentCategory,
@@ -283,8 +298,10 @@ fun CategoryReviewScreen(
             onDismiss = { pickMoreTransaction = null },
             onSelect = { selectedCategory ->
                 pickMoreTransaction = null
-                confirmedKeys = confirmedKeys + tx.key
-                viewModel.confirmCategory(tx, selectedCategory) {}
+                if (paymentCategoryState(tx.key, categoryProgress) == PaymentCategoryState.IDLE) {
+                    confirmedKeys = confirmedKeys + tx.key
+                    viewModel.confirmCategory(tx, selectedCategory) {}
+                }
             },
         )
     }
@@ -297,9 +314,12 @@ private fun ReviewPaymentRow(
     currentCategory: String,
     alternatives: List<String>,
     reason: String?,
+    categoryState: PaymentCategoryState = PaymentCategoryState.IDLE,
     onSelectCategory: (String) -> Unit,
     onOpenMore: () -> Unit,
 ) {
+    val isBusy = categoryState != PaymentCategoryState.IDLE
+    val busyLabel = paymentCategoryStateLabel(categoryState)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -340,27 +360,45 @@ private fun ReviewPaymentRow(
             )
         }
 
-        FlowRow(
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            FilterChip(
-                selected = true,
-                onClick = { onSelectCategory(currentCategory) },
-                label = { Text(currentCategory) },
-            )
-            alternatives.forEach { alt ->
-                FilterChip(
-                    selected = false,
-                    onClick = { onSelectCategory(alt) },
-                    label = { Text(alt) },
+        if (isBusy && busyLabel != null) {
+            Row(
+                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                )
+                Text(
+                    text = busyLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            AssistChip(
-                onClick = onOpenMore,
-                label = { Text("More") },
-            )
+        } else {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                FilterChip(
+                    selected = true,
+                    onClick = { onSelectCategory(currentCategory) },
+                    label = { Text(currentCategory) },
+                )
+                alternatives.forEach { alt ->
+                    FilterChip(
+                        selected = false,
+                        onClick = { onSelectCategory(alt) },
+                        label = { Text(alt) },
+                    )
+                }
+                AssistChip(
+                    onClick = onOpenMore,
+                    label = { Text("More") },
+                )
+            }
         }
     }
     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))

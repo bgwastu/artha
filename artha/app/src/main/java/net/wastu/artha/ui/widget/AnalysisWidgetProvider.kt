@@ -28,6 +28,7 @@ import net.wastu.artha.data.analysis.CategorySpending
 class AnalysisWidgetProvider : AppWidgetProvider() {
 
     override fun onReceive(context: Context, intent: Intent) {
+        WidgetRefresh.bind(context)
         super.onReceive(context, intent)
         if (intent.action == ACTION_UPDATE_WIDGET) {
             val appWidgetManager = AppWidgetManager.getInstance(context)
@@ -40,6 +41,7 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
     }
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+        WidgetRefresh.bind(context)
         val targetIds = if (appWidgetIds.isNotEmpty()) appWidgetIds else {
             appWidgetManager.getAppWidgetIds(ComponentName(context, AnalysisWidgetProvider::class.java))
         }
@@ -167,6 +169,7 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
         const val ACTION_UPDATE_WIDGET = "net.wastu.artha.UPDATE_WIDGET"
 
         fun triggerUpdate(context: Context) {
+            WidgetRefresh.bind(context)
             val intent = Intent(context, AnalysisWidgetProvider::class.java).apply {
                 action = ACTION_UPDATE_WIDGET
             }

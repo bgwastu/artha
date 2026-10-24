@@ -3,13 +3,45 @@ package net.wastu.artha.ui.widget
 import android.content.BroadcastReceiver
 import android.content.Context
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import net.wastu.artha.ArthaApplication
+import net.wastu.artha.data.analysis.CategoryActivity
 import net.wastu.artha.data.analysis.SpendingState
 
+@OptIn(FlowPreview::class)
 internal object WidgetRefresh {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val jobs = mutableMapOf<String, Job>()
+    @Volatile private var appContext: Context? = null
+    private var activityJob: Job? = null
+
+    @Synchronized
+    fun bind(context: Context) {
+        val app = context.applicationContext
+        if (appContext === app && activityJob?.isActive == true) return
+        appContext = app
+        activityJob?.cancel()
+        activityJob = scope.launch {
+            CategoryActivity.keys
+                .drop(1)
+                .debounce(500)
+                .collect {
+                    appContext?.let { ctx ->
+                        AnalysisWidgetProvider.triggerUpdate(ctx)
+                    }
+                }
+        }
+    }
+
+    @Synchronized
+    internal fun resetForTests() {
+        activityJob?.cancel()
+        activityJob = null
+        appContext = null
+    }
+
     @Synchronized
     fun schedule(key: String, pending: BroadcastReceiver.PendingResult?, onFailure: () -> Unit = {}, update: suspend () -> Unit) {
         jobs.remove(key)?.cancel()

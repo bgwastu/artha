@@ -29,6 +29,7 @@ import kotlinx.coroutines.runBlocking
 class TransactionsWidgetProvider : AppWidgetProvider() {
 
     override fun onReceive(context: Context, intent: Intent) {
+        WidgetRefresh.bind(context)
         super.onReceive(context, intent)
         if (intent.action == ACTION_UPDATE_WIDGET) {
             val appWidgetManager = AppWidgetManager.getInstance(context)
@@ -41,6 +42,7 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
     }
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+        WidgetRefresh.bind(context)
         val targetIds = if (appWidgetIds.isNotEmpty()) appWidgetIds else {
             appWidgetManager.getAppWidgetIds(ComponentName(context, TransactionsWidgetProvider::class.java))
         }
@@ -138,6 +140,7 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
         const val ACTION_UPDATE_WIDGET = "net.wastu.artha.UPDATE_TRANSACTIONS_WIDGET"
 
         fun triggerUpdate(context: Context) {
+            WidgetRefresh.bind(context)
             val intent = Intent(context, TransactionsWidgetProvider::class.java).apply {
                 action = ACTION_UPDATE_WIDGET
             }
@@ -156,6 +159,7 @@ internal fun buildWidgetRowView(context: Context, row: WidgetPaymentRow): Remote
 internal fun buildTransactionItemView(
     context: Context,
     tx: UnifiedTransaction,
+    busyKeys: Set<String> = net.wastu.artha.data.analysis.CategoryActivity.keys.value,
 ): RemoteViews {
     val views = RemoteViews(context.packageName, R.layout.widget_transaction_item)
 
@@ -163,7 +167,8 @@ internal fun buildTransactionItemView(
     val title = transactionHumanLine(tx)
     views.setTextViewText(R.id.widget_item_description, title)
     val tags = transactionTags(tx)
-    bindWidgetTags(views, tags)
+    val categoryText = widgetCategoryText(tx, busyKeys)
+    bindWidgetTags(views, tags, categoryText)
 
     val zone = net.wastu.artha.core.model.AccountingTime.zone
     val localDate = tx.occurredAt.atZone(zone).toLocalDate()
@@ -191,14 +196,15 @@ internal fun buildTransactionItemView(
     val fillInIntent = Intent().apply {
         putExtra("extra_destination", "TRANSACTIONS")
     }
-    views.setContentDescription(R.id.widget_item_root, "${tx.provider.displayName}, ${(tags.map { it.description } + title).joinToString(", ")}, ${if (isCredit) "Incoming" else "Outgoing"}, $amountText, $dateStr. Open Transactions")
+    val tagLabels = tags.map { it.description } + listOfNotNull(categoryText)
+    views.setContentDescription(R.id.widget_item_root, "${tx.provider.displayName}, ${(tagLabels + title).joinToString(", ")}, ${if (isCredit) "Incoming" else "Outgoing"}, $amountText, $dateStr. Open Transactions")
     views.setOnClickFillInIntent(R.id.widget_item_root, fillInIntent)
 
     return views
 }
 
 /** RemoteViews cannot draw inline pills, so a fixed set of tag views is shown or hidden. */
-private fun bindWidgetTags(views: RemoteViews, tags: List<TransactionTag>) {
+private fun bindWidgetTags(views: RemoteViews, tags: List<TransactionTag>, categoryText: String? = null) {
     val status = tags.firstOrNull { it.kind != TransactionTagKind.QRIS && it.kind != TransactionTagKind.CARD }
     val returned = status?.kind in setOf(TransactionTagKind.REVERSED, TransactionTagKind.REFUND, TransactionTagKind.PARTIAL_REFUND)
     fun bind(id: Int, text: String?) {
@@ -208,8 +214,9 @@ private fun bindWidgetTags(views: RemoteViews, tags: List<TransactionTag>) {
     // Grouping is glyph-only, matching the in-app list.
     val glyph = status?.kind == TransactionTagKind.GROUPED
     views.setViewVisibility(R.id.widget_item_tag_grouped, if (status?.kind == TransactionTagKind.GROUPED) View.VISIBLE else View.GONE)
+    val statusSecondary = status?.label?.takeIf { !returned && !glyph } ?: categoryText
+    bind(R.id.widget_item_tag_status_secondary, statusSecondary)
     bind(R.id.widget_item_tag_status_tertiary, status?.label?.takeIf { returned && !glyph })
-    bind(R.id.widget_item_tag_status_secondary, status?.label?.takeIf { !returned && !glyph })
     bind(R.id.widget_item_tag_qris, tags.firstOrNull { it.kind == TransactionTagKind.QRIS }?.label)
     bind(R.id.widget_item_tag_card, tags.firstOrNull { it.kind == TransactionTagKind.CARD }?.label)
 }

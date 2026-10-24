@@ -92,6 +92,10 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import net.wastu.artha.data.analysis.CategoryProgress
+import net.wastu.artha.data.analysis.PaymentCategoryState
+import net.wastu.artha.data.analysis.paymentCategoryState
+import net.wastu.artha.data.analysis.paymentCategoryStateLabel
 
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -183,6 +187,7 @@ fun LedgerScreen(
 ) {
     val dateRange by viewModel?.dateRangeFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val category by viewModel?.categoryFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(CategoryProgress()) }
     val showCategory = analysisShown(viewModel)
     // Category drill-down is all-source confirmed spending; prior browsing choices stay intact for Back.
     val effectiveFilters = if (category == null) filters else TransactionFilters(direction = Direction.DEBIT)
@@ -213,6 +218,7 @@ fun LedgerScreen(
             emptyTitle = if (active.isNotEmpty()) "No matching transactions" else "No saved payments",
             onImportHistory = if (active.isEmpty()) onImportHistory else null,
             showCategory = showCategory,
+            categoryProgress = categoryProgress,
         )
     }
     if (showFilter) {
@@ -340,6 +346,7 @@ fun SearchTransactionsScreen(
     var showFilter by rememberSaveable { mutableStateOf(false) }
     val dateRange = if (firstDay != null || lastDay != null) firstDay to lastDay else null
     val showCategory = analysisShown(viewModel)
+    val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(CategoryProgress()) }
     val allTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle()
         ?: remember(ledgerState) { mutableStateOf((ledgerState as? LedgerState.Ready)?.transactions.orEmpty()) }
     val transactions = remember(allTransactions, filters, dateRange) { transactionSearchScope(allTransactions, filters, dateRange) }
@@ -437,6 +444,7 @@ fun SearchTransactionsScreen(
                     onClearFilters = ::clearFilters,
                     resultCount = results!!.transactions.size,
                     showCategory = showCategory,
+                    categoryProgress = categoryProgress,
                 )
             }
         }
@@ -466,6 +474,7 @@ private fun TransactionList(
     resultCount: Int? = null,
     onImportHistory: (() -> Unit)? = null,
     showCategory: Boolean = true,
+    categoryProgress: CategoryProgress = CategoryProgress(),
 ) {
     val listState = rememberLazyListState()
     var previousResetKey by rememberSaveable { mutableStateOf(resetKey?.toString()) }
@@ -538,6 +547,7 @@ private fun TransactionList(
                     onClick = { onTransaction(transaction) },
                     highlightQuery = highlightQuery,
                     showCategory = showCategory,
+                    categoryState = paymentCategoryState(transaction.key, categoryProgress),
                 )
                 HorizontalDivider(
                     modifier = Modifier.padding(horizontal = 16.dp),
@@ -630,7 +640,13 @@ fun HighlightedText(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlightQuery: String = "", showCategory: Boolean = true) {
+fun TransactionRow(
+    transaction: UnifiedTransaction,
+    onClick: () -> Unit,
+    highlightQuery: String = "",
+    showCategory: Boolean = true,
+    categoryState: PaymentCategoryState = PaymentCategoryState.IDLE,
+) {
     val credit = transaction.direction == Direction.CREDIT
     val reversed = transaction.isReversedRecord
     val tags = remember(transaction) { transactionTags(transaction) }
@@ -674,9 +690,27 @@ fun TransactionRow(transaction: UnifiedTransaction, onClick: () -> Unit, highlig
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(formatTime(transaction.occurredAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (showCategory && !credit && !movedMoney && !transaction.category.isNullOrBlank()) {
-                        HighlightedText(transaction.category, highlightQuery, MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                    if (showCategory && !credit && !movedMoney) {
+                        val busyLabel = paymentCategoryStateLabel(categoryState)
+                        if (categoryState != PaymentCategoryState.IDLE && busyLabel != null) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(12.dp),
+                                    strokeWidth = 1.5.dp,
+                                )
+                                Text(
+                                    text = busyLabel,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        } else if (!transaction.category.isNullOrBlank()) {
+                            HighlightedText(transaction.category, highlightQuery, MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                        }
                     }
                 }
                 transaction.userNote?.takeIf { it.isNotBlank() }?.let {
