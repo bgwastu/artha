@@ -150,8 +150,15 @@ object AiCategorization {
                         tx.key !in snapshot.manualCategories
                 }.map { it.key }.toSet()
             }
+            is RecategorizeScope.New -> rows.filter { tx -> isNew(tx, snapshot) &&
+                YearMonth.from(tx.occurredAt.atZone(net.wastu.artha.core.model.AccountingTime.zone)) == scope.month
+            }.map { it.key }.toSet()
         }
     }
+
+    /** Never categorized: spending with no saved category, reason or manual pick. Automatic runs only touch these. */
+    fun isNew(tx: UnifiedTransaction, snapshot: AnalysisSnapshot): Boolean =
+        isEligible(tx, snapshot) && tx.key !in snapshot.categories && tx.key !in snapshot.reasons
 
     /** (labeled, total) eligible payments. */
     fun progress(rows: List<UnifiedTransaction>, snapshot: AnalysisSnapshot): Pair<Int, Int> =

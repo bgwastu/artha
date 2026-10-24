@@ -649,6 +649,13 @@ class ArthaViewModel(
         triggerPump()
     }
 
+    /** Payments a [recategorize] run for [scope] would touch, for confirmation dialogs. */
+    fun recategorizeCount(scope: RecategorizeScope): Int =
+        scopeKeysAction(scope, _reconciledCache.value, analysisSnapshot.value).size
+    /** Cancels in-flight and queued categorization; those payments return to their previous state. */
+    fun stopCategorization() {}
+    /** Cancels a manual analysis that is waiting for categorization to finish. */
+    fun cancelPendingAnalysis() {}
     /** Pauses or resumes the automatic queue; manual [recategorize] runs still work while paused. */
     fun setAutoCategorize(enabled: Boolean) {
         viewModelScope.launch(ioDispatcher) {

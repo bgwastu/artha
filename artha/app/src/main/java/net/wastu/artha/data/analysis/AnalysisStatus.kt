@@ -31,7 +31,26 @@ data class CategoryProgress(
     val paused: Boolean = false,
     /** Payment keys in a request right now, for per-payment spinners. */
     val activeKeys: Set<String> = emptySet(),
+    /** Payment keys waiting their turn in a run. */
+    val queuedKeys: Set<String> = emptySet(),
+    /** The user pressed Stop; cleared by Retry, a manual run, or the next new payment. */
+    val stopped: Boolean = false,
 )
+
+/** Per-payment lock while AI categorization owns it: editing that payment is disabled. */
+enum class PaymentCategoryState { IDLE, QUEUED, CATEGORIZING }
+
+fun paymentCategoryState(key: String, progress: CategoryProgress): PaymentCategoryState = when (key) {
+    in progress.activeKeys -> PaymentCategoryState.CATEGORIZING
+    in progress.queuedKeys -> PaymentCategoryState.QUEUED
+    else -> PaymentCategoryState.IDLE
+}
+
+fun paymentCategoryStateLabel(state: PaymentCategoryState): String? = when (state) {
+    PaymentCategoryState.IDLE -> null
+    PaymentCategoryState.QUEUED -> "Queued"
+    PaymentCategoryState.CATEGORIZING -> "Categorizing"
+}
 
 /** Where a payment's category came from, for the transaction detail. */
 enum class CategorySource { MANUAL, AI, MERCHANT, REVIEW, FAILED, PENDING, NONE }
