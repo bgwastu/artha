@@ -46,6 +46,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.ColorFilter
@@ -329,37 +330,27 @@ private fun DonutChart(
                     if (rawSweep >= 12f || selected == index) {
                         val percent = "${slice.amountMinor * 100 / total}%"
                         val label = if (selected == index) "${slice.name} $percent" else percent
-                        val ringEdge = center + dir * outerRadius
-                        val tickEnd = center + dir * (outerRadius + 8.dp.toPx())
-                        drawLine(
-                            color = tickColor,
-                            start = ringEdge,
-                            end = tickEnd,
-                            strokeWidth = 1.5.dp.toPx(),
+                        val clearance = outerRadius + 22f.dp.toPx()
+                        val anchor = Offset(
+                            center.x + dir.x * clearance,
+                            center.y + dir.y * clearance,
                         )
-                        val textX = center.x + dir.x * (outerRadius + 14.dp.toPx())
-                        val textY = center.y + dir.y * (outerRadius + 14.dp.toPx())
-                        val align = when {
-                            dir.x > 0.35f -> android.graphics.Paint.Align.LEFT
-                            dir.x < -0.35f -> android.graphics.Paint.Align.RIGHT
-                            else -> android.graphics.Paint.Align.CENTER
-                        }
-                        percentPaint.textAlign = align
-                        percentPaint.color = labelTextColor.toArgb()
+                        percentPaint.typeface = android.graphics.Typeface.create(
+                            android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD,
+                        )
+                        // Label keeps the slice hue but flips lightness for the theme:
+                        // dark ink on a light surface, light ink on a dark one.
+                        val hsv = floatArrayOf(0f, 0f, 0f)
+                        android.graphics.Color.colorToHSV(slice.color.toArgb(), hsv)
+                        hsv[2] = if (colors.surface.luminance() > 0.5f) 0.40f else 0.78f
+                        percentPaint.color = Color(android.graphics.Color.HSVToColor(hsv)).toArgb()
                         percentPaint.textSize = labelPx
-                        var drawX = textX
                         val textWidth = percentPaint.measureText(label)
-                        when (align) {
-                            android.graphics.Paint.Align.LEFT -> drawX = min(textX, size.width - textWidth - 8f)
-                            android.graphics.Paint.Align.CENTER -> {
-                                drawX = textX - textWidth / 2f
-                                drawX = drawX.coerceIn(8f, size.width - textWidth - 8f).coerceAtLeast(8f)
-                            }
-                            else -> drawX = maxOf(textX, textWidth + 8f)
-                        }
-                        drawContext.canvas.nativeCanvas.drawText(
-                            label, drawX, textY + labelPx * 0.35f, percentPaint,
-                        )
+                        val drawX = (anchor.x - textWidth / 2f)
+                            .coerceIn(8f, (size.width - textWidth - 8f).coerceAtLeast(8f))
+                        val fm = percentPaint.fontMetrics
+                        val baseline = anchor.y - (fm.ascent + fm.descent) / 2f
+                        drawContext.canvas.nativeCanvas.drawText(label, drawX, baseline, percentPaint)
                     }
                     startDegrees += rawSweep
                 }
