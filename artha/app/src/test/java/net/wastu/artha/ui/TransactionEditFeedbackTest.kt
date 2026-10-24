@@ -326,28 +326,9 @@ class TransactionEditFeedbackTest {
         assertFalse(state.saving)
     }
 
-    @Test fun researchAnalysisPreservesOldSavedResultsAndFailedCommitKeepsPreviousResults() {
-        val prefs = FixturePreferences()
-        val store = AnalysisStore(prefs.context)
-        assertTrue(store.commitMonthSummary("2026-10:3m", "Three months", "three", store.snapshot.value))
-        assertTrue(store.commitMonthSummary("2026-10:research", "Research", "research", store.snapshot.value))
-        val previous = store.snapshot.value
-        prefs.updateMemoryOnFailure = true
-        prefs.commitSucceeds = false
-        assertTrue(runCatching { store.commitMonthSummary("2026-10:research", "Unsaved", "new", previous) }.isFailure)
-        assertEquals(previous, store.snapshot.value)
-        assertEquals(previous.monthlySummaries, AnalysisStore(prefs.context).snapshot.value.monthlySummaries)
-        assertEquals("Three months", previous.monthlySummaries["2026-10:3m"])
-        assertEquals("Research", previous.monthlySummaries["2026-10:research"])
-    }
 
-    @Test fun researchCannotSaveOverChangedSelectedMonthContext() {
-        val prefs = FixturePreferences(mapOf("monthly_notes" to "{\"2026-10\":\"New context\"}"))
-        val store = AnalysisStore(prefs.context)
-        val obsolete = store.snapshot.value.copy(monthlyNotes = mapOf("2026-10" to "Old context"))
-        assertFalse(store.commitMonthSummary("2026-10:research", "Obsolete", "fingerprint", obsolete))
-        assertTrue(store.snapshot.value.monthlySummaries.isEmpty())
-    }
+
+
 
     private fun payment() = UnifiedTransaction(
         Provider.JAGO, "fictional-payment", Direction.DEBIT, Money(10000), Instant.EPOCH, "Fictional payment", "{}",

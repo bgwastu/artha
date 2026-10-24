@@ -11,7 +11,6 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.YearMonth
 import java.time.DayOfWeek
-import net.wastu.artha.data.analysis.analysisKey
 import net.wastu.artha.data.analysis.BudgetAnalyzer
 
 internal fun demoModel(dispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default): ArthaViewModel {
@@ -22,7 +21,7 @@ internal fun demoModel(dispatcher: kotlinx.coroutines.CoroutineDispatcher = kotl
         clock = Clock.fixed(Instant.parse("2026-10-14T05:00:00Z"), ZoneOffset.UTC),
         computationDispatcher = dispatcher,
         spendingState = MutableStateFlow(SpendingState.Ready(rows, rows.groupingBy { it.provider }.eachCount())),
-        initialSnapshot = AnalysisSnapshot(analysisEnabled = true, monthlySummaries = sampleAnalyses(rows)),
+        initialSnapshot = AnalysisSnapshot(analysisEnabled = true),
     )
 }
 
@@ -92,23 +91,3 @@ internal fun samplePayments(): List<UnifiedTransaction> {
     return (current + history).sortedByDescending { it.occurredAt }
 }
 
-/** Saved examples, never generated from personal data or sent to an AI provider. */
-private fun sampleAnalyses(rows: List<UnifiedTransaction>): Map<String, String> = buildMap {
-    var month = YearMonth.of(2023, 1)
-    while (month <= YearMonth.of(2026, 10)) {
-        val text = if (month == YearMonth.of(2026, 10)) {
-            "- Headphones are the largest purchase this month; groceries are the next biggest category.\n" +
-            "- October is still in progress, so its total cannot be compared directly with a full month.\n" +
-            "- Internet, rent and subscriptions recur across the saved history.\n\n### Recommendations\n" +
-            "- Space out other large purchases after the headphones.\n" +
-            "- Review the next grocery shop before adding another delivery."
-        } else {
-            val largest = BudgetAnalyzer.analyzeMonth(month, rows).categories.first().category
-            "- $largest is the largest recorded spending category.\n" +
-            "- Rent, internet and subscriptions recur in the recorded history.\n\n### Recommendations\n" +
-            "- Review recurring subscriptions before the next renewal."
-        }
-        put(analysisKey(month), text)
-        month = month.plusMonths(1)
-    }
-}

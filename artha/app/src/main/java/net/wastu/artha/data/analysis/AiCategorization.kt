@@ -32,7 +32,7 @@ object AiCategorization {
         if (rows.isNotEmpty()) lastKnownRows = rows
     }
 
-    /** UI decoration and commentary updates must not cancel a category request. */
+    /** UI decoration updates must not cancel a category request. */
     fun requestSnapshot(snapshot: AnalysisSnapshot): AnalysisSnapshot = snapshot.copy(
         monthlySummaries = emptyMap(), categoryIcons = emptyMap(), monthlyNotes = emptyMap(),
         deletedCategories = emptyMap(), analysisFingerprints = emptyMap(),
@@ -295,7 +295,7 @@ object AiCategorization {
         """.trimIndent()
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", instructions))
             .put(JSONObject().put("role", "user").put("content", requestData(snapshot, candidates, rows).toString()))
-        val result = AiAnalysisService.chat(config, messages, readTimeoutMs = 150_000).getString("content")
+        val result = AiClient.chat(config, messages, readTimeoutMs = 150_000).getString("content")
         return parse(result, candidates, categories(snapshot))
     }
 }

@@ -78,159 +78,11 @@ class ViewModelBehaviorTest {
     @Before fun setUp() { Dispatchers.setMain(dispatcher) }
     @After fun tearDown() { Dispatchers.resetMain() }
 
-    @Test
-    fun analysisNeverAutoStartsOnForegroundOrDataChange() = runTest(dispatcher) {
-        val prefs = FixturePreferences(configuredPrefs())
-        val store = AnalysisStore(prefs.context)
-        val p1 = testPayment("p1")
-        val state = MutableStateFlow(readySpending(listOf(p1)))
 
-        val analysisCalls = AtomicInteger(0)
-        val model = ArthaViewModel(
-            RootAccess { true },
-            { ledger },
-            clock = fixedClock,
-            analysisStore = store,
-            computationDispatcher = dispatcher,
-            ioDispatcher = dispatcher,
-            spendingState = state,
-            categorize = { _, _, batch ->
-                batch.associate { it.transaction.key to CategorySuggestion("Groceries", "Food") }
-            },
-            analyzeMonthAction = { _, _, _, _, _, _, _ ->
-                analysisCalls.incrementAndGet()
-                MonthAnalysisResult("Summary")
-            },
-        )
 
-        // 1. Foreground does not start analysis
-        model.enterForeground()
-        advanceUntilIdle()
-        assertEquals(0, analysisCalls.get())
-        assertEquals(MonthAnalysisStatus.NeverRun, model.analysisStatus.value)
 
-        // 2. Data change (new payments arrive) does not start analysis
-        val p2 = testPayment("p2")
-        state.value = readySpending(listOf(p1, p2))
-        advanceUntilIdle()
-        assertEquals(0, analysisCalls.get())
-        assertEquals(MonthAnalysisStatus.NeverRun, model.analysisStatus.value)
 
-        // 3. User note change does not start analysis
-        store.setUserNote(p1.key, "New note")
-        advanceUntilIdle()
-        assertEquals(0, analysisCalls.get())
 
-        // 4. Manual analysis start runs
-        model.analyzeMonth(currentMonth, forceReanalyze = true)
-        advanceUntilIdle()
-        assertEquals(1, analysisCalls.get())
-        assertTrue(model.analysisStatus.value is MonthAnalysisStatus.UpToDate)
-
-        model.lock()
-    }
-
-    @Test
-    fun manualAnalysisWaitsForInMonthCategorizationThenStarts() = runTest(dispatcher) {
-        val prefs = FixturePreferences(configuredPrefs())
-        val store = AnalysisStore(prefs.context)
-        val p1 = testPayment("p1")
-        val state = MutableStateFlow(readySpending(listOf(p1)))
-
-        val categoryGate = CompletableDeferred<Unit>()
-        val analysisCalls = AtomicInteger(0)
-
-        val model = ArthaViewModel(
-            RootAccess { true },
-            { ledger },
-            clock = fixedClock,
-            analysisStore = store,
-            computationDispatcher = dispatcher,
-            ioDispatcher = dispatcher,
-            spendingState = state,
-            categorize = { _, _, batch ->
-                categoryGate.await()
-                batch.associate { it.transaction.key to CategorySuggestion("Groceries", "AI suggestion: Food") }
-            },
-            analyzeMonthAction = { _, _, _, _, _, _, _ ->
-                analysisCalls.incrementAndGet()
-                MonthAnalysisResult("October summary")
-            },
-        )
-
-        model.enterForeground()
-        // Wait until categorization is active/in flight for p1
-        model.categoryProgress.first { it.activeKeys.contains(p1.key) }
-
-        // User taps analyze while p1 in October is categorizing
-        model.analyzeMonth(currentMonth, forceReanalyze = true)
-        advanceUntilIdle()
-
-        // Analysis status should be Waiting(CATEGORIES)
-        assertEquals(MonthAnalysisStatus.Waiting(AnalysisWait.CATEGORIES), model.analysisStatus.value)
-        assertEquals(0, analysisCalls.get())
-
-        // Finish categorization
-        categoryGate.complete(Unit)
-        advanceUntilIdle()
-
-        // Once categorization completes, analysis runs automatically
-        assertEquals(1, analysisCalls.get())
-        assertTrue(model.analysisStatus.value is MonthAnalysisStatus.UpToDate)
-
-        model.lock()
-    }
-
-    @Test
-    fun cancelPendingAnalysisRevertsStatusAndPreventsAutoStart() = runTest(dispatcher) {
-        val prefs = FixturePreferences(configuredPrefs())
-        val store = AnalysisStore(prefs.context)
-        val p1 = testPayment("p1")
-        val state = MutableStateFlow(readySpending(listOf(p1)))
-
-        val categoryGate = CompletableDeferred<Unit>()
-        val analysisCalls = AtomicInteger(0)
-
-        val model = ArthaViewModel(
-            RootAccess { true },
-            { ledger },
-            clock = fixedClock,
-            analysisStore = store,
-            computationDispatcher = dispatcher,
-            ioDispatcher = dispatcher,
-            spendingState = state,
-            categorize = { _, _, batch ->
-                categoryGate.await()
-                batch.associate { it.transaction.key to CategorySuggestion("Groceries", "AI suggestion: Food") }
-            },
-            analyzeMonthAction = { _, _, _, _, _, _, _ ->
-                analysisCalls.incrementAndGet()
-                MonthAnalysisResult("October summary")
-            },
-        )
-
-        model.enterForeground()
-        model.categoryProgress.first { it.activeKeys.contains(p1.key) }
-
-        model.analyzeMonth(currentMonth, forceReanalyze = true)
-        advanceUntilIdle()
-        assertEquals(MonthAnalysisStatus.Waiting(AnalysisWait.CATEGORIES), model.analysisStatus.value)
-
-        // Cancel the wait
-        model.cancelPendingAnalysis()
-        advanceUntilIdle()
-        assertEquals(MonthAnalysisStatus.NeverRun, model.analysisStatus.value)
-
-        // Complete categorization
-        categoryGate.complete(Unit)
-        advanceUntilIdle()
-
-        // Analysis was cancelled, so it does NOT auto-start
-        assertEquals(0, analysisCalls.get())
-        assertEquals(MonthAnalysisStatus.NeverRun, model.analysisStatus.value)
-
-        model.lock()
-    }
 
     @Test
     fun automaticCategorizationIgnoresOldMonthsAndAlreadyCategorizedPayments() = runTest(dispatcher) {
@@ -325,11 +177,6 @@ class ViewModelBehaviorTest {
 
         // 3. Edit custom categories
         store.addCustomCategory("Special Category")
-        advanceUntilIdle()
-        assertEquals(0, categorizeCalls.get())
-
-        // 4. Edit monthly note
-        store.setMonthlyNote(currentMonth.toString(), "Monthly note context")
         advanceUntilIdle()
         assertEquals(0, categorizeCalls.get())
 

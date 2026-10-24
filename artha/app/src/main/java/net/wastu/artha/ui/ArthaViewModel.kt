@@ -58,17 +58,6 @@ class ArthaViewModel(
     private val scopeKeysAction: (RecategorizeScope, List<UnifiedTransaction>, AnalysisSnapshot) -> Set<String> = AiCategorization::scopeKeys,
     private val needsReviewAction: (UnifiedTransaction, AnalysisSnapshot) -> Boolean = ::needsReview,
     private val merchantKeyProvider: (UnifiedTransaction) -> String? = ::merchantKey,
-    private val analyzeMonthAction: suspend (
-        config: AiConfig,
-        knowledge: String,
-        monthLabel: String,
-        transactions: List<UnifiedTransaction>,
-        availableCategories: List<String>,
-        monthlyUserNote: String,
-        onProgress: (AnalysisStage) -> Unit,
-    ) -> MonthAnalysisResult = { config, knowledge, monthLabel, transactions, availableCategories, monthlyUserNote, onProgress ->
-        AiAnalysisService.analyzeMonth(config, knowledge, monthLabel, transactions, availableCategories, monthlyUserNote, onProgress)
-    },
     initialSnapshot: AnalysisSnapshot = AnalysisSnapshot(),
 ) : ViewModel() {
     private val _rootGate = MutableStateFlow(RootGateState.LOCKED)
@@ -97,46 +86,12 @@ class ArthaViewModel(
     val allTransactions = _reconciledCache.asStateFlow()
     private val _monthAnalysis = MutableStateFlow(BudgetAnalyzer.analyzeMonth(_selectedMonth.value, emptyList()))
     val monthAnalysis = _monthAnalysis.asStateFlow()
-    private val _analyzingMonths = MutableStateFlow<Set<YearMonth>>(emptySet())
-    val analyzingMonths = _analyzingMonths.asStateFlow()
-    private val _analysisErrors = MutableStateFlow<Map<YearMonth, String>>(emptyMap())
-    val analysisErrors = _analysisErrors.asStateFlow()
     private val _settingsError = MutableStateFlow<String?>(null)
     val settingsError = _settingsError.asStateFlow()
-    private val _analysisStages = MutableStateFlow<Map<YearMonth, AnalysisStage>>(emptyMap())
-    val analysisStages = _analysisStages.asStateFlow()
-    /** Status of the selected month's AI commentary; the single source for every analysis status line. */
-    private val _analysisStatus = MutableStateFlow<MonthAnalysisStatus>(MonthAnalysisStatus.NeverRun)
-    val analysisStatus = _analysisStatus.asStateFlow()
     private val _categoryProgress = MutableStateFlow(CategoryProgress())
     val categoryProgress = _categoryProgress.asStateFlow()
-    private val _waitingAnalysisMonths = MutableStateFlow<Set<YearMonth>>(emptySet())
-    private val _discardedMonths = MutableStateFlow<Set<YearMonth>>(emptySet())
     private val pendingAutomaticKeys = mutableSetOf<String>()
     private var stopped = false
-    private val monthJobs = mutableMapOf<YearMonth, Job>()
-    private val fallbackFailures = MutableStateFlow<Map<String, AnalysisFailure>>(emptyMap())
-    private val analysisFailures: StateFlow<Map<String, AnalysisFailure>> =
-        analysisStore?.analysisFailures ?: fallbackFailures.asStateFlow()
-
-    private fun recordAnalysisFailure(key: String, message: String, fingerprint: String) {
-        val store = analysisStore
-        if (store != null) {
-            store.recordAnalysisFailure(key, message, fingerprint)
-        } else {
-            val now = System.currentTimeMillis()
-            fallbackFailures.update { it + (key to AnalysisFailure(message, now, fingerprint)) }
-        }
-    }
-
-    private fun clearAnalysisFailure(key: String) {
-        val store = analysisStore
-        if (store != null) {
-            store.clearAnalysisFailure(key)
-        } else {
-            fallbackFailures.update { it - key }
-        }
-    }
     private val _refreshing = MutableStateFlow(false)
     val refreshing = _refreshing.asStateFlow()
     private val _automaticImportActive = MutableStateFlow(false)
@@ -220,67 +175,7 @@ class ArthaViewModel(
                     }.flowOn(computationDispatcher).collect { _ledgerState.value = it }
                 }
                 launch(computationDispatcher) {
-                    combine(_reconciledCache, _selectedMonth, analysisSnapshot.map { it.monthlySummaries }.distinctUntilChanged()) { rows, month, summaries ->
-                        BudgetAnalyzer.analyzeMonth(month, rows, summaries[analysisKey(month)])
-                    }.collect { if (it.month == _selectedMonth.value) _monthAnalysis.value = it }
-                }
-                launch(computationDispatcher) {
-                    combine(
-                        combine(_reconciledCache, _selectedMonth, analysisSnapshot) { rows, month, snapshot ->
-                            AnalysisStatusData(rows, month, snapshot)
-                        },
-                        combine(_analyzingMonths, _analysisStages, analysisFailures) { running, stages, failures ->
-                            AnalysisStatusExecution(running, stages, failures)
-                        },
-                        combine(_waitingAnalysisMonths, _discardedMonths) { waitingMonths, discardedMonths ->
-                            waitingMonths to discardedMonths
-                        }
-                    ) { data, exec, (waitingMonths, discardedMonths) ->
-                        val month = data.month
-                        val snapshot = data.snapshot
-                        val rows = data.rows
-                        val key = analysisKey(month)
-                        val config = snapshot.aiConfig
-                        val configured = config.baseUrl.isNotBlank() && config.model.isNotBlank() && config.apiKey.isNotBlank()
-                        // Hashing every spending row is wasted work while analysis is off or unconfigured.
-                        if (!snapshot.analysisEnabled) return@combine MonthAnalysisStatus.Off
-                        if (!configured) return@combine MonthAnalysisStatus.NotConfigured
-                        val hasSpending = rows.any {
-                            YearMonth.from(it.occurredAt.atZone(AccountingTime.zone)) <= month && BudgetAnalyzer.isSpending(it)
-                        }
-                        val summary = snapshot.monthlySummaries[key]
-                        val hasSummary = !summary.isNullOrBlank()
-                        val savedAt = snapshot.updatedAt["monthSummary:$key"]
-                        val currentFp = fingerprint(month, rows, snapshot)
-                        val upToDate = snapshot.analysisFingerprints[key] == currentFp
-                        val running = month in exec.running
-                        val stage = exec.stages[month]
-                        val waiting = if (month in waitingMonths) AnalysisWait.CATEGORIES else null
-                        val failureEntry = exec.failures[key]
-                        val failure = if (failureEntry != null && failureEntry.fingerprint == currentFp) {
-                            failureEntry.message to failureEntry.at
-                        } else null
-
-                        val status = monthAnalysisStatus(
-                            enabled = snapshot.analysisEnabled,
-                            configured = configured,
-                            hasSpending = hasSpending,
-                            hasSummary = hasSummary,
-                            savedAt = savedAt,
-                            upToDate = upToDate && (waiting == null),
-                            running = running,
-                            stage = stage,
-                            waiting = waiting,
-                            failure = failure,
-                        )
-                        if (month in discardedMonths && (status is MonthAnalysisStatus.NeverRun || status is MonthAnalysisStatus.UpToDate)) {
-                            MonthAnalysisStatus.Outdated(savedAt)
-                        } else {
-                            status
-                        }
-                    }.distinctUntilChanged().collect {
-                        _analysisStatus.value = it
-                    }
+                    combine(_reconciledCache, _selectedMonth) { rows, month -> BudgetAnalyzer.analyzeMonth(month, rows) }.collect { if (it.month == _selectedMonth.value) _monthAnalysis.value = it }
                 }
             }
         }
@@ -317,25 +212,6 @@ class ArthaViewModel(
 
     private fun isCurrentMonth(tx: UnifiedTransaction): Boolean =
         YearMonth.from(tx.occurredAt.atZone(AccountingTime.zone)) == currentMonth()
-
-    private fun isCategorizationActiveForMonth(month: YearMonth): Boolean {
-        val keysInMonth = _reconciledCache.value.filter {
-            YearMonth.from(it.occurredAt.atZone(AccountingTime.zone)) == month
-        }.map { it.key }.toSet()
-        val activeOrQueued = inFlightKeys + manualQueue.map { it.key } + pendingAutomaticKeys
-        return keysInMonth.any { it in activeOrQueued }
-    }
-
-    private fun checkWaitingAnalysis() {
-        val waiting = _waitingAnalysisMonths.value
-        if (waiting.isEmpty()) return
-        for (m in waiting) {
-            if (!isCategorizationActiveForMonth(m)) {
-                _waitingAnalysisMonths.update { it - m }
-                analyzeMonth(m, forceReanalyze = true, debounceMs = 0)
-            }
-        }
-    }
 
     private fun observeAutomaticCategories() {
         val store = analysisStore ?: return
@@ -661,7 +537,6 @@ class ArthaViewModel(
             )
             _categoryProgress.value = progress
             _categoryAutomation.value = CategoryAutomationState.ERROR
-            checkWaitingAnalysis()
             return
         }
 
@@ -686,7 +561,6 @@ class ArthaViewModel(
         )
         _categoryProgress.value = progress
         _categoryAutomation.value = state
-        checkWaitingAnalysis()
     }
 
     /** Runs AI categorization for [scope] now, ahead of the automatic queue and regardless of failure back-off. */
@@ -736,11 +610,6 @@ class ArthaViewModel(
         stopped = true
         CategoryActivity.publish(emptySet())
         updateCategoryProgress(analysisSnapshot.value)
-        checkWaitingAnalysis()
-    }
-    /** Cancels a manual analysis that is waiting for categorization to finish. */
-    fun cancelPendingAnalysis() {
-        _waitingAnalysisMonths.value = emptySet()
     }
     /** Pauses or resumes the automatic queue; manual [recategorize] runs still work while paused. */
     fun setAutoCategorize(enabled: Boolean) {
@@ -938,12 +807,11 @@ class ArthaViewModel(
         }
     }
     fun lock() {
-        stopForegroundImports(); observerJob?.cancel(); categorizationJob?.cancel(); monthJobs.values.forEach(Job::cancel); monthJobs.clear()
+        stopForegroundImports(); observerJob?.cancel(); categorizationJob?.cancel();
         for ((job, _) in activeBatchJobs.toList()) job.cancel()
         activeBatchJobs.clear(); inFlightKeys.clear(); backedOffKeys.clear()
         for ((_, job) in backoffJobs) job.cancel(); backoffJobs.clear()
         manualQueue.clear(); replaceManualKeys.clear(); pendingAutomaticKeys.clear()
-        _waitingAnalysisMonths.value = emptySet(); _discardedMonths.value = emptySet()
         stopped = false
         CategoryActivity.publish(emptySet())
         _rootGate.value = RootGateState.LOCKED; _ledgerState.value = LedgerState.Loading
@@ -1007,88 +875,4 @@ class ArthaViewModel(
     fun removeCustomCategory(category: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.removeCustomCategory(category) } }
     fun resetCategoriesToDefault() { viewModelScope.launch(Dispatchers.IO) { analysisStore?.resetCategoriesToDefault() } }
     fun setCategoryIcon(category: String, iconKey: String?) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setCategoryIcon(category, iconKey) } }
-    fun setMonthlyNote(month: String, note: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setMonthlyNote(month, note) } }
-
-    internal fun fingerprint(month: YearMonth, rows: List<UnifiedTransaction>, snapshot: AnalysisSnapshot): String =
-        BudgetAnalyzer.computeMonthFingerprint(
-            rows.filter {
-                YearMonth.from(it.occurredAt.atZone(AccountingTime.zone)) <= month &&
-                    BudgetAnalyzer.isSpending(it)
-            },
-            snapshot.monthlyNotes[month.toString()].orEmpty(),
-            snapshot.knowledge + "\nresearch-v7\n${snapshot.aiConfig.baseUrl}\n${snapshot.aiConfig.model}",
-            snapshot.customCategories,
-        )
-
-    fun analyzeMonth(month: YearMonth, forceReanalyze: Boolean = false, debounceMs: Long = 600, allowRetry: Boolean = true) {
-        if (!forceReanalyze) return
-        if (!analysisSnapshot.value.analysisEnabled) return
-        val config = analysisSnapshot.value.aiConfig
-        if (analysisStore == null || config.baseUrl.isBlank() || config.model.isBlank() || config.apiKey.isBlank()) return
-        if (isCategorizationActiveForMonth(month)) {
-            _waitingAnalysisMonths.update { it + month }
-            return
-        }
-        _waitingAnalysisMonths.update { it - month }
-        monthJobs[month]?.cancel()
-        val key = analysisKey(month)
-        val job = viewModelScope.launch {
-            try {
-                if (debounceMs > 0) delay(debounceMs)
-                val snapshot = analysisSnapshot.value
-                val rows = _reconciledCache.value
-                if (withContext(computationDispatcher) { rows.none { YearMonth.from(it.occurredAt.atZone(AccountingTime.zone)) <= month && BudgetAnalyzer.isSpending(it) } }) return@launch
-                val fp = withContext(computationDispatcher) { fingerprint(month, rows, snapshot) }
-                _analyzingMonths.update { it + month }; _analysisErrors.update { it - month }
-                try {
-                    val result = analyzeMonthAction(snapshot.aiConfig, snapshot.knowledge, month.toString(), rows,
-                        snapshot.customCategories, snapshot.monthlyNotes[month.toString()].orEmpty()) { stage ->
-                        _analysisStages.update { it + (month to stage) }
-                    }
-                    ensureActive()
-                    if (withContext(computationDispatcher) { fingerprint(month, _reconciledCache.value, analysisSnapshot.value) } != fp) {
-                        _discardedMonths.update { it + month }
-                        return@launch
-                    }
-                    _analysisStages.update { it + (month to AnalysisStage.SAVING) }
-                    val committed = withContext(ioDispatcher) { analysisStore.commitMonthSummary(key, result.monthlySummary, fp, snapshot) }
-                    if (!committed) {
-                        _discardedMonths.update { it + month }
-                        return@launch
-                    }
-                    _discardedMonths.update { it - month }
-                    clearAnalysisFailure(key)
-                } catch (timeout: TimeoutCancellationException) {
-                    val msg = "Analysis timed out. Try again"
-                    recordAnalysisFailure(key, msg, fp)
-                    _analysisErrors.update { it + (month to msg) }
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (e: Exception) {
-                    val msg = aiConnectionFailure(e)
-                    recordAnalysisFailure(key, msg, fp)
-                    _analysisErrors.update { it + (month to msg) }
-                }
-            } finally {
-                if (monthJobs[month] === coroutineContext[Job]) {
-                    monthJobs.remove(month); _analyzingMonths.update { it - month }; _analysisStages.update { it - month }
-                }
-            }
-        }
-        monthJobs[month] = job
-    }
-
-    fun analyzeCurrentMonth() { analyzeMonth(_selectedMonth.value, forceReanalyze = true) }
 }
-
-private data class AnalysisStatusData(
-    val rows: List<UnifiedTransaction>,
-    val month: YearMonth,
-    val snapshot: AnalysisSnapshot,
-)
-
-private data class AnalysisStatusExecution(
-    val running: Set<YearMonth>,
-    val stages: Map<YearMonth, AnalysisStage>,
-    val failures: Map<String, AnalysisFailure>,
-)
-

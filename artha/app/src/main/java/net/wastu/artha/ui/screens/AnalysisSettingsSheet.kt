@@ -49,7 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import net.wastu.artha.data.analysis.AiAnalysisService
+import net.wastu.artha.data.analysis.AiClient
 import net.wastu.artha.data.analysis.AiConfig
 import net.wastu.artha.data.analysis.CategoryAutomationState
 import net.wastu.artha.data.analysis.CategoryProgress
@@ -184,7 +184,7 @@ fun AnalysisSettingsSheet(
                                         testing = true
                                         scope.launch {
                                             try {
-                                                AiAnalysisService.testConnection(config)
+                                                AiClient.testConnection(config)
                                                 testSucceeded = true
                                                 testResult = "Connected"
                                             } catch (cancelled: CancellationException) {

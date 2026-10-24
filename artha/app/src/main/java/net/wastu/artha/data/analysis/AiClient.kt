@@ -3,17 +3,12 @@ package net.wastu.artha.data.analysis
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
-import java.time.LocalDate
-import java.time.YearMonth
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.*
-import net.wastu.artha.core.model.AccountingTime
-import net.wastu.artha.core.model.UnifiedTransaction
 import org.json.JSONArray
 import org.json.JSONObject
 
-data class MonthAnalysisResult(val monthlySummary: String)
 internal class AiHttpException(val status: Int) : java.io.IOException("AI service returned HTTP $status")
 internal class EmptyAiResponseException : IllegalStateException()
 
@@ -33,12 +28,12 @@ internal fun aiConnectionFailure(error: Exception): String = when (error) {
 
 internal fun aiConfigValidation(config: AiConfig): String? = when {
     config.baseUrl.isBlank() || config.apiKey.isBlank() || config.model.isBlank() -> "Enter the URL, API key and model"
-    runCatching { AiAnalysisService.endpoint(config.baseUrl) }.isFailure -> "Enter a valid provider URL"
+    runCatching { AiClient.endpoint(config.baseUrl) }.isFailure -> "Enter a valid provider URL"
     else -> null
 }
 
-/** AI commentary consumes authoritative totals and cannot change ledger facts or categories. */
-object AiAnalysisService {
+/** OpenAI-compatible chat client shared by categorization and the connection test. */
+object AiClient {
     private val disconnectScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** Exercises generation with the draft configuration; no ledger, notes or settings are sent or saved. */
@@ -60,52 +55,6 @@ object AiAnalysisService {
         }
     }
 
-    fun parseCommentary(raw: String): MonthAnalysisResult {
-        val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-        val json = try { JSONObject(cleaned) } catch (_: Exception) { error("AI returned invalid JSON. Your previous commentary is kept.") }
-        fun items(name: String, maximum: Int): List<String> {
-            val array = json.opt(name) as? JSONArray ?: error("AI returned invalid $name.")
-            require(array.length() <= maximum) { "AI returned too many $name." }
-            return (0 until array.length()).map { index ->
-                val value = (array.opt(index) as? String)?.trim() ?: error("AI returned invalid $name.")
-                val clean = value.replace(Regex("^(?:[-*+]\\s+|[0-9]+[.)]\\s+|[\\u2022\\u25cf]\\s*)"), "").trim()
-                require(clean.isNotEmpty() && clean.length <= 600 && !clean.contains('\n') && !clean.contains("\\n")) { "AI returned invalid $name." }
-                clean
-            }
-        }
-        if (json.has("findings")) {
-            val findings = items("findings", 3)
-            require(findings.isNotEmpty()) { "AI returned no findings." }
-            val recommendations = items("recommendations", 2)
-            return MonthAnalysisResult(buildString {
-                append(findings.joinToString("\n") { "- $it" })
-                if (recommendations.isNotEmpty()) {
-                    append("\n\n### Recommendations\n")
-                    append(recommendations.joinToString("\n") { "- $it" })
-                }
-            })
-        }
-        // Keep compatibility with saved responses from older app versions.
-        val summary = (json.opt("monthlySummary") as? String)?.trim() ?: error("AI returned an invalid analysis.")
-        require(summary.isNotEmpty() && summary.length <= 8000) { "AI returned an empty or oversized analysis." }
-        val recommendations = if (json.has("recommendations")) (json.opt("recommendations") as? String)?.trim()
-            ?: error("AI returned invalid recommendations.") else ""
-        require(recommendations.length <= 8000) { "AI recommendations are too long." }
-        return MonthAnalysisResult(if (recommendations.isEmpty()) summary else "$summary\n\n### Recommendations\n$recommendations")
-    }
-
-    suspend fun analyzeMonth(config: AiConfig, knowledge: String, monthLabel: String,
-        transactions: List<UnifiedTransaction>, availableCategories: List<String> = INITIAL_DEFAULT_CATEGORIES,
-        monthlyUserNote: String = "",
-        onProgress: (AnalysisStage) -> Unit = {},
-    ): MonthAnalysisResult = withTimeout(240_000) {
-        onProgress(AnalysisStage.COMPARING)
-        val agent = withContext(Dispatchers.Default) {
-            SpendingAnalysisAgent(YearMonth.parse(monthLabel), transactions, LocalDate.now(AccountingTime.clock))
-        }
-        agent.run(knowledge, monthlyUserNote, onProgress) { messages, tools, choice -> chat(config, messages, tools, choice, readTimeoutMs = 90_000) }
-    }
-
     internal suspend fun call(config: AiConfig, prompt: String): String =
         chat(config, JSONArray().put(JSONObject().put("role", "user").put("content", prompt))).getString("content")
 
@@ -114,7 +63,7 @@ object AiAnalysisService {
         val connection = URL(endpoint(config.baseUrl)).openConnection() as HttpURLConnection
         continuation.invokeOnCancellation { disconnectScope.launch { connection.disconnect() } }
         // HttpURLConnection may block inside disconnect on some runtimes. Keep transport
-        // work independent so cancellation immediately discards obsolete commentary.
+        // work independent so cancellation immediately discards obsolete replies.
         disconnectScope.launch {
             if (!continuation.isActive) { connection.disconnect(); return@launch }
             try {

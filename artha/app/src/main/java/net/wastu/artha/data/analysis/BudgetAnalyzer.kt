@@ -10,7 +10,6 @@ object BudgetAnalyzer {
     fun analyzeMonth(
         month: YearMonth,
         allTransactions: List<UnifiedTransaction>,
-        aiSummary: String? = null,
     ): MonthSpendingAnalysis {
         val zone = net.wastu.artha.core.model.AccountingTime.zone
         val currentMonthTxs = allTransactions.filter { YearMonth.from(it.occurredAt.atZone(zone)) == month }
@@ -55,7 +54,6 @@ object BudgetAnalyzer {
             previousMonthTotalMinor = prevTotal,
             totalDeltaPercent = totalDelta,
             categories = categoriesWithShare,
-            monthlyAiSummary = aiSummary,
             unsupportedCurrencyCount = currentMonthTxs.count { it.money.currencyCode != "IDR" },
         ).let { it.copy(localSummary = localSummary(it)) }
     }
@@ -89,20 +87,4 @@ object BudgetAnalyzer {
         return true // Accounting exclusion is source evidence, never an editable display category.
     }
 
-    fun computeMonthFingerprint(
-        monthTransactions: List<UnifiedTransaction>,
-        monthlyNote: String,
-        knowledge: String,
-        customCategories: List<String>,
-    ): String {
-        val md = java.security.MessageDigest.getInstance("SHA-256")
-        md.update("commentary-v4\n".toByteArray(Charsets.UTF_8))
-        md.update("note:${monthlyNote.trim()}\n".toByteArray(Charsets.UTF_8))
-        md.update("knowledge:${knowledge.trim()}\n".toByteArray(Charsets.UTF_8))
-        md.update("cats:${customCategories.sorted().joinToString(",")}\n".toByteArray(Charsets.UTF_8))
-        for (tx in monthTransactions.sortedBy { it.key }) {
-            md.update("${tx.key}:${tx.money.amountMinor}:${tx.money.currencyCode}:${tx.occurredAt}:${tx.description}:${tx.direction}:${tx.isConfirmed}:${tx.isReversal}:${tx.userNote.orEmpty()}:${tx.category.orEmpty()}\n".toByteArray(Charsets.UTF_8))
-        }
-        return md.digest().toLowerHex()
-    }
 }

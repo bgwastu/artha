@@ -19,7 +19,6 @@ data class MonthSpendingAnalysis(
     val previousMonthTotalMinor: Long,
     val totalDeltaPercent: Float?,
     val categories: List<CategorySpending>,
-    val monthlyAiSummary: String?,
     val unsupportedCurrencyCount: Int = 0,
     val localSummary: String = "",
 )

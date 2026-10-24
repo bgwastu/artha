@@ -14,11 +14,6 @@ data class AiConfig(
     val apiKey: String = "",
     val model: String = "",
 )
-data class AnalysisFailure(
-    val message: String,
-    val at: Long,
-    val fingerprint: String,
-)
 
 data class AnalysisSnapshot(
     val userNotes: Map<String, String> = emptyMap(),
@@ -74,8 +69,10 @@ class AnalysisStore(context: Context) {
     private val secret = StoredSecret(prefs, "artha_ai_config_key", "ai_api_key")
     private val _snapshot = MutableStateFlow(loadSnapshot())
     val snapshot: StateFlow<AnalysisSnapshot> = _snapshot.asStateFlow()
-    private val _analysisFailures = MutableStateFlow(loadAnalysisFailures())
-    val analysisFailures: StateFlow<Map<String, AnalysisFailure>> = _analysisFailures.asStateFlow()
+    init {
+        // Monthly AI analysis was removed; its run cache is not user data.
+        if (prefs.contains("analysis_failures")) prefs.edit { remove("analysis_failures") }
+    }
 
     private fun loadSnapshot(): AnalysisSnapshot {
         val notesJson = prefs.getString("user_notes", "{}") ?: "{}"
@@ -369,7 +366,7 @@ class AnalysisStore(context: Context) {
 
     @Synchronized
     fun setAiConfig(config: AiConfig) {
-        if (config.baseUrl.isNotBlank()) AiAnalysisService.endpoint(config.baseUrl)
+        if (config.baseUrl.isNotBlank()) AiClient.endpoint(config.baseUrl)
         val normalized = config.copy(baseUrl = config.baseUrl.trim(), model = config.model.trim(), apiKey = config.apiKey.trim())
         val now = System.currentTimeMillis()
         val currentUpdated = _snapshot.value.updatedAt.toMutableMap()
@@ -381,91 +378,6 @@ class AnalysisStore(context: Context) {
             putString("updated_at_map", JSONObject(currentUpdated as Map<*, *>).toString())
         }
         _snapshot.value = _snapshot.value.copy(aiConfig = normalized, updatedAt = currentUpdated)
-    }
-
-    @Synchronized
-    fun commitMonthSummary(month: String, summary: String, fingerprint: String, input: AnalysisSnapshot): Boolean {
-        val current = _snapshot.value
-        if (current.userNotes != input.userNotes || current.categories != input.categories || current.knowledge != input.knowledge ||
-            current.aiConfig != input.aiConfig || current.customCategories != input.customCategories ||
-            current.manualCategories != input.manualCategories || current.monthlyNotes[month.substringBefore(':')] != input.monthlyNotes[month.substringBefore(':')]) return false
-        val summaries = current.monthlySummaries + (month to summary)
-        val fingerprints = current.analysisFingerprints + (month to fingerprint)
-        val times = current.updatedAt + ("monthSummary:$month" to System.currentTimeMillis())
-        checkedPreferenceEdit(prefs, listOf("monthly_summaries", "analysis_fingerprints", "updated_at_map"), "Analysis could not be saved") {
-            putString("monthly_summaries", JSONObject(summaries as Map<*, *>).toString())
-            putString("analysis_fingerprints", JSONObject(fingerprints as Map<*, *>).toString())
-            putString("updated_at_map", JSONObject(times as Map<*, *>).toString())
-        }
-        _snapshot.value = current.copy(monthlySummaries = summaries, analysisFingerprints = fingerprints, updatedAt = times)
-        clearAnalysisFailure(month)
-        return true
-    }
-
-    @Synchronized
-    fun recordAnalysisFailure(key: String, message: String, fingerprint: String) {
-        val now = System.currentTimeMillis()
-        val current = _analysisFailures.value.toMutableMap()
-        current[key] = AnalysisFailure(message, now, fingerprint)
-        persistAnalysisFailures(current)
-        _analysisFailures.value = current
-    }
-
-    @Synchronized
-    fun clearAnalysisFailure(key: String) {
-        val current = _analysisFailures.value.toMutableMap()
-        if (current.remove(key) != null) {
-            persistAnalysisFailures(current)
-            _analysisFailures.value = current
-        }
-    }
-
-    private fun loadAnalysisFailures(): Map<String, AnalysisFailure> {
-        val json = prefs.getString("analysis_failures", "{}") ?: "{}"
-        val obj = runCatching { JSONObject(json) }.getOrNull() ?: return emptyMap()
-        val map = mutableMapOf<String, AnalysisFailure>()
-        val keys = obj.keys()
-        while (keys.hasNext()) {
-            val k = keys.next()
-            val entry = obj.optJSONObject(k) ?: continue
-            val message = entry.optString("message")
-            val at = entry.optLong("at", 0L)
-            val fingerprint = entry.optString("fingerprint")
-            if (message.isNotBlank() && fingerprint.isNotBlank()) {
-                map[k] = AnalysisFailure(message, at, fingerprint)
-            }
-        }
-        return map
-    }
-
-    private fun persistAnalysisFailures(failures: Map<String, AnalysisFailure>) {
-        val obj = JSONObject()
-        for ((k, v) in failures) {
-            val entry = JSONObject()
-            entry.put("message", v.message)
-            entry.put("at", v.at)
-            entry.put("fingerprint", v.fingerprint)
-            obj.put(k, entry)
-        }
-        prefs.edit { putString("analysis_failures", obj.toString()) }
-    }
-
-    @Synchronized
-    fun setMonthlyNote(month: String, note: String) {
-        val now = System.currentTimeMillis()
-        val current = _snapshot.value.monthlyNotes.toMutableMap()
-        val currentUpdated = _snapshot.value.updatedAt.toMutableMap()
-        if (note.isBlank()) {
-            current.remove(month)
-        } else {
-            current[month] = note.trim()
-        }
-        currentUpdated["monthNote:$month"] = now
-        prefs.edit {
-            putString("monthly_notes", JSONObject(current as Map<*, *>).toString())
-            putString("updated_at_map", JSONObject(currentUpdated as Map<*, *>).toString())
-        }
-        _snapshot.value = _snapshot.value.copy(monthlyNotes = current, updatedAt = currentUpdated)
     }
 
     @Synchronized

@@ -43,7 +43,6 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
-import net.wastu.artha.data.analysis.relativeTime
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Clear
@@ -116,11 +115,7 @@ import net.wastu.artha.ui.MarkdownText
 import net.wastu.artha.data.analysis.MonthSpendingAnalysis
 import kotlinx.coroutines.delay
 import net.wastu.artha.data.analysis.CategoryProgress
-import net.wastu.artha.data.analysis.MonthAnalysisStatus
-import net.wastu.artha.data.analysis.analysisActionLabel
-import net.wastu.artha.data.analysis.analysisStatusLabel
 import net.wastu.artha.data.analysis.categoryProgressLabel
-import net.wastu.artha.data.analysis.AnalysisWait
 import net.wastu.artha.data.analysis.recategorizeConfirmation
 import net.wastu.artha.ui.categoryIconFor
 import net.wastu.artha.ui.formatDate
@@ -146,12 +141,10 @@ fun AnalysisScreen(
     val savedTransactions by viewModel.allTransactions.collectAsStateWithLifecycle()
     val snapshot by viewModel.analysisSnapshot.collectAsStateWithLifecycle()
     val categoryAutomation by viewModel.categoryAutomation.collectAsStateWithLifecycle()
-    val analysisStatus by viewModel.analysisStatus.collectAsStateWithLifecycle()
     val categoryProgress by viewModel.categoryProgress.collectAsStateWithLifecycle()
     val selectedMonth by viewModel.selectedMonth.collectAsStateWithLifecycle()
     val analysisEnabled = snapshot.analysisEnabled
 
-    var showMonthlyNoteDialog by remember { mutableStateOf(false) }
     var showScopeDialog by remember { mutableStateOf(false) }
 
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -209,94 +202,11 @@ fun AnalysisScreen(
         item(key = "header_summary") {
             MonthSummaryCard(
                 month = selectedMonth, analysis = analysis, editable = viewModel.analysisStore != null,
-                monthlyNote = snapshot.monthlyNotes[selectedMonth.toString()],
-                onEditNote = { showMonthlyNoteDialog = true },
                 onOpenCategories = onOpenCategoriesSheet, onOpenScope = { showScopeDialog = true },
                 onOpenLargestPayment = largest?.let { { onOpenTransaction(it) } },
                 onPreviousMonth = { viewModel.setAnalysisMonth(selectedMonth.minusMonths(1)) },
                 onNextMonth = { viewModel.setAnalysisMonth(selectedMonth.plusMonths(1)) },
             )
-        }
-        val status = analysisStatus
-        val showInsights = status !is MonthAnalysisStatus.Off && status !is MonthAnalysisStatus.NoSpending
-        if (showInsights) {
-            item(key = "insights") {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 16.dp, bottom = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "Insights",
-                            style = MaterialTheme.typography.titleSmall,
-                            modifier = Modifier.semantics { heading() },
-                        )
-                        Spacer(Modifier.weight(1f))
-                        when (status) {
-                            is MonthAnalysisStatus.Running -> {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    strokeWidth = 2.dp,
-                                )
-                            }
-                            is MonthAnalysisStatus.Waiting -> {
-                                if (status.reason == AnalysisWait.CATEGORIES) {
-                                    TextButton(onClick = { viewModel.cancelPendingAnalysis() }) {
-                                        Text("Cancel")
-                                    }
-                                }
-                            }
-                            MonthAnalysisStatus.NotConfigured -> {
-                                TextButton(onClick = { viewModel.setTargetDestination("SETTINGS") }) {
-                                    Text("Set up")
-                                }
-                            }
-                            MonthAnalysisStatus.NeverRun -> {
-                                TextButton(onClick = { viewModel.analyzeMonth(selectedMonth, forceReanalyze = true) }) {
-                                    Text("Analyze")
-                                }
-                            }
-                            is MonthAnalysisStatus.UpToDate, is MonthAnalysisStatus.Outdated -> {
-                                TextButton(onClick = { viewModel.analyzeMonth(selectedMonth, forceReanalyze = true) }) {
-                                    Text("Re-analyze")
-                                }
-                            }
-                            is MonthAnalysisStatus.Failed -> {
-                                TextButton(onClick = { viewModel.analyzeMonth(selectedMonth, forceReanalyze = true) }) {
-                                    Text("Retry")
-                                }
-                            }
-                            MonthAnalysisStatus.Off, MonthAnalysisStatus.NoSpending -> Unit
-                        }
-                    }
-                    val statusLine: String? = when (status) {
-                        is MonthAnalysisStatus.Running -> status.stage?.label ?: "Preparing analysis"
-                        is MonthAnalysisStatus.Waiting -> "Waiting for categories"
-                        is MonthAnalysisStatus.UpToDate -> status.savedAt?.let { "Updated ${relativeTime(it, now)}" } ?: "Updated"
-                        is MonthAnalysisStatus.Outdated -> "Out of date"
-                        is MonthAnalysisStatus.Failed -> status.message
-                        MonthAnalysisStatus.NotConfigured -> "AI is not set up"
-                        MonthAnalysisStatus.NeverRun, MonthAnalysisStatus.Off, MonthAnalysisStatus.NoSpending -> null
-                    }
-                    if (statusLine != null) {
-                        Text(
-                            text = statusLine,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (status is MonthAnalysisStatus.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    val summary = snapshot.monthlySummaries[net.wastu.artha.data.analysis.analysisKey(selectedMonth)]
-                    if (!summary.isNullOrBlank()) {
-                        Spacer(Modifier.height(4.dp))
-                        net.wastu.artha.ui.AnalysisListContent(summary)
-                    }
-                }
-            }
         }
         item(key = "category_header") {
             Column(
@@ -346,22 +256,6 @@ fun AnalysisScreen(
         dismissButton = { TextButton(onClick = { showScopeDialog = false; viewModel.setTargetDestination("SETTINGS") }) { Text("Sources") } },
     )
 
-    if (showMonthlyNoteDialog) {
-        val currentNote = snapshot.monthlyNotes[selectedMonth.toString()].orEmpty()
-        val monthLabel = remember(selectedMonth) {
-            selectedMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US))
-        }
-        MonthlyNoteDialog(
-            monthLabel = monthLabel,
-            initialNote = currentNote,
-            onDismiss = { showMonthlyNoteDialog = false },
-            onSave = { updated ->
-                viewModel.setMonthlyNote(selectedMonth.toString(), updated)
-                showMonthlyNoteDialog = false
-            },
-        )
-    }
-
     if (showKnowledgeEditor) {
         KnowledgeEditorDialog(
             initialKnowledge = snapshot.knowledge,
@@ -390,8 +284,8 @@ fun AnalysisScreen(
 
 @Composable
 private fun MonthSummaryCard(
-    month: YearMonth, analysis: MonthSpendingAnalysis, monthlyNote: String?, editable: Boolean = true,
-    onEditNote: () -> Unit, onOpenCategories: () -> Unit, onOpenScope: () -> Unit,
+    month: YearMonth, analysis: MonthSpendingAnalysis, editable: Boolean = true,
+    onOpenCategories: () -> Unit, onOpenScope: () -> Unit,
     onOpenLargestPayment: (() -> Unit)?,
     onPreviousMonth: () -> Unit, onNextMonth: () -> Unit,
 ) {
@@ -416,7 +310,6 @@ private fun MonthSummaryCard(
                     onOpenLargestPayment?.let { open ->
                         DropdownMenuItem(text = { Text("Largest payment") }, onClick = { showMenu = false; open() })
                     }
-                    DropdownMenuItem(enabled = editable, text = { Text("Monthly note") }, onClick = { showMenu = false; onEditNote() })
                     DropdownMenuItem(enabled = editable, text = { Text("Manage categories") }, onClick = { showMenu = false; onOpenCategories() })
                     DropdownMenuItem(text = { Text("Spending scope") }, onClick = { showMenu = false; onOpenScope() })
                 }
@@ -438,53 +331,9 @@ private fun MonthSummaryCard(
                     Text("${kotlin.math.abs(delta).toInt()}% ${if (delta < 0) "less" else "more"} than previous month",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (!monthlyNote.isNullOrBlank()) Text(monthlyNote, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClickLabel = "Edit monthly note", onClick = onEditNote).padding(vertical = 12.dp),
-                    style = MaterialTheme.typography.bodySmall)
             }
         }
     }
-}
-
-@Composable
-fun MonthlyNoteDialog(
-    monthLabel: String,
-    initialNote: String,
-    onDismiss: () -> Unit,
-    onSave: (String) -> Unit,
-) {
-    var text by rememberSaveable(initialNote) { mutableStateOf(initialNote) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Note for $monthLabel", fontWeight = FontWeight.Bold) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "Add context for commentary. Your chosen categories stay.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    label = { Text("Month note") },
-                    minLines = 3,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        },
-        confirmButton = {
-            FilledTonalButton(onClick = { onSave(text) }) {
-                Text("Save context")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        },
-    )
 }
 
 internal object AiCardLogic {
@@ -586,7 +435,7 @@ fun KnowledgeEditorDialog(
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "Context for AI commentary. Your chosen categories stay.",
+                    "Used by AI when categorizing payments.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

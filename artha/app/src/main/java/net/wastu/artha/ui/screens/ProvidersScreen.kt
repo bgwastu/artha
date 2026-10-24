@@ -71,8 +71,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.data.analysis.AiConfig
 import net.wastu.artha.data.analysis.CategoryProgress
-import net.wastu.artha.data.analysis.MonthAnalysisStatus
-import net.wastu.artha.data.analysis.AiAnalysisService
+import net.wastu.artha.data.analysis.AiClient
 import net.wastu.artha.data.analysis.aiConfigValidation
 import net.wastu.artha.data.analysis.aiConnectionFailure
 import net.wastu.artha.ui.theme.incomeColor
@@ -165,7 +164,6 @@ fun ProvidersScreen(
     val diagnostics by viewModel?.providerDiagnostics?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap()) }
     val importing by viewModel?.syncingProvider?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(syncingProvider) }
     val categoryAutomation by viewModel?.categoryAutomation?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<net.wastu.artha.data.analysis.CategoryAutomationState?>(null) }
-    val analysisStatus by viewModel?.analysisStatus?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<MonthAnalysisStatus>(MonthAnalysisStatus.NeverRun) }
     val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(CategoryProgress()) }
     val importBusy by viewModel?.refreshing?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
     val automaticImport by viewModel?.automaticImportActive?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
@@ -621,7 +619,7 @@ fun AiConfigDialog(currentConfig: AiConfig, onDismiss: () -> Unit, onSave: (AiCo
                         testing = true
                         scope.launch {
                             try {
-                                AiAnalysisService.testConnection(config)
+                                AiClient.testConnection(config)
                                 testSucceeded = true; testResult = "Connected"
                             } catch (cancelled: CancellationException) { throw cancelled }
                             catch (failure: Exception) { testSucceeded = false; testResult = aiConnectionFailure(failure) }

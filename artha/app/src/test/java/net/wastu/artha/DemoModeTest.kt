@@ -75,7 +75,7 @@ class DemoModeTest {
         assertFalse(DemoMode.isEnabled(context))
     }
 
-    @Test fun previewLoadsWithoutStorageAndHasSavedCommentaryButNoLiveServices() = runTest {
+    @Test fun previewLoadsWithoutStorageAndNoLiveServices() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         val store = ViewModelStore()
         try {
@@ -85,7 +85,6 @@ class DemoModeTest {
             advanceUntilIdle()
             assertTrue(model.ledgerState.value is LedgerState.Ready)
             assertEquals(samplePayments(), model.allTransactions.value)
-            assertFalse(model.analysisSnapshot.value.monthlySummaries["2026-10:research"].isNullOrBlank())
             assertNull(model.analysisStore)
             assertEquals("", model.analysisSnapshot.value.aiConfig.apiKey)
         } finally {
