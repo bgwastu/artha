@@ -243,12 +243,12 @@ fun LedgerScreen(
 
     when (state) {
         LedgerState.Loading -> LedgerFeedback(loading = true)
-        LedgerState.Failed -> LedgerFeedback(title = "Couldn't load transactions", onRetry = onRetry)
+        LedgerState.Failed -> LedgerFeedback(title = "Couldn't load expenses", onRetry = onRetry)
         is LedgerState.Ready -> TransactionList(
             transactions = filteredTransactions,
             onTransaction = onTransaction, resetKey = listOf(effectiveFilters, dateRange, category),
             activeFilters = active, onClearFilters = ::clearAll,
-            emptyTitle = if (active.isNotEmpty()) "No matching transactions" else "No saved payments",
+            emptyTitle = if (active.isNotEmpty()) "No matching expenses" else "No saved payments",
             onImportHistory = if (active.isEmpty()) onImportHistory else null,
             showCategory = showCategory,
             categoryProgress = categoryProgress,
@@ -524,7 +524,7 @@ fun SearchTransactionsScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
             when {
-                ledgerState == LedgerState.Failed -> LedgerFeedback(title = "Couldn't load transactions", onRetry = onRetry)
+                ledgerState == LedgerState.Failed -> LedgerFeedback(title = "Couldn't load expenses", onRetry = onRetry)
                 ledgerState == LedgerState.Loading || results == null || results?.query != keyword ->
                     LedgerFeedback(loading = true)
                 else -> TransactionList(
@@ -649,7 +649,7 @@ private fun TransactionList(
         if (transactions.isEmpty()) {
             item(key = "empty") {
                 Text(
-                    emptyTitle ?: if (highlightQuery.isBlank()) "No transactions" else "No matching transactions",
+                    emptyTitle ?: if (highlightQuery.isBlank()) "No expenses" else "No matching expenses",
                     modifier = Modifier.fillMaxWidth().padding(vertical = 64.dp),
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.titleMedium,
@@ -720,7 +720,8 @@ private fun DateGroupHeader(date: LocalDate, totalMinor: Long = 0L) {
                 Text(
                     text = formatAmountMinor(totalMinor),
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
             }
         }

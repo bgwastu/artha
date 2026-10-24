@@ -71,7 +71,7 @@ import net.wastu.artha.ui.screens.TransactionFilters
 import net.wastu.artha.ui.screens.TransactionFiltersSaver
 
 private enum class Destination(val label: String, val icon: ImageVector) {
-    TRANSACTIONS("Transactions", Icons.AutoMirrored.Filled.List),
+    TRANSACTIONS("Expenses", Icons.AutoMirrored.Filled.List),
     ANALYSIS("Analysis", Icons.Default.Analytics),
     SETTINGS("Settings", Icons.Default.Settings),
 }

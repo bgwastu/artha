@@ -197,7 +197,7 @@ internal fun buildTransactionItemView(
         putExtra("extra_destination", "TRANSACTIONS")
     }
     val tagLabels = tags.map { it.description } + listOfNotNull(categoryText)
-    views.setContentDescription(R.id.widget_item_root, "${tx.provider.displayName}, ${(tagLabels + title).joinToString(", ")}, ${if (isCredit) "Incoming" else "Outgoing"}, $amountText, $dateStr. Open Transactions")
+    views.setContentDescription(R.id.widget_item_root, "${tx.provider.displayName}, ${(tagLabels + title).joinToString(", ")}, ${if (isCredit) "Incoming" else "Outgoing"}, $amountText, $dateStr. Open Expenses")
     views.setOnClickFillInIntent(R.id.widget_item_root, fillInIntent)
 
     return views

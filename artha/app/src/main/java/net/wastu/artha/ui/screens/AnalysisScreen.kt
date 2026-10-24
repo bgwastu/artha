@@ -189,7 +189,7 @@ fun AnalysisScreen(
     if (ledgerState is net.wastu.artha.ui.LedgerState.Failed && savedTransactions.isEmpty()) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Text("Unable to load saved spending")
-            TextButton(onClick = { viewModel.setTargetDestination("TRANSACTIONS") }) { Text("Open transactions") }
+            TextButton(onClick = { viewModel.setTargetDestination("TRANSACTIONS") }) { Text("Open expenses") }
         }
         return
     }

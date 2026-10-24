@@ -258,7 +258,7 @@ fun TransactionDetailsContent(
     BackHandler(onBack = close)
     Column(modifier.fillMaxSize().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Transaction", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            Text("Expense", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             TextButton(onClick = close, enabled = !state.saving) {
                 Text(if (state.editor == null && state.recordIndex < 0) "Close" else "Back")
             }

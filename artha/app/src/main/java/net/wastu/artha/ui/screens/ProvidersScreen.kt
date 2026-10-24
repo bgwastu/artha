@@ -285,7 +285,7 @@ fun ProvidersScreen(
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Touch and hold your home screen, choose Widgets, then Artha.")
-                    Text("Analysis opens the month overview. Recent payments opens Transactions.")
+                    Text("Analysis opens the month overview. Recent expenses opens Expenses.")
                     Text("Touch and hold a widget to resize it. Use more space for larger text and complete amounts.")
                     Text("Widgets use saved payments. Check the update time when history is unavailable.")
                 }
