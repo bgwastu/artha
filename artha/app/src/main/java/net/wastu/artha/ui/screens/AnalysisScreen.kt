@@ -117,6 +117,8 @@ import net.wastu.artha.data.analysis.MonthAnalysisStatus
 import net.wastu.artha.data.analysis.analysisActionLabel
 import net.wastu.artha.data.analysis.analysisStatusLabel
 import net.wastu.artha.data.analysis.categoryProgressLabel
+import net.wastu.artha.data.analysis.AnalysisWait
+import net.wastu.artha.data.analysis.recategorizeConfirmation
 import net.wastu.artha.ui.categoryIconFor
 import net.wastu.artha.ui.formatDate
 import java.time.YearMonth
@@ -134,6 +136,7 @@ fun AnalysisScreen(
     onOpenKnowledgeEditor: () -> Unit = {},
     onDismissKnowledgeEditor: () -> Unit = {},
     onOpenCategoryReview: () -> Unit = {},
+    onOpenAiCategories: () -> Unit = {},
 ) {
     val analysis by viewModel.monthAnalysis.collectAsStateWithLifecycle()
     val ledgerState by viewModel.ledgerState.collectAsStateWithLifecycle()
@@ -147,7 +150,6 @@ fun AnalysisScreen(
 
     var showMonthlyNoteDialog by remember { mutableStateOf(false) }
     var showScopeDialog by remember { mutableStateOf(false) }
-    var showAiCategoriesSheet by rememberSaveable { mutableStateOf(false) }
 
     if (!analysisEnabled) {
         Column(
@@ -199,7 +201,7 @@ fun AnalysisScreen(
                 monthlyNote = snapshot.monthlyNotes[selectedMonth.toString()],
                 onEditNote = { showMonthlyNoteDialog = true },
                 onOpenCategories = onOpenCategoriesSheet, onOpenScope = { showScopeDialog = true },
-                onOpenAiCategories = { showAiCategoriesSheet = true },
+                onOpenAiCategories = onOpenAiCategories,
                 onOpenLargestPayment = largest?.let { { onOpenTransaction(it) } },
                 onPreviousMonth = { viewModel.setAnalysisMonth(selectedMonth.minusMonths(1)) },
                 onNextMonth = { viewModel.setAnalysisMonth(selectedMonth.plusMonths(1)) },
@@ -216,6 +218,7 @@ fun AnalysisScreen(
                 onRetryCategories = { viewModel.retryAutomaticCategories() },
                 onOpenKnowledge = onOpenKnowledgeEditor,
                 month = selectedMonth,
+                onCancelPendingAnalysis = { viewModel.cancelPendingAnalysis() },
             )
         }
         item(key = "ai_categories") {
@@ -266,11 +269,19 @@ fun AnalysisScreen(
                     },
                     trailingContent = {
                         if (isWorking) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                            )
-                        } else if (isError) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                                TextButton(onClick = { viewModel.stopCategorization() }) {
+                                    Text("Stop")
+                                }
+                            }
+                        } else if (categoryProgress.state == CategoryAutomationState.ERROR || categoryProgress.stopped) {
                             TextButton(onClick = { viewModel.retryAutomaticCategories() }) {
                                 Text("Retry")
                             }
@@ -282,7 +293,7 @@ fun AnalysisScreen(
                         }
                     },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    modifier = Modifier.clickable { showAiCategoriesSheet = true },
+                    modifier = Modifier.clickable(onClick = onOpenAiCategories),
                 )
             }
         }
@@ -294,7 +305,7 @@ fun AnalysisScreen(
             Text("No confirmed spending this month", style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else items(analysis.categories, key = { it.category }) { category ->
-            CategorySpendingRow(category, snapshot.categoryIcons, selectedMonth, viewModel::openCategoryTransactions, viewModel::recategorize)
+            CategorySpendingRow(category, snapshot.categoryIcons, selectedMonth, viewModel::openCategoryTransactions, viewModel::recategorize, viewModel::recategorizeCount)
         }
     }
     if (showScopeDialog) AlertDialog(
@@ -344,21 +355,6 @@ fun AnalysisScreen(
             onRetryAi = viewModel::retryAutomaticCategories,
         )
     }
-    if (showAiCategoriesSheet) {
-        AiCategoriesSheet(
-            categoryProgress = categoryProgress,
-            autoCategorize = snapshot.autoCategorize,
-            selectedMonth = selectedMonth,
-            onDismiss = { showAiCategoriesSheet = false },
-            onSetAutoCategorize = viewModel::setAutoCategorize,
-            onRecategorize = viewModel::recategorize,
-            onRetryAutomaticCategories = viewModel::retryAutomaticCategories,
-            onOpenReview = {
-                showAiCategoriesSheet = false
-                onOpenCategoryReview()
-            },
-        )
-    }
 }
 
 @Composable
@@ -384,6 +380,7 @@ private fun MonthSummaryCard(
             IconButton(onClick = onPreviousMonth) { Icon(Icons.Default.ChevronLeft, "Previous month") }
             Text(monthTitle, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
             IconButton(onClick = onNextMonth, enabled = canGoNext) { Icon(Icons.Default.ChevronRight, "Next month") }
+            IconButton(onClick = onOpenAiCategories) { Icon(Icons.Default.Category, contentDescription = "AI categories") }
             Box {
                 IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Month options") }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
@@ -483,6 +480,7 @@ internal fun AiInsightsCard(
     onConfigure: () -> Unit,
     onRetryCategories: () -> Unit,
     onOpenKnowledge: () -> Unit,
+    onCancelPendingAnalysis: () -> Unit = {},
     month: YearMonth? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -568,16 +566,22 @@ internal fun AiInsightsCard(
 
 
                     if (showActionRow) {
-                        val actionLabel = analysisActionLabel(status)
                         FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            if (actionLabel != null) {
-                                FilledTonalButton(
-                                    onClick = if (AiCardLogic.isConfigureAction(status)) onConfigure else onAction,
-                                ) {
-                                    Text(actionLabel)
+                            if (status is MonthAnalysisStatus.Waiting && status.reason == AnalysisWait.CATEGORIES) {
+                                TextButton(onClick = onCancelPendingAnalysis) {
+                                    Text("Cancel")
+                                }
+                            } else {
+                                val actionLabel = analysisActionLabel(status)
+                                if (actionLabel != null) {
+                                    FilledTonalButton(
+                                        onClick = if (AiCardLogic.isConfigureAction(status)) onConfigure else onAction,
+                                    ) {
+                                        Text(actionLabel)
+                                    }
                                 }
                             }
                             TextButton(onClick = onOpenKnowledge) {
@@ -599,9 +603,14 @@ private fun CategorySpendingRow(
     selectedMonth: YearMonth,
     onOpenCategory: (String) -> Unit,
     onRecategorize: (RecategorizeScope) -> Unit,
+    onRecategorizeCount: (RecategorizeScope) -> Int = { 0 },
 ) {
     val fontScale = LocalDensity.current.fontScale
     var showMenu by remember { mutableStateOf(false) }
+    var showConfirmDialog by remember { mutableStateOf(false) }
+    val scope = remember(category.category, selectedMonth) {
+        RecategorizeScope.CategoryInMonth(category.category, selectedMonth)
+    }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val stackAmount = fontScale > 1.3f || maxWidth < 280.dp
         Box {
@@ -630,13 +639,38 @@ private fun CategorySpendingRow(
                 onDismissRequest = { showMenu = false },
             ) {
                 DropdownMenuItem(
-                    text = { Text(recategorizeLabel(RecategorizeScope.CategoryInMonth(category.category, selectedMonth))) },
+                    text = { Text(recategorizeLabel(scope)) },
                     onClick = {
                         showMenu = false
-                        onRecategorize(RecategorizeScope.CategoryInMonth(category.category, selectedMonth))
+                        showConfirmDialog = true
                     },
                 )
             }
+        }
+    }
+    if (showConfirmDialog) {
+        val count = onRecategorizeCount(scope)
+        val confirmText = recategorizeConfirmation(scope, count)
+        if (confirmText != null) {
+            AlertDialog(
+                onDismissRequest = { showConfirmDialog = false },
+                text = { Text(confirmText) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showConfirmDialog = false
+                            onRecategorize(scope)
+                        },
+                    ) {
+                        Text("Re-categorize")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showConfirmDialog = false }) {
+                        Text("Cancel")
+                    }
+                },
+            )
         }
     }
 }

@@ -101,6 +101,7 @@ fun HomeScreen(
     var selectedKey by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedFallback by remember { mutableStateOf<UnifiedTransaction?>(null) }
     var showCategoryReview by rememberSaveable { mutableStateOf(false) }
+    var showAiCategories by rememberSaveable { mutableStateOf(false) }
     val snackbarHost = remember { androidx.compose.material3.SnackbarHostState() }
     val importFeedback by viewModel?.importFeedback?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val automaticImport by viewModel?.automaticImportActive?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
@@ -132,6 +133,10 @@ fun HomeScreen(
 
     BackHandler(enabled = showCategoryReview) {
         showCategoryReview = false
+    }
+
+    BackHandler(enabled = showAiCategories) {
+        showAiCategories = false
     }
 
     val latestTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyList<UnifiedTransaction>()) }
@@ -280,6 +285,7 @@ fun HomeScreen(
                                         onDismissKnowledgeEditor = { showKnowledgeEditor = false },
                                         onOpenKnowledgeEditor = { showKnowledgeEditor = true },
                                         onOpenCategoryReview = { showCategoryReview = true },
+                                        onOpenAiCategories = { showAiCategories = true },
                                     )
                                 }
                             }
@@ -298,6 +304,7 @@ fun HomeScreen(
                                 onDetailOpenChanged = { settingsSourceOpen = it },
                                 onOpenDemo = { net.wastu.artha.DemoMode.open(context) },
                                 onOpenCategoryReview = { showCategoryReview = true },
+                                onOpenAiCategories = { showAiCategories = true },
                             )
                         }
                     }
@@ -313,6 +320,16 @@ fun HomeScreen(
                     onTransaction = { selectedKey = it.key; selectedFallback = it },
                     viewModel = viewModel,
                     onRetry = onRetryLedger,
+                )
+            }
+        }
+        if (showAiCategories && viewModel != null) {
+            Surface(Modifier.fillMaxSize()) {
+                AiCategoriesScreen(
+                    viewModel = viewModel,
+                    onBack = { showAiCategories = false },
+                    onOpenReview = { showCategoryReview = true },
+                    onOpenTransaction = { selectedKey = it.key; selectedFallback = it },
                 )
             }
         }
