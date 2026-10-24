@@ -13,7 +13,6 @@ import net.wastu.artha.ui.screens.TransactionDetailsState
 import net.wastu.artha.ui.screens.canEditTransaction
 import net.wastu.artha.ui.screens.paymentCategoryRowSupporting
 import net.wastu.artha.ui.screens.paymentNoteRowSupporting
-import net.wastu.artha.ui.widget.widgetCategoryText
 import org.junit.Assert.*
 import org.junit.Test
 import java.time.Instant
@@ -68,32 +67,6 @@ class PaymentLockTest {
         assertFalse(canEditTransaction(PaymentCategoryState.CATEGORIZING, hasStore = true))
     }
 
-    @Test
-    fun widgetCategoryTextPureHelper() {
-        val busyKeys = setOf("JAGO:busy")
-
-        val busyPayment = samplePayment("busy", category = "Food")
-        assertEquals("Categorizing", widgetCategoryText(busyPayment, busyKeys))
-
-        val idlePayment = samplePayment("idle", category = "Food")
-        assertEquals("Food", widgetCategoryText(idlePayment, busyKeys))
-
-        val uncategorized = samplePayment("uncat", category = null)
-        assertNull(widgetCategoryText(uncategorized, busyKeys))
-        assertEquals("Categorizing", widgetCategoryText(uncategorized, setOf("JAGO:uncat")))
-
-        val credit = samplePayment("credit", category = "Refund", direction = Direction.CREDIT)
-        assertNull(widgetCategoryText(credit, busyKeys))
-        assertEquals("Categorizing", widgetCategoryText(credit, setOf("JAGO:credit")))
-
-        val reversed = samplePayment("reversed", category = "Food", isReversal = true)
-        assertNull(widgetCategoryText(reversed, busyKeys))
-        assertEquals("Categorizing", widgetCategoryText(reversed, setOf("JAGO:reversed")))
-
-        assertEquals("Categorizing", widgetCategoryText("JAGO:busy", "Food", busyKeys))
-        assertEquals("Food", widgetCategoryText("JAGO:idle", "Food", busyKeys))
-        assertNull(widgetCategoryText("JAGO:idle", null, busyKeys))
-    }
 
     @Test
     fun chooseCategoryGuardsWhenBusy() {

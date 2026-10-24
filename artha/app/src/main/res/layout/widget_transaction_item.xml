@@ -33,19 +33,23 @@
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <ImageView
+            <TextView
                 android:id="@+id/widget_item_tag_grouped"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="4dp"
                 android:background="@drawable/bg_widget_tag_secondary"
-                android:contentDescription="Grouped"
-                android:importantForAccessibility="no"
+                android:gravity="center_vertical"
+                android:includeFontPadding="false"
+                android:maxLines="1"
                 android:paddingStart="4dp"
                 android:paddingTop="2dp"
                 android:paddingEnd="4dp"
                 android:paddingBottom="2dp"
-                android:src="@drawable/ic_widget_grouped"
+                android:textColor="@color/widget_tag_secondary_text"
+                android:textSize="10sp"
+                android:importantForAccessibility="no"
+                android:text="Grouped"
                 android:visibility="gone" />
             <TextView
                 android:id="@+id/widget_item_tag_status_secondary"
@@ -81,24 +85,6 @@
                 android:textSize="10sp"
                 android:importantForAccessibility="no"
                 android:visibility="gone" />
-            <TextView
-                android:id="@+id/widget_item_tag_qris"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="4dp"
-                android:background="@drawable/bg_widget_tag_outline"
-                android:gravity="center_vertical"
-                android:includeFontPadding="false"
-                android:maxLines="1"
-                android:paddingStart="4dp"
-                android:paddingTop="2dp"
-                android:paddingEnd="4dp"
-                android:paddingBottom="2dp"
-                android:textColor="@color/widget_text_secondary"
-                android:textSize="10sp"
-                android:importantForAccessibility="no"
-                android:visibility="gone"
-                android:text="QRIS" />
             <TextView
                 android:id="@+id/widget_item_tag_card"
                 android:layout_width="wrap_content"

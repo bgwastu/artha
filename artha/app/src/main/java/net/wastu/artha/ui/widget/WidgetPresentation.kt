@@ -78,18 +78,3 @@ internal fun analysisWidgetAmounts(analysis: MonthSpendingAnalysis): AnalysisWid
     )
 }
 
-/**
- * Category text for a widget payment row. Shows "Categorizing" while AI is actively
- * working on this transaction, the category name for spending transactions, or null
- * when uncategorized or for non-spending transactions.
- */
-internal fun widgetCategoryText(transaction: UnifiedTransaction, busyKeys: Set<String>): String? {
-    if (transaction.key in busyKeys) return "Categorizing"
-    if (transaction.direction == Direction.CREDIT || transaction.isReversedRecord) return null
-    return transaction.category?.takeIf { it.isNotBlank() }
-}
-
-internal fun widgetCategoryText(key: String, category: String?, busyKeys: Set<String>): String? {
-    if (key in busyKeys) return "Categorizing"
-    return category?.takeIf { it.isNotBlank() }
-}

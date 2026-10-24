@@ -22,7 +22,7 @@ class TransactionGroupTest {
         assertEquals(listOf("Original charge", "Refund"), records.map { it.role })
         assertEquals(listOf(Direction.DEBIT, Direction.CREDIT), records.map { it.transaction.direction })
         assertEquals("Circle K", records.first().title)
-        assertEquals(listOf(TransactionTagKind.QRIS, TransactionTagKind.CARD), records.first().tags.map { it.kind })
+        assertEquals(listOf(TransactionTagKind.CARD), records.first().tags.map { it.kind })
         assertEquals(0L, groupNetMinor(records))
     }
 
@@ -54,6 +54,29 @@ class TransactionGroupTest {
         assertEquals(formatMinorAmount(java.math.BigInteger.valueOf(1_332_000)), net.wastu.artha.ui.screens.itemPriceText("Rp13320"))
         assertEquals(formatMinorAmount(java.math.BigInteger.valueOf(1_332_000)), net.wastu.artha.ui.screens.itemPriceText("13320"))
         assertEquals("13.320,50", net.wastu.artha.ui.screens.itemPriceText("13.320,50"))
+    }
+
+    @Test fun groupBadgeNamesSecondProviderAndCountsHiddenMembers() {
+        val shopee = tx("order", Direction.DEBIT, 1_000, "2026-10-22T03:06:00Z", "{}").copy(provider = Provider.SHOPEE)
+        val two = charge.copy(rawPayload = JSONObject()
+            .put("groupedTransactions", JSONArray().put(LedgerReconciler.buildGroupEntry(charge, "Original Charge"))
+                .put(LedgerReconciler.buildGroupEntry(shopee, "Order details")))
+            .toString())
+        assertEquals(GroupBadge(Provider.SHOPEE, 0), groupBadgeInfo(two))
+
+        val third = tx("other", Direction.DEBIT, 1_000, "2026-10-22T03:06:00Z", "{}")
+        val four = two.copy(rawPayload = JSONObject()
+            .put("groupedTransactions", JSONArray().put(LedgerReconciler.buildGroupEntry(charge, "Original Charge"))
+                .put(LedgerReconciler.buildGroupEntry(shopee, "Order details"))
+                .put(LedgerReconciler.buildGroupEntry(third, "Card payment")))
+            .toString())
+        assertEquals(GroupBadge(Provider.SHOPEE, 1), groupBadgeInfo(four))
+    }
+
+    @Test fun unreadableOrSingleGroupEntriesGiveNoBadge() {
+        assertNull(groupBadgeInfo(charge))
+        assertNull(groupBadgeInfo(charge.copy(rawPayload = """{"groupedTransactions":[{"provider":"NOPE"},{"role":"Refund"}]}""")))
+        assertNull(groupBadgeInfo(charge.copy(rawPayload = "not json")))
     }
 
     private fun grouped(vararg entries: Pair<UnifiedTransaction, String>) = charge.copy(rawPayload = JSONObject()

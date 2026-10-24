@@ -7,13 +7,28 @@ import net.wastu.artha.core.model.Pocket
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import org.json.JSONObject
+import org.json.JSONArray
 
+/** What the tiny bottom-right icon overlay on a grouped row shows. */
+data class GroupBadge(val secondProvider: Provider, val extraCount: Int)
+
+/**
+ * The 2nd member's provider and the member count beyond the two visible icons; null when the
+ * group entries are unreadable, in which case the row keeps its Grouped pill.
+ */
+internal fun groupBadgeInfo(transaction: UnifiedTransaction): GroupBadge? {
+    val groups = runCatching { JSONObject(transaction.rawPayload).optJSONArray("groupedTransactions") }.getOrNull() ?: return null
+    if (groups.length() < 2) return null
+    val second = groups.optJSONObject(1)?.optString("provider")?.takeIf { !it.isNullOrBlank() } ?: return null
+    val provider = runCatching { Provider.valueOf(second) }.getOrNull() ?: return null
+    return GroupBadge(provider, maxOf(0, groups.length() - 2))
+}
 /** One source record inside a reconciled transaction, rebuilt from its stored group entry. */
 data class GroupRecord(val role: String, val transaction: UnifiedTransaction) {
     val title: String get() = transactionHumanLine(transaction)
     /** Records only show how they were paid; grouping facts belong to the parent row. */
     val tags: List<TransactionTag> get() = transactionTags(transaction)
-        .filter { it.kind == TransactionTagKind.QRIS || it.kind == TransactionTagKind.CARD }
+        .filter { it.kind == TransactionTagKind.CARD }
     val signedAmount: String get() = "${if (transaction.direction == Direction.CREDIT) "+" else ""}${formatMoney(transaction.money)}"
 }
 

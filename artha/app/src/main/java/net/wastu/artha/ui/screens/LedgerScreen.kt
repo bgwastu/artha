@@ -97,7 +97,16 @@ import net.wastu.artha.data.analysis.CategoryProgress
 import net.wastu.artha.data.analysis.PaymentCategoryState
 import net.wastu.artha.data.analysis.paymentCategoryState
 import net.wastu.artha.data.analysis.paymentCategoryStateLabel
-
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.unit.sp
+import net.wastu.artha.ui.GroupBadge
+import net.wastu.artha.ui.groupBadgeInfo
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.widthIn
@@ -759,6 +768,9 @@ fun TransactionRow(
 ) {
     val reversed = transaction.isReversedRecord
     val tags = remember(transaction) { transactionTags(transaction) }
+    // A readable group drops the Grouped pill for an icon overlay; unreadable keeps the pill.
+    val groupBadge = remember(transaction) { groupBadgeInfo(transaction) }.takeIf { tags.any { it.kind == TransactionTagKind.GROUPED } }
+    val rowTags = if (groupBadge != null) tags.filter { it.kind != TransactionTagKind.GROUPED } else tags
     val movedMoney = tags.any { it.kind == TransactionTagKind.REVERSED || it.kind == TransactionTagKind.REFUND || it.kind == TransactionTagKind.TRANSFER }
     val title = remember(transaction) { transactionHumanLine(transaction) }
     val amount = remember(transaction) { paymentRowAmount(transaction) }
@@ -774,21 +786,28 @@ fun TransactionRow(
     val fontScale = LocalDensity.current.fontScale
     Surface(onClick = onClick, color = MaterialTheme.colorScheme.surface, modifier = Modifier.semantics { stateDescription = "Outgoing payment" }) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Image(painterResource(transaction.provider.iconRes), transaction.provider.displayName,
-                Modifier.size(36.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
+            Box(Modifier.size(36.dp).clearAndSetSemantics {
+                contentDescription = transaction.provider.displayName + if (groupBadge != null) ", Grouped" else ""
+            }) {
+                Image(painterResource(transaction.provider.iconRes), contentDescription = null,
+                    Modifier.matchParentSize().clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
+                groupBadge?.let { badge ->
+                    GroupBadgeOverlay(badge, Modifier.align(Alignment.BottomEnd).offset(x = 3.dp, y = 3.dp))
+                }
+            }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
                     val stackAmount = fontScale >= 1.3f || maxWidth < 300.dp || amount.length > 16
                     if (stackAmount) {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            TaggedTitle(title, tags, MaterialTheme.typography.bodyLarge, highlightQuery = highlightQuery,
+                            TaggedTitle(title, rowTags, MaterialTheme.typography.bodyLarge, highlightQuery = highlightQuery,
                                 fontWeight = FontWeight.Medium)
                             HighlightedText(amount, highlightQuery, MaterialTheme.typography.titleSmall,
                                 color = amountColor,
                                 fontWeight = FontWeight.SemiBold, maxLines = Int.MAX_VALUE)
                         }
                     } else Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        TaggedTitle(title, tags, MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f),
+                        TaggedTitle(title, rowTags, MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f),
                             highlightQuery = highlightQuery, fontWeight = FontWeight.Medium)
                         HighlightedText(amount, highlightQuery, MaterialTheme.typography.titleSmall,
                                 color = amountColor, fontWeight = FontWeight.SemiBold)
@@ -851,6 +870,28 @@ fun LedgerFeedback(
         onRetry?.let {
             Spacer(Modifier.height(16.dp))
             Button(onClick = it) { Text("Retry") }
+        }
+    }
+}
+
+/** The tiny bottom-right overlay on a grouped row: the 2nd member's icon, or "+n" for bigger groups. */
+@Composable
+private fun GroupBadgeOverlay(badge: GroupBadge, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .size(16.dp)
+            .background(MaterialTheme.colorScheme.surface, CircleShape)
+            .padding(1.dp)
+            .clip(CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (badge.extraCount > 0) {
+            Text("+${badge.extraCount}", style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 8.sp, fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+        } else {
+            Image(painterResource(badge.secondProvider.iconRes), contentDescription = null,
+                Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
     }
 }
