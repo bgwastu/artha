@@ -1,6 +1,7 @@
 package net.wastu.artha.data.analysis
 
 import java.time.Instant
+import java.time.YearMonth
 import net.wastu.artha.core.model.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -96,7 +97,164 @@ class AiCategorizationTest {
     @Test fun aiMaySuggestLabelsButCannotChangePaymentFacts() {
         val original = payment.copy()
         val result = AiCategorization.parse("""{"classifications":[{"id":"p0","category":"Groceries","reason":"Food shop","amountMinor":1,"date":"2099","isConfirmed":false}]}""", batch, AiCategorization.categories(snapshot))
-        assertEquals(CategorySuggestion("Groceries", "AI suggestion: Food shop"), result[payment.key])
+        assertEquals(CategorySuggestion("Groceries", "AI suggestion: Food shop", CategoryConfidence.MEDIUM), result[payment.key])
         assertEquals(original, payment)
+    }
+
+    @Test
+    fun parseReplyConfidenceAndMerchantConsistent() {
+        val raw = """{"classifications":[{"id":"p0","category":"Groceries","reason":"Fresh food","confidence":"high","merchantConsistent":true}]}"""
+        val result = AiCategorization.parse(raw, batch, AiCategorization.categories(snapshot))
+        val sug = result.getValue(payment.key)
+        assertEquals("Groceries", sug.category)
+        assertEquals("AI suggestion: Fresh food", sug.reason)
+        assertEquals(CategoryConfidence.HIGH, sug.confidence)
+        assertTrue(sug.merchantConsistent)
+
+        // Missing confidence defaults to MEDIUM, missing merchantConsistent defaults to false
+        val minimal = """{"classifications":[{"id":"p0","category":"Groceries","reason":"Food"}]}"""
+        val minResult = AiCategorization.parse(minimal, batch, AiCategorization.categories(snapshot))
+        val minSug = minResult.getValue(payment.key)
+        assertEquals(CategoryConfidence.MEDIUM, minSug.confidence)
+        assertFalse(minSug.merchantConsistent)
+
+        // Unknown confidence defaults to MEDIUM
+        val unknownConf = """{"classifications":[{"id":"p0","category":"Groceries","reason":"Food","confidence":"uncertain","merchantConsistent":false}]}"""
+        val unkResult = AiCategorization.parse(unknownConf, batch, AiCategorization.categories(snapshot))
+        assertEquals(CategoryConfidence.MEDIUM, unkResult.getValue(payment.key).confidence)
+
+        // Low confidence
+        val lowConf = """{"classifications":[{"id":"p0","category":"Groceries","reason":"Food","confidence":"low"}]}"""
+        val lowResult = AiCategorization.parse(lowConf, batch, AiCategorization.categories(snapshot))
+        assertEquals(CategoryConfidence.LOW, lowResult.getValue(payment.key).confidence)
+    }
+
+    @Test
+    fun requestDataIncludesUserExamplesUpTo40DedupedByMerchantWithRecency() {
+        val rows = (1..50).map { i ->
+            UnifiedTransaction(
+                provider = Provider.JAGO,
+                providerTransactionId = "tx$i",
+                direction = Direction.DEBIT,
+                money = Money(10000 * i.toLong()),
+                occurredAt = Instant.parse("2026-10-01T10:00:00Z"),
+                description = "Merchant $i",
+                rawPayload = "{}",
+                classificationIsManual = true,
+                category = "Cat $i",
+                userNote = "Note $i",
+            )
+        }
+
+        // Set updatedAt for recency: tx50 is newest, tx1 is oldest
+        val updatedAt = rows.associate { "cat:${it.key}" to (it.providerTransactionId.removePrefix("tx").toLong() * 1000) }
+        val snap = snapshot.copy(
+            customCategories = (1..50).map { "Cat $it" },
+            manualCategories = rows.map { it.key }.toSet(),
+            categories = rows.associate { it.key to "Cat ${it.providerTransactionId.removePrefix("tx")}" },
+            updatedAt = updatedAt,
+        )
+
+        val req = AiCategorization.requestData(snap, batch, rows)
+        assertTrue(req.has("userExamples"))
+        val examples = req.getJSONArray("userExamples")
+        assertEquals(40, examples.length())
+
+        // tx50 should be first (highest timestamp)
+        val first = examples.getJSONObject(0)
+        assertEquals("Merchant 50", first.getString("merchant"))
+        assertEquals("Cat 50", first.getString("category"))
+
+        // Examples must not include amount, notes or IDs
+        assertFalse(first.has("amount"))
+        assertFalse(first.has("amountMinor"))
+        assertFalse(first.has("userNote"))
+        assertFalse(first.has("note"))
+        assertFalse(first.has("id"))
+        assertFalse(first.has("key"))
+
+        // Deduping by merchant: duplicate merchants should only appear once
+        val dup1 = payment.copy(providerTransactionId = "d1", description = "Indomaret - Sudirman", classificationIsManual = true)
+        val dup2 = payment.copy(providerTransactionId = "d2", description = "Indomaret - Thamrin", classificationIsManual = true)
+        val dupSnap = snapshot.copy(
+            categories = mapOf(dup1.key to "Groceries", dup2.key to "Groceries"),
+            manualCategories = setOf(dup1.key, dup2.key),
+            updatedAt = mapOf("cat:${dup1.key}" to 100L, "cat:${dup2.key}" to 200L),
+        )
+        val dupReq = AiCategorization.requestData(dupSnap, batch, listOf(dup1, dup2))
+        val dupExamples = dupReq.getJSONArray("userExamples")
+        assertEquals(1, dupExamples.length())
+        assertEquals("Indomaret", dupExamples.getJSONObject(0).getString("merchant"))
+    }
+
+    @Test
+    fun noMassRelabelAfterPersonalContextModelOrCategoriesChange() {
+        val baseFp = AiCategorization.fingerprint(payment, snapshot)
+        val withKnowledge = snapshot.copy(knowledge = "User is vegetarian and lives in Jakarta")
+        val withModel = snapshot.copy(aiConfig = AiConfig(baseUrl = "https://ai.wastu.net", apiKey = "key", model = "new-model"))
+        val withCats = snapshot.copy(customCategories = listOf("Custom 1", "Custom 2"))
+
+        assertEquals(baseFp, AiCategorization.fingerprint(payment, withKnowledge))
+        assertEquals(baseFp, AiCategorization.fingerprint(payment, withModel))
+        assertEquals(baseFp, AiCategorization.fingerprint(payment, withCats))
+
+        // When payment note or source data changes, fingerprint DOES change
+        val withNote = snapshot.copy(userNotes = mapOf(payment.key to "Personal expense"))
+        assertNotEquals(baseFp, AiCategorization.fingerprint(payment, withNote))
+        assertNotEquals(baseFp, AiCategorization.fingerprint(payment.copy(rawPayload = """{"changed":true}"""), snapshot))
+    }
+
+    @Test
+    fun scopeKeysNeverIncludeManualPicksExceptPaymentReplaceManual() {
+        val manualTx = payment.copy(providerTransactionId = "m1", classificationIsManual = true, description = "Manual tx")
+        val snapshotManual = snapshot.copy(
+            manualCategories = setOf(manualTx.key),
+            categories = mapOf(manualTx.key to "Groceries"),
+        )
+        val rows = listOf(payment, manualTx)
+
+        // Payment scope without replaceManual -> excludes manual
+        assertEquals(emptySet<String>(), AiCategorization.scopeKeys(RecategorizeScope.Payment(manualTx.key, replaceManual = false), rows, snapshotManual))
+        // Payment scope with replaceManual = true -> includes manual
+        assertEquals(setOf(manualTx.key), AiCategorization.scopeKeys(RecategorizeScope.Payment(manualTx.key, replaceManual = true), rows, snapshotManual))
+
+        // All scope -> only non-manual spending
+        assertEquals(setOf(payment.key), AiCategorization.scopeKeys(RecategorizeScope.All, rows, snapshotManual))
+
+        // CategoryInMonth scope -> excludes manual even if in that category and month
+        val octMonth = YearMonth.of(1970, 1) // Instant.EPOCH in AccountingTime.zone (UTC+7) is 1970-01
+        assertEquals(emptySet<String>(), AiCategorization.scopeKeys(RecategorizeScope.CategoryInMonth("Groceries", octMonth), rows, snapshotManual))
+
+        // Month scope -> excludes manual
+        assertEquals(setOf(payment.key), AiCategorization.scopeKeys(RecategorizeScope.Month(octMonth), rows, snapshotManual))
+
+        // NeedsReview scope -> excludes manual even if marked LOW confidence
+        val snapWithLow = snapshotManual.copy(aiConfidence = mapOf(manualTx.key to CategoryConfidence.LOW, payment.key to CategoryConfidence.LOW))
+        assertEquals(setOf(payment.key), AiCategorization.scopeKeys(RecategorizeScope.NeedsReview, rows, snapWithLow))
+    }
+
+    @Test
+    fun paymentsAnsweredByMerchantMemoryAreNotSentToAi() {
+        val earlierManual = payment.copy(providerTransactionId = "earlier", description = "Indomaret - Sudirman", classificationIsManual = true)
+        val currentIndomaret = payment.copy(providerTransactionId = "current", description = "Indomaret - Thamrin")
+        val otherPayment = payment.copy(providerTransactionId = "other", description = "Unique Store")
+
+        val snap = snapshot.copy(
+            categories = mapOf(earlierManual.key to "Groceries"),
+            manualCategories = setOf(earlierManual.key),
+        )
+        val rows = listOf(earlierManual, currentIndomaret, otherPayment)
+
+        // fromMemory should resolve currentIndomaret
+        val fromMemory = AiCategorization.fromMemory(rows, snap)
+        assertTrue(fromMemory.containsKey(currentIndomaret.key))
+        assertEquals("Groceries", fromMemory[currentIndomaret.key]?.category)
+        assertEquals("Same merchant: Same as earlier Indomaret payments", fromMemory[currentIndomaret.key]?.reason)
+        assertFalse(fromMemory.containsKey(otherPayment.key))
+
+        // pending should EXCLUDE currentIndomaret because merchant memory can answer it
+        val (total, pending) = AiCategorization.pending(rows, snap)
+        assertEquals(2, total) // currentIndomaret + otherPayment (earlierManual is manual, so not eligible)
+        assertEquals(listOf(otherPayment.key), pending.map { it.transaction.key })
     }
 }
