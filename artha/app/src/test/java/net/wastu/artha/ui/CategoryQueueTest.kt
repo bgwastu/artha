@@ -104,7 +104,7 @@ class CategoryQueueTest {
     }
 
     @Test
-    fun priorityManualAndSelectedMonthFirst() = runTest(dispatcher) {
+    fun manualScopeRunsFirstAndAutomaticIgnoresOlderMonths() = runTest(dispatcher) {
         val prefs = FixturePreferences(configuredPrefs())
         val store = AnalysisStore(prefs.context)
 
@@ -130,8 +130,14 @@ class CategoryQueueTest {
         model.enterForeground()
         advanceUntilIdle()
 
-        // Manual run first: sep-old, then selected month newest first: oct-new, oct-old, then rest: sep-new
+        // Manual run first: sep-old, then current month newest first: oct-new, oct-old; older month sep-new is ignored
         assertEquals(pSepOlder.key, categorizedOrder.first())
+        assertEquals(listOf(pSepOlder.key, pOctNewer.key, pOctOlder.key), categorizedOrder)
+        assertFalse(pSepNewer.key in categorizedOrder)
+
+        // Older month runs only via explicit manual recategorize
+        model.recategorize(RecategorizeScope.Payment(pSepNewer.key))
+        advanceUntilIdle()
         assertEquals(listOf(pSepOlder.key, pOctNewer.key, pOctOlder.key, pSepNewer.key), categorizedOrder)
         model.lock()
     }

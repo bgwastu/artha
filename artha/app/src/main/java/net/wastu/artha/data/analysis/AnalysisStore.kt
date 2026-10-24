@@ -198,13 +198,13 @@ class AnalysisStore(context: Context) {
     @Synchronized
     fun commitCategorySuggestions(candidates: List<CategoryCandidate>, suggestions: Map<String, CategorySuggestion>, input: AnalysisSnapshot): Int {
         val current = _snapshot.value
-        if (current.aiConfig != input.aiConfig || current.knowledge != input.knowledge || current.customCategories != input.customCategories ||
-            current.manualCategories != input.manualCategories || current.userNotes != input.userNotes) return 0
+        if (current.aiConfig != input.aiConfig || current.knowledge != input.knowledge || current.customCategories != input.customCategories) return 0
         val valid = candidates.filter { candidate ->
             val key = candidate.transaction.key
             BudgetAnalyzer.isSpending(candidate.transaction) &&
                 AiCategorization.fingerprint(candidate.transaction, current) == candidate.fingerprint &&
                 !candidate.transaction.classificationIsManual && key !in current.manualCategories &&
+                current.userNotes[key] == input.userNotes[key] &&
                 current.updatedAt["cat:$key"] == input.updatedAt["cat:$key"] &&
                 suggestions[key]?.category in AiCategorization.categories(current)
         }
@@ -248,12 +248,12 @@ class AnalysisStore(context: Context) {
     @Synchronized
     fun commitMerchantSuggestions(candidates: List<CategoryCandidate>, suggestions: Map<String, CategorySuggestion>, input: AnalysisSnapshot): Int {
         val current = _snapshot.value
-        if (current.aiConfig != input.aiConfig || current.knowledge != input.knowledge || current.customCategories != input.customCategories ||
-            current.manualCategories != input.manualCategories || current.userNotes != input.userNotes) return 0
+        if (current.aiConfig != input.aiConfig || current.knowledge != input.knowledge || current.customCategories != input.customCategories) return 0
         val valid = candidates.filter { candidate ->
             val key = candidate.transaction.key
             BudgetAnalyzer.isSpending(candidate.transaction) &&
                 !candidate.transaction.classificationIsManual && key !in current.manualCategories &&
+                current.userNotes[key] == input.userNotes[key] &&
                 current.updatedAt["cat:$key"] == input.updatedAt["cat:$key"] &&
                 suggestions[key]?.category in AiCategorization.categories(current)
         }
@@ -289,10 +289,10 @@ class AnalysisStore(context: Context) {
     @Synchronized
     fun commitMerchantSuggestions(suggestions: Map<String, CategorySuggestion>, input: AnalysisSnapshot): Int {
         val current = _snapshot.value
-        if (current.aiConfig != input.aiConfig || current.knowledge != input.knowledge || current.customCategories != input.customCategories ||
-            current.manualCategories != input.manualCategories || current.userNotes != input.userNotes) return 0
+        if (current.aiConfig != input.aiConfig || current.knowledge != input.knowledge || current.customCategories != input.customCategories) return 0
         val validKeys = suggestions.keys.filter { key ->
             key !in current.manualCategories &&
+                current.userNotes[key] == input.userNotes[key] &&
                 current.updatedAt["cat:$key"] == input.updatedAt["cat:$key"] &&
                 suggestions[key]?.category in AiCategorization.categories(current)
         }

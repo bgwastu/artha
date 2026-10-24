@@ -264,7 +264,7 @@ class TransactionEditFeedbackTest {
             val state = MutableStateFlow<SpendingState>(SpendingState.Ready((0..32).map { payment().copy(providerTransactionId = if (it == 0) payment().providerTransactionId else "fixture-$it") }, emptyMap()))
             val called = CompletableDeferred<Unit>()
             var calls = 0
-            vm = ArthaViewModel(RootAccess { true }, { error("Uses fixture state") }, analysisStore = store,
+            vm = ArthaViewModel(RootAccess { true }, { error("Uses fixture state") }, clock = java.time.Clock.fixed(Instant.EPOCH, AccountingTime.zone), analysisStore = store,
                 ingest = { CompletableDeferred<Unit>().await(); emptyMap() },
                 computationDispatcher = dispatcher, spendingState = state, categorize = { _, _, batch ->
                     calls++; if (calls == 5) called.complete(Unit)

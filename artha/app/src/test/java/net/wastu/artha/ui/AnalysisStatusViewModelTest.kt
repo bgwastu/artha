@@ -86,6 +86,7 @@ class AnalysisStatusViewModelTest {
             clock = fixedClock,
             analysisStore = store,
             computationDispatcher = dispatcher,
+            ioDispatcher = dispatcher,
             spendingState = state,
             analyzeMonthAction = { _, _, _, _, _, _, onProgress ->
                 onProgress(AnalysisStage.EXAMINING)
@@ -101,7 +102,9 @@ class AnalysisStatusViewModelTest {
         advanceUntilIdle()
 
         assertTrue("Expected NeverRun in history, got: $statuses", statuses.any { it is MonthAnalysisStatus.NeverRun })
+        model.analyzeMonth(month, forceReanalyze = true)
         analyzeEntered.await()
+        model.analysisStatus.first { it is MonthAnalysisStatus.Running }
         assertTrue("Expected Running in history, got: $statuses", statuses.any { it is MonthAnalysisStatus.Running })
 
         allowComplete.complete(Unit)
@@ -131,6 +134,7 @@ class AnalysisStatusViewModelTest {
             clock = fixedClock,
             analysisStore = store,
             computationDispatcher = dispatcher,
+            ioDispatcher = dispatcher,
             spendingState = state,
             analyzeMonthAction = { _, _, _, _, _, _, _ ->
                 throw AiHttpException(401)
@@ -138,6 +142,7 @@ class AnalysisStatusViewModelTest {
         )
 
         model1.enterForeground()
+        model1.analyzeMonth(month, forceReanalyze = true)
         advanceUntilIdle()
 
         val status1 = model1.analysisStatus.value
@@ -159,6 +164,7 @@ class AnalysisStatusViewModelTest {
             clock = fixedClock,
             analysisStore = store,
             computationDispatcher = dispatcher,
+            ioDispatcher = dispatcher,
             spendingState = state,
             analyzeMonthAction = { _, _, _, _, _, _, _ ->
                 model2RanAnalysis = true
@@ -185,13 +191,14 @@ class AnalysisStatusViewModelTest {
     }
 
     @Test
-    fun waitingImportWhileRefreshing() = runTest(dispatcher) {
+    fun importDoesNotBlockManualAnalysisAndWaitingImportNeverProduced() = runTest(dispatcher) {
         val prefs = FixturePreferences(configuredPrefs())
         val store = AnalysisStore(prefs.context)
         val payment = testPayment(manual = true)
         val state = MutableStateFlow(readySpending(listOf(payment)))
 
         val importHold = CompletableDeferred<Unit>()
+        val analyzed = CompletableDeferred<Unit>()
 
         val model = ArthaViewModel(
             RootAccess { true },
@@ -199,10 +206,15 @@ class AnalysisStatusViewModelTest {
             clock = fixedClock,
             analysisStore = store,
             computationDispatcher = dispatcher,
+            ioDispatcher = dispatcher,
             spendingState = state,
             ingest = {
                 importHold.await()
                 emptyMap()
+            },
+            analyzeMonthAction = { _, _, _, _, _, _, _ ->
+                analyzed.complete(Unit)
+                MonthAnalysisResult("Monthly summary text")
             },
         )
 
@@ -210,7 +222,14 @@ class AnalysisStatusViewModelTest {
         advanceUntilIdle()
 
         assertTrue(model.refreshing.value)
-        assertEquals(MonthAnalysisStatus.Waiting(AnalysisWait.IMPORT), model.analysisStatus.value)
+        // Waiting(IMPORT) is never produced; status is NeverRun
+        assertEquals(MonthAnalysisStatus.NeverRun, model.analysisStatus.value)
+
+        // Manual analysis is NOT blocked by import in progress
+        model.analyzeMonth(month, forceReanalyze = true)
+        advanceUntilIdle()
+        assertTrue(analyzed.isCompleted)
+        assertTrue(model.analysisStatus.value is MonthAnalysisStatus.UpToDate)
 
         importHold.complete(Unit)
         advanceUntilIdle()
@@ -333,7 +352,7 @@ class AnalysisStatusViewModelTest {
     }
 
     @Test
-    fun silentDiscardReschedulesAtMostOncePerCallChain() = runTest(dispatcher) {
+    fun discardRecordsNothingSetsOutdatedAndRequiresManualReanalyze() = runTest(dispatcher) {
         val prefs = FixturePreferences(configuredPrefs())
         val store = AnalysisStore(prefs.context)
         val payment = testPayment(manual = true)
@@ -346,6 +365,7 @@ class AnalysisStatusViewModelTest {
             clock = fixedClock,
             analysisStore = store,
             computationDispatcher = dispatcher,
+            ioDispatcher = dispatcher,
             spendingState = state,
             analyzeMonthAction = { _, _, _, _, _, _, _ ->
                 attempts++
@@ -358,11 +378,25 @@ class AnalysisStatusViewModelTest {
         )
 
         model.enterForeground()
+        advanceUntilIdle()
+        assertEquals(MonthAnalysisStatus.NeverRun, model.analysisStatus.value)
+
+        // User starts analysis manually
+        model.analyzeMonth(month, forceReanalyze = true)
+        advanceUntilIdle()
+
+        // Discarded run records nothing, does not automatically retry, and status becomes Outdated
+        assertEquals(1, attempts)
+        assertNull(store.analysisFailures.value[analysisKey(month)])
+        assertTrue(model.analysisStatus.value is MonthAnalysisStatus.Outdated)
+
+        // User manually re-analyzes
+        model.analyzeMonth(month, forceReanalyze = true)
         model.analysisStatus.first { it is MonthAnalysisStatus.UpToDate }
         advanceUntilIdle()
 
-        // First attempt ran and failed commit, rescheduled once (attempt 2), then succeeded
         assertEquals(2, attempts)
+        assertTrue(model.analysisStatus.value is MonthAnalysisStatus.UpToDate)
         model.lock()
         advanceUntilIdle()
     }
