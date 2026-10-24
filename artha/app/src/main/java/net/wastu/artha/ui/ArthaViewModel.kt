@@ -88,6 +88,11 @@ class ArthaViewModel(
     val settingsError = _settingsError.asStateFlow()
     private val _analysisStages = MutableStateFlow<Map<YearMonth, AnalysisStage>>(emptyMap())
     val analysisStages = _analysisStages.asStateFlow()
+    /** Status of the selected month's AI commentary; the single source for every analysis status line. */
+    private val _analysisStatus = MutableStateFlow<MonthAnalysisStatus>(MonthAnalysisStatus.NeverRun)
+    val analysisStatus = _analysisStatus.asStateFlow()
+    private val _categoryProgress = MutableStateFlow(CategoryProgress())
+    val categoryProgress = _categoryProgress.asStateFlow()
     private val monthJobs = mutableMapOf<YearMonth, Job>()
     private val failedFingerprints = mutableMapOf<YearMonth, String>()
     private val _refreshing = MutableStateFlow(false)
