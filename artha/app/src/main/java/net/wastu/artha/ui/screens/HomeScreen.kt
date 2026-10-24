@@ -70,10 +70,17 @@ import net.wastu.artha.ui.LedgerState
 import net.wastu.artha.ui.screens.TransactionFilters
 import net.wastu.artha.ui.screens.TransactionFiltersSaver
 
-private enum class Destination(val label: String, val icon: ImageVector) {
+internal enum class Destination(val label: String, val icon: ImageVector) {
     TRANSACTIONS("Expenses", Icons.AutoMirrored.Filled.List),
     ANALYSIS("Analysis", Icons.Default.Analytics),
-    SETTINGS("Settings", Icons.Default.Settings),
+    SETTINGS("Settings", Icons.Default.Settings);
+
+    companion object {
+        val Saver = androidx.compose.runtime.saveable.Saver<Destination, String>(
+            save = { it.name },
+            restore = { name -> entries.firstOrNull { it.name == name } ?: TRANSACTIONS }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -93,16 +100,42 @@ fun HomeScreen(
     val context = LocalContext.current
     val saveableStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     var transactionFilters by rememberSaveable(stateSaver = TransactionFiltersSaver) { mutableStateOf(TransactionFilters()) }
-    var destination by rememberSaveable { mutableStateOf(Destination.TRANSACTIONS) }
+    val prefs = remember { context.getSharedPreferences("artha_ui_state", android.content.Context.MODE_PRIVATE) }
+    val initialTabName = remember { prefs.getString("active_tab", null) }
+    val initialDestination = remember {
+        initialTabName?.let { name -> Destination.entries.firstOrNull { it.name == name } }
+            ?: Destination.TRANSACTIONS
+    }
+    var destination by rememberSaveable(stateSaver = Destination.Saver) { mutableStateOf(initialDestination) }
+    androidx.compose.runtime.LaunchedEffect(destination) {
+        prefs.edit().putString("active_tab", destination.name).apply()
+    }
+
     var showSearch by rememberSaveable { mutableStateOf(false) }
     var showFilter by rememberSaveable { mutableStateOf(false) }
     var showCategoriesSheet by rememberSaveable { mutableStateOf(false) }
     var showKnowledgeEditor by rememberSaveable { mutableStateOf(false) }
     var selectedKey by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedFallback by remember { mutableStateOf<UnifiedTransaction?>(null) }
-    var showCategoryReview by rememberSaveable { mutableStateOf(false) }
-    var showAiCategories by rememberSaveable { mutableStateOf(false) }
-    var showSpendingChart by rememberSaveable { mutableStateOf(false) }
+
+    val initialShowReview = remember { prefs.getBoolean("show_category_review", false) }
+    var showCategoryReview by rememberSaveable { mutableStateOf(initialShowReview) }
+    androidx.compose.runtime.LaunchedEffect(showCategoryReview) {
+        prefs.edit().putBoolean("show_category_review", showCategoryReview).apply()
+    }
+
+    val initialShowAi = remember { prefs.getBoolean("show_ai_categories", false) }
+    var showAiCategories by rememberSaveable { mutableStateOf(initialShowAi) }
+    androidx.compose.runtime.LaunchedEffect(showAiCategories) {
+        prefs.edit().putBoolean("show_ai_categories", showAiCategories).apply()
+    }
+
+    val initialShowChart = remember { prefs.getBoolean("show_spending_chart", false) }
+    var showSpendingChart by rememberSaveable { mutableStateOf(initialShowChart) }
+    androidx.compose.runtime.LaunchedEffect(showSpendingChart) {
+        prefs.edit().putBoolean("show_spending_chart", showSpendingChart).apply()
+    }
+
     var categoryDrillFromChart by rememberSaveable { mutableStateOf(false) }
     val snackbarHost = remember { androidx.compose.material3.SnackbarHostState() }
     val importFeedback by viewModel?.importFeedback?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
@@ -130,7 +163,15 @@ fun HomeScreen(
         }
     }
 
-    BackHandler(enabled = destination != Destination.TRANSACTIONS && selectedKey == null) {
+    BackHandler(
+        enabled = destination != Destination.TRANSACTIONS &&
+            selectedKey == null &&
+            !showAiCategories &&
+            !showCategoryReview &&
+            !showSpendingChart &&
+            !showSearch &&
+            !showFilter
+    ) {
         destination = Destination.TRANSACTIONS
     }
 

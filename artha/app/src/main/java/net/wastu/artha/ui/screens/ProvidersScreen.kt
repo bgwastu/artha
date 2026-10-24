@@ -113,9 +113,6 @@ fun ProvidersScreen(
         onDetailOpenChanged(selectedProvider != null)
         onDispose { onDetailOpenChanged(false) }
     }
-    var showAnalysisSettings by rememberSaveable { mutableStateOf(false) }
-    var savingAi by remember { mutableStateOf(false) }
-    var aiError by remember { mutableStateOf<String?>(null) }
     var exporting by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -278,8 +275,8 @@ fun ProvidersScreen(
                             summary = aiSummary,
                             icon = Icons.Default.SettingsSuggest,
                         ) {
-                            aiError = null
-                            showAnalysisSettings = true
+                            onDetailOpenChanged(false)
+                            onOpenAiCategories()
                         }
                     }
 
@@ -375,40 +372,6 @@ fun ProvidersScreen(
             )
         }
 
-        if (showAnalysisSettings && snapshot != null && viewModel != null) {
-            val analysisSnapshot = snapshot!!
-            AnalysisSettingsSheet(
-                aiConfig = analysisSnapshot.aiConfig,
-                analysisEnabled = analysisSnapshot.analysisEnabled,
-                customCategories = analysisSnapshot.customCategories,
-                categoryIcons = analysisSnapshot.categoryIcons,
-                automationState = categoryAutomation,
-                categoryProgress = categoryProgress,
-                savingAi = savingAi,
-                aiError = aiError,
-                onDismiss = { if (!savingAi) showAnalysisSettings = false },
-                onAnalysisEnabled = viewModel::setAnalysisEnabled,
-                onSaveAi = { config ->
-                    savingAi = true
-                    aiError = null
-                    viewModel.updateAiConfig(config) { error ->
-                        savingAi = false
-                        aiError = error
-                    }
-                },
-                onAddCategory = viewModel::addCustomCategory,
-                onRemoveCategory = viewModel::removeCustomCategory,
-                onSetCategoryIcon = viewModel::setCategoryIcon,
-                onResetCategories = viewModel::resetCategoriesToDefault,
-                onRetryAi = viewModel::retryAutomaticCategories,
-                knowledge = analysisSnapshot.knowledge,
-                onApplyKnowledge = { viewModel.applyKnowledgeRewrite(it) },
-                onOpenAiCategories = {
-                    showAnalysisSettings = false
-                    onOpenAiCategories()
-                },
-            )
-        }
     }
 }
 
