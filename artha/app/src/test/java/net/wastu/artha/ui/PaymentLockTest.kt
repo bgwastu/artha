@@ -59,8 +59,8 @@ class PaymentLockTest {
         assertEquals("Categorizing", paymentCategoryRowSupporting(PaymentCategoryState.CATEGORIZING))
 
         assertNull(paymentNoteRowSupporting(PaymentCategoryState.IDLE))
-        assertEquals("Available after categorizing", paymentNoteRowSupporting(PaymentCategoryState.QUEUED))
-        assertEquals("Available after categorizing", paymentNoteRowSupporting(PaymentCategoryState.CATEGORIZING))
+        assertEquals("Locked while categorizing", paymentNoteRowSupporting(PaymentCategoryState.QUEUED))
+        assertEquals("Locked while categorizing", paymentNoteRowSupporting(PaymentCategoryState.CATEGORIZING))
 
         assertTrue(canEditTransaction(PaymentCategoryState.IDLE, hasStore = true))
         assertFalse(canEditTransaction(PaymentCategoryState.IDLE, hasStore = false))

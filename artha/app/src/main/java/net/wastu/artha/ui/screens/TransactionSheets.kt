@@ -55,6 +55,20 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import androidx.compose.material3.SuggestionChipDefaults
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Info
+import net.wastu.artha.data.analysis.categoryReasonText
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -69,14 +83,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.wastu.artha.data.analysis.BudgetAnalyzer
 import net.wastu.artha.data.analysis.CategorySource
-import net.wastu.artha.data.analysis.aiCategoryReason
 import net.wastu.artha.data.analysis.categorySource
-import net.wastu.artha.data.analysis.AI_REASON_PREFIX
 import net.wastu.artha.data.analysis.CategoryProgress
 import net.wastu.artha.data.analysis.PaymentCategoryState
 import net.wastu.artha.data.analysis.paymentCategoryState
 import net.wastu.artha.data.analysis.paymentCategoryStateLabel
-import net.wastu.artha.data.analysis.MERCHANT_REASON_PREFIX
 import net.wastu.artha.data.analysis.RecategorizeScope
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -276,7 +287,6 @@ private fun TransactionDetailsBody(
     val currentNote = if (snapshot?.updatedAt?.containsKey("note:${record.key}") == true)
         snapshot.userNotes[record.key].orEmpty() else record.userNote.orEmpty()
     val categorySource = if (snapshot != null && snapshot.analysisEnabled) categorySource(record, snapshot) else CategorySource.NONE
-    val aiReason = if (categorySource == CategorySource.AI && snapshot != null) aiCategoryReason(snapshot, record.key) else null
     val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(CategoryProgress()) }
     val paymentState = paymentCategoryState(record.key, categoryProgress)
     val isBusy = paymentState != PaymentCategoryState.IDLE
@@ -286,7 +296,6 @@ private fun TransactionDetailsBody(
             state.onPaymentBusy()
         }
     }
-    val rawReason = snapshot?.reasons?.get(record.key) ?: record.aiReasoning
     val focus = LocalFocusManager.current
     val closeEditor = { focus.clearFocus(); state.editor = null; state.saveError = null }
     val payload = remember(record.rawPayload) {
@@ -310,24 +319,45 @@ private fun TransactionDetailsBody(
     val showShopInItems = showOrder && shopLabel != null && !humanTitle.startsWith(shopLabel, ignoreCase = true)
     val paymentLabel = payload?.detailText("sourcePaymentMethod") ?: payload?.detailText("paymentMethod")
     val showCounterpart = counterpart != null && !humanTitle.contains(counterpart, ignoreCase = true)
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    var showWhyDialog by remember(record.key) { mutableStateOf(false) }
+    var showReplaceManualDialog by remember(record.key) { mutableStateOf(false) }
 
-    if (state.editor == "category") {
-        val selectCategory: (String) -> Unit = { category ->
-            val merchant = CategoryReviewLogic.transactionMerchant(record)
-            state.chooseCategory(category, currentCategory, isBusy = isBusy,
-                persist = { selected, complete ->
-                    if (viewModel == null) complete(Result.failure(IllegalStateException("Editor unavailable")))
-                    else viewModel.setTransactionCategory(record, selected) { result ->
-                        complete(result)
-                        if (result.isSuccess) {
-                            val peerCount = viewModel.merchantPeerCount(record, selected)
-                            if (peerCount > 0) {
-                                state.peerPrompt = PeerPrompt(selected, merchant, peerCount)
+    Box(Modifier.fillMaxWidth()) {
+        if (state.editor == "category") {
+            val selectCategory: (String) -> Unit = { category ->
+                val merchant = CategoryReviewLogic.transactionMerchant(record)
+                state.chooseCategory(category, currentCategory, isBusy = isBusy,
+                    persist = { selected, complete ->
+                        if (viewModel == null) complete(Result.failure(IllegalStateException("Editor unavailable")))
+                        else viewModel.setTransactionCategory(record, selected) { result ->
+                            complete(result)
+                            if (result.isSuccess) {
+                                state.savedFeedback = null
+                                val peerCount = viewModel.merchantPeerCount(record, selected)
+                                scope.launch {
+                                    val snackbarResult = snackbarHostState.showSnackbar(
+                                        message = "Category saved",
+                                        actionLabel = if (peerCount > 0) "Apply to $peerCount more" else null,
+                                        duration = SnackbarDuration.Short,
+                                    )
+                                    if (snackbarResult == SnackbarResult.ActionPerformed && peerCount > 0) {
+                                        viewModel.applyToMerchant(record, selected) { applyResult ->
+                                            val updated = applyResult.getOrDefault(peerCount)
+                                            scope.launch {
+                                                snackbarHostState.showSnackbar(
+                                                    message = "Updated $updated payments",
+                                                    duration = SnackbarDuration.Short,
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
-                    }
-                }, onDone = closeEditor)
-        }
+                    }, onDone = closeEditor)
+            }
         CategoryPickerView(
             currentCategory = currentCategory,
             availableCategories = (availableCategories + currentCategory).distinct(),
@@ -382,48 +412,9 @@ private fun TransactionDetailsBody(
                 if (tags.none { it.kind in StatusTagKinds }) transactionAccountingLabel(record)?.let { Text(it, style = MaterialTheme.typography.labelLarge) }
                 // With records shown, the original charge and net already appear in the Records section.
                 if (!credit && isReversal && records.isEmpty()) DetailRow("Original charge", formatMoney(originalPaymentMoney(record)))
-                state.savedFeedback?.let { SaveFeedback(it, false) }
-                if (!isBusy) {
-                    state.peerPrompt?.let { prompt ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Text(
-                                    "Apply ${prompt.category} to ${prompt.peerCount} other ${prompt.merchant} payments?",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.End,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    TextButton(onClick = { state.peerPrompt = null }) {
-                                        Text("Dismiss")
-                                    }
-                                    FilledTonalButton(
-                                        onClick = {
-                                            state.applyMerchantPrompt(isBusy) { p ->
-                                                val count = p.peerCount
-                                                viewModel?.applyToMerchant(record, p.category) { result ->
-                                                    state.peerPrompt = null
-                                                    val updated = result.getOrDefault(count)
-                                                    state.savedFeedback = "Updated $updated payments"
-                                                }
-                                            }
-                                        },
-                                        enabled = !isBusy,
-                                    ) {
-                                        Text("Apply")
-                                    }
-                                }
-                            }
-                        }
-                    }
+                val feedback = state.savedFeedback
+                if (feedback != null && feedback != "Category saved" && !feedback.startsWith("Updated ")) {
+                    SaveFeedback(feedback, false)
                 }
                 Text(humanTitle, style = MaterialTheme.typography.titleLarge)
                 TagRow(tags)
@@ -448,31 +439,15 @@ private fun TransactionDetailsBody(
                             })
                             CategorySource.AI -> ({
                                 Text("Suggested by AI", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                val reason = rawReason?.removePrefix(AI_REASON_PREFIX)?.takeIf { it.isNotBlank() }
-                                if (reason != null) {
-                                    Text(reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
                             })
                             CategorySource.MERCHANT -> ({
-                                Text("Same as earlier payments from this merchant", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                val reason = rawReason?.removePrefix(MERCHANT_REASON_PREFIX)?.takeIf { it.isNotBlank() }
-                                if (reason != null) {
-                                    Text(reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
+                                Text("Same merchant", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             })
                             CategorySource.REVIEW -> ({
                                 Text("Needs review", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
-                                val reason = rawReason?.removePrefix(AI_REASON_PREFIX)?.takeIf { it.isNotBlank() }
-                                if (reason != null) {
-                                    Text(reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
                             })
                             CategorySource.FAILED -> ({
-                                Text("AI couldn't categorize", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                                val failText = snapshot?.categoryFailures?.get(record.key)?.takeIf { it.isNotBlank() }
-                                if (failText != null) {
-                                    Text(failText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                                }
+                                Text("Couldn't categorize", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                             })
                             CategorySource.PENDING -> ({
                                 Text("Waiting for AI", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -486,47 +461,70 @@ private fun TransactionDetailsBody(
                             state.categoryDraft = currentCategory; state.saveError = null; state.savedFeedback = null; state.editor = "category"
                         }
                     }
-                    if (!isBusy) {
-                        var showReplaceManualDialog by remember { mutableStateOf(false) }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
+                    if (!isBusy && snapshot?.analysisEnabled == true) {
+                        val reason = categoryReasonText(snapshot, record.key)
+                        FlowRow(
+                            modifier = Modifier.padding(start = 36.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            if (categorySource == CategorySource.REVIEW) {
-                                TextButton(
-                                    onClick = {
-                                        if (isBusy) return@TextButton
-                                        viewModel?.confirmCategory(record, currentCategory) { result ->
-                                            if (result.isSuccess) {
-                                                state.savedFeedback = "Category saved"
-                                            }
-                                        }
+                            if (reason != null) {
+                                AssistChip(
+                                    onClick = { showWhyDialog = true },
+                                    label = { Text("Why") },
+                                    leadingIcon = {
+                                        Icon(Icons.Outlined.Info, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize))
                                     },
-                                ) {
-                                    Text("Looks right")
-                                }
+                                )
                             }
-                            TextButton(
+                            AssistChip(
                                 onClick = {
-                                    if (isBusy) return@TextButton
                                     if (categorySource == CategorySource.MANUAL) {
                                         showReplaceManualDialog = true
                                     } else {
                                         viewModel?.recategorize(RecategorizeScope.Payment(record.key))
                                     }
                                 },
-                            ) {
-                                Text("Re-categorize with AI")
+                                label = { Text("Re-categorize") },
+                                leadingIcon = {
+                                    Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize))
+                                },
+                            )
+                            if (categorySource == CategorySource.REVIEW) {
+                                SuggestionChip(
+                                    onClick = {
+                                        viewModel?.confirmCategory(record, currentCategory) { result ->
+                                            if (result.isSuccess) {
+                                                scope.launch {
+                                                    snackbarHostState.showSnackbar("Category saved")
+                                                }
+                                            }
+                                        }
+                                    },
+                                    label = { Text("Looks right") },
+                                    icon = {
+                                        Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(SuggestionChipDefaults.IconSize))
+                                    },
+                                )
                             }
                         }
-
+                        if (showWhyDialog && reason != null) {
+                            AlertDialog(
+                                onDismissRequest = { showWhyDialog = false },
+                                title = { Text("Why $currentCategory") },
+                                text = { Text(reason) },
+                                confirmButton = {
+                                    TextButton(onClick = { showWhyDialog = false }) {
+                                        Text("Close")
+                                    }
+                                },
+                            )
+                        }
                         if (showReplaceManualDialog) {
                             AlertDialog(
                                 onDismissRequest = { showReplaceManualDialog = false },
                                 title = { Text("Replace your pick?") },
-                                text = { Text("AI will suggest a category for this payment.") },
+                                text = { Text("AI will choose a new category for this payment.") },
                                 confirmButton = {
                                     TextButton(
                                         onClick = {
@@ -550,7 +548,7 @@ private fun TransactionDetailsBody(
                     label = "Note", value = currentNote.ifBlank { "Add note" },
                     icon = Icons.Default.EditNote,
                     enabled = viewModel?.analysisStore != null && !isBusy,
-                    supporting = if (isBusy) "Available after categorizing" else null,
+                    supporting = paymentNoteRowSupporting(paymentState),
                 ) {
                     if (!isBusy) {
                         state.noteDraft = currentNote; state.saveError = null; state.savedFeedback = null; state.editor = "note"
@@ -692,6 +690,11 @@ private fun TransactionDetailsBody(
                 Spacer(Modifier.height(24.dp))
             }
         }
+        }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
+        )
     }
 }
 
@@ -1081,7 +1084,7 @@ internal fun paymentCategoryRowSupporting(state: PaymentCategoryState): String? 
     paymentCategoryStateLabel(state)
 
 internal fun paymentNoteRowSupporting(state: PaymentCategoryState): String? =
-    if (state != PaymentCategoryState.IDLE) "Available after categorizing" else null
+    if (state != PaymentCategoryState.IDLE) "Locked while categorizing" else null
 
 internal fun canEditTransaction(state: PaymentCategoryState, hasStore: Boolean): Boolean =
     hasStore && state == PaymentCategoryState.IDLE

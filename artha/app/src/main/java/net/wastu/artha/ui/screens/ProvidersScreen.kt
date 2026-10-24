@@ -302,7 +302,6 @@ fun ProvidersScreen(
             customCategories = analysisSnapshot.customCategories,
             categoryIcons = analysisSnapshot.categoryIcons,
             automationState = categoryAutomation,
-            monthStatus = analysisStatus,
             categoryProgress = categoryProgress,
             savingAi = savingAi,
             aiError = aiError,
@@ -321,7 +320,6 @@ fun ProvidersScreen(
             onSetCategoryIcon = viewModel::setCategoryIcon,
             onResetCategories = viewModel::resetCategoriesToDefault,
             onRetryAi = viewModel::retryAutomaticCategories,
-            onAnalyzeNow = { viewModel.analyzeCurrentMonth() },
             knowledge = analysisSnapshot.knowledge,
             onApplyKnowledge = { viewModel.applyKnowledgeRewrite(it) },
             onOpenAiCategories = {
