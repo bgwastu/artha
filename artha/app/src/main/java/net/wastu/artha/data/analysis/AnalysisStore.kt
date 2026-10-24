@@ -184,6 +184,17 @@ class AnalysisStore(context: Context) {
         runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
     }
 
+    /** Lets the AI replace a user's pick after they confirmed "Replace your pick?". */
+    @Synchronized
+    fun removeManualCategory(key: String) {
+        val manual = _snapshot.value.manualCategories - key
+        if (manual == _snapshot.value.manualCategories) return
+        checkedPreferenceEdit(prefs, listOf("manual_categories"), "Category could not be saved") {
+            putString("manual_categories", JSONArray(manual.toList()).toString())
+        }
+        _snapshot.value = _snapshot.value.copy(manualCategories = manual)
+    }
+
     @Synchronized
     fun commitCategorySuggestions(candidates: List<CategoryCandidate>, suggestions: Map<String, CategorySuggestion>, input: AnalysisSnapshot): Int {
         val current = _snapshot.value
