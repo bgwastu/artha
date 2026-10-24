@@ -79,6 +79,9 @@ object BudgetAnalyzer {
         if (tx.direction != Direction.DEBIT || !tx.isConfirmed || tx.money.currencyCode != "IDR") return false
         if (tx.isReversedRecord) return false
         val p = runCatching { JSONObject(tx.rawPayload) }.getOrNull()
+        if (p?.optBoolean("isOwnTransfer") == true) return false
+        // Money sent to a wallet Artha can't read is the last place Artha sees that spending.
+        if (p?.optBoolean("untrackedWalletTopUp") == true) return true
         if (p?.optBoolean("isWalletFunding") == true) return false
         if (p?.optBoolean("isPocketTransfer") == true || tx.description.startsWith("Pocket Transfer:", ignoreCase = true)) return false
         val code = p?.optString("code").orEmpty()

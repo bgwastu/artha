@@ -118,10 +118,47 @@ object LedgerReconciler {
         return result + secondary.map { it.tx }.filter { it.key !in used }
     }
 
+    /** GoPay moves into its own savings pocket (GoPay Tabungan); always the user's own money. */
+    private const val GOPAY_SAVINGS_SWEEP = "AUTO_SWEEP_WITHDRAWAL"
+    /** GoPay withdrawals to a bank account; own money only when that bank shows the matching deposit. */
+    private val GOPAY_BANK_TRANSFERS = setOf("DIRECT_DEBIT_BANK_TRANSFER", "PP_DIRECT_DEBIT_BANK_TRANSFER")
+    private const val OWN_TRANSFER_WINDOW_SECONDS = 15 * 60L
+
+    /** The e-wallet a Jago top-up funds: the provider Artha reads it through, or null when Artha can't read it. */
+    private fun toppedUpWallet(e: Evidence): Pair<Boolean, Provider?> {
+        val text = (e.merchant + " " + e.tx.description).lowercase(Locale.ROOT)
+        return when {
+            "shopeepay" in text -> true to Provider.SHOPEE
+            "gopay" in text -> true to Provider.GOJEK
+            "ovo" in text -> true to Provider.GRAB
+            listOf("dana", "dnid", "linkaja").any { it in text } -> true to null
+            else -> false to null
+        }
+    }
+
     fun reconcileLedger(transactions: List<UnifiedTransaction>): List<UnifiedTransaction> {
-        val initial = transactions.distinctBy { it.key }.map { t ->
+        val unique = transactions.distinctBy { it.key }
+        // Structural evidence only; never the account holder's name. Sources with saved data count as connected.
+        val connected = unique.mapTo(mutableSetOf()) { it.provider }
+        val credits = unique.filter { it.direction == Direction.CREDIT }.groupBy { it.money.currencyCode to it.money.amountMinor }
+        fun depositedElsewhere(t: UnifiedTransaction) = credits[t.money.currencyCode to t.money.amountMinor].orEmpty()
+            .any { it.provider != t.provider && close(it, t, OWN_TRANSFER_WINDOW_SECONDS) }
+        val initial = unique.map { t ->
             val e = evidence(t)
-            t.copy(isConfirmed = e.confirmed, rawPayload = if (e.funding) e.payload.put("isWalletFunding", true).toString() else t.rawPayload)
+            val tier = e.payload.optString("serviceTier")
+            val ownTransfer = t.provider == Provider.GOJEK && t.direction == Direction.DEBIT &&
+                (tier == GOPAY_SAVINGS_SWEEP || tier in GOPAY_BANK_TRANSFERS && depositedElsewhere(t))
+            val (isTopUp, wallet) = if (t.provider == Provider.JAGO && e.funding && !e.internal &&
+                !e.payload.optBoolean("isPocketTransfer")) toppedUpWallet(e) else false to null
+            // A top-up into a wallet Artha can't read is where the spending ends for Artha, so it counts.
+            val untrackedTopUp = isTopUp && (wallet == null || wallet !in connected)
+            val payload = when {
+                ownTransfer -> e.payload.put("isOwnTransfer", true).toString()
+                untrackedTopUp -> e.payload.put("untrackedWalletTopUp", true).toString()
+                e.funding -> e.payload.put("isWalletFunding", true).toString()
+                else -> t.rawPayload
+            }
+            t.copy(isConfirmed = e.confirmed, rawPayload = payload)
         }
         val deduped = reconcileWalletReceipts(reconcileOrderPayments(reconcilePocketTransfers(initial)))
         val bank = deduped.filter { it.provider == Provider.JAGO }

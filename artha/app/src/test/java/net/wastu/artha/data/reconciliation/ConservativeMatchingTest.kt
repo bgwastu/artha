@@ -69,7 +69,8 @@ class ConservativeMatchingTest {
 
     @Test fun walletFundingIsExcludedEvenWhenItsDisplayCategoryChanges() {
         val topup = tx(Provider.JAGO, "jago:p", "GoPay", payload = """{"code":"OTD10","counterpart":"GoPay"}""").copy(category = "Dining Out")
-        val row = LedgerReconciler.reconcileLedger(listOf(topup)).single()
+        val gojek = tx(Provider.GOJEK, "gopay:o", "Order", payload = "{}")
+        val row = LedgerReconciler.reconcileLedger(listOf(topup, gojek)).single { it.provider == Provider.JAGO }
         assertFalse(BudgetAnalyzer.isSpending(row))
     }
 

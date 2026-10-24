@@ -218,7 +218,9 @@ class LedgerReconcilerTest {
             description = "Top Up OVO",
             rawPayload = """{"code":"WTD-AJ-EWALLET","counterpart":"OVO","fields":{"f16":"{\"code\":\"C058\",\"en\":\"Top up\"}"}}""",
         )
-        val reconciled = LedgerReconciler.reconcileLedger(listOf(topUp))
+        // OVO is read through Grab; with Grab connected the top-up is a transfer, not spending.
+        val grabRide = UnifiedTransaction(Provider.GRAB, "grab:ride-1", Direction.DEBIT, Money(20_000_00L), Instant.parse("2026-10-14T01:00:00Z"), "Ride", "{}")
+        val reconciled = LedgerReconciler.reconcileLedger(listOf(topUp, grabRide)).filter { it.provider == Provider.JAGO }
         assertEquals(1, reconciled.size)
         val payload = org.json.JSONObject(reconciled.first().rawPayload)
         assertTrue(payload.getBoolean("isWalletFunding"))
