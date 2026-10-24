@@ -150,8 +150,9 @@ class CloudflareQuickTunnel(
             mount -t tmpfs tmpfs /data/local/tmp/artha_etc 2>/dev/null || true
             cp -a /system/etc/* /data/local/tmp/artha_etc/ 2>/dev/null || true
             echo -e "nameserver 1.1.1.1\nnameserver 8.8.8.8" > /data/local/tmp/artha_etc/resolv.conf
+            echo -e "127.0.0.1 localhost\n::1 localhost" > /data/local/tmp/artha_etc/hosts
             mkdir -p /data/local/tmp/artha_etc/ssl/certs
-            cat /system/etc/security/cacerts/* > /data/local/tmp/artha_etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
+            cat /apex/com.android.conscrypt*/cacerts/* /system/etc/security/cacerts/* > /data/local/tmp/artha_etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
             cp /data/local/tmp/artha_etc/ssl/certs/ca-certificates.crt /data/local/tmp/artha_etc/ssl/cert.pem 2>/dev/null || true
             mount -o bind /data/local/tmp/artha_etc /system/etc 2>/dev/null || true
         """.trimIndent()
@@ -194,7 +195,7 @@ class CloudflareQuickTunnel(
                 if (logFile.exists()) logFile.delete()
                 logFile.createNewFile()
 
-                val launchCmd = "${execBinary.absolutePath} tunnel --no-autoupdate --url http://127.0.0.1:$localPort > '${logFile.absolutePath}' 2>&1 & echo \$!"
+                val launchCmd = "${execBinary.absolutePath} tunnel --no-autoupdate --metrics 127.0.0.1:0 --url http://127.0.0.1:$localPort > '${logFile.absolutePath}' 2>&1 & echo \$!"
                 val execResult = rootShell().newJob().add(launchCmd).exec()
 
                 if (!execResult.isSuccess || execResult.out.isEmpty()) {
