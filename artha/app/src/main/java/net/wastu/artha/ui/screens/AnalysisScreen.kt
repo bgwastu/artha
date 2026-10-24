@@ -133,6 +133,7 @@ fun AnalysisScreen(
     onDismissKnowledgeEditor: () -> Unit = {},
     onOpenCategoryReview: () -> Unit = {},
     onOpenAiCategories: () -> Unit = {},
+    onOpenChart: () -> Unit = {},
 ) {
     val analysis by viewModel.monthAnalysis.collectAsStateWithLifecycle()
     val ledgerState by viewModel.ledgerState.collectAsStateWithLifecycle()
@@ -201,6 +202,7 @@ fun AnalysisScreen(
             MonthSummaryCard(
                 month = selectedMonth, analysis = analysis, editable = viewModel.analysisStore != null,
                 onOpenCategories = onOpenCategoriesSheet, onOpenScope = { showScopeDialog = true },
+                onOpenChart = onOpenChart,
                 onOpenLargestPayment = largest?.let { { onOpenTransaction(it) } },
                 onPreviousMonth = { viewModel.setAnalysisMonth(selectedMonth.minusMonths(1)) },
                 onNextMonth = { viewModel.setAnalysisMonth(selectedMonth.plusMonths(1)) },
@@ -283,7 +285,7 @@ fun AnalysisScreen(
 private fun MonthSummaryCard(
     month: YearMonth, analysis: MonthSpendingAnalysis, editable: Boolean = true,
     onOpenCategories: () -> Unit, onOpenScope: () -> Unit,
-    onOpenLargestPayment: (() -> Unit)?,
+    onOpenChart: () -> Unit, onOpenLargestPayment: (() -> Unit)?,
     onPreviousMonth: () -> Unit, onNextMonth: () -> Unit,
 ) {
     val monthTitle = remember(month) { month.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)) }
@@ -304,6 +306,7 @@ private fun MonthSummaryCard(
             Box {
                 IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Month options") }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    DropdownMenuItem(text = { Text("Chart") }, onClick = { showMenu = false; onOpenChart() })
                     onOpenLargestPayment?.let { open ->
                         DropdownMenuItem(text = { Text("Largest payment") }, onClick = { showMenu = false; open() })
                     }
@@ -317,7 +320,6 @@ private fun MonthSummaryCard(
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(if (canGoNext) "Spending" else "Spending to date", style = MaterialTheme.typography.labelMedium)
-                    Icon(Icons.Default.Info, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Text(formatAmountMinor(analysis.totalPersonalSpendingMinor), style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)

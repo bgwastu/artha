@@ -102,6 +102,7 @@ fun HomeScreen(
     var selectedFallback by remember { mutableStateOf<UnifiedTransaction?>(null) }
     var showCategoryReview by rememberSaveable { mutableStateOf(false) }
     var showAiCategories by rememberSaveable { mutableStateOf(false) }
+    var showSpendingChart by rememberSaveable { mutableStateOf(false) }
     val snackbarHost = remember { androidx.compose.material3.SnackbarHostState() }
     val importFeedback by viewModel?.importFeedback?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val automaticImport by viewModel?.automaticImportActive?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
@@ -129,6 +130,10 @@ fun HomeScreen(
 
     BackHandler(enabled = destination == Destination.TRANSACTIONS && categoryFilter != null && selectedKey == null && !showSearch && !showFilter) {
         viewModel?.closeCategoryTransactions()
+    }
+
+    BackHandler(enabled = showSpendingChart) {
+        showSpendingChart = false
     }
 
     BackHandler(enabled = showCategoryReview) {
@@ -282,6 +287,7 @@ fun HomeScreen(
                                         onOpenCategoriesSheet = { showCategoriesSheet = true },
                                         onDismissCategoriesSheet = { showCategoriesSheet = false },
                                         showKnowledgeEditor = showKnowledgeEditor,
+                                        onOpenChart = { showSpendingChart = true },
                                         onDismissKnowledgeEditor = { showKnowledgeEditor = false },
                                         onOpenKnowledgeEditor = { showKnowledgeEditor = true },
                                         onOpenCategoryReview = { showCategoryReview = true },
@@ -331,6 +337,11 @@ fun HomeScreen(
                     onOpenReview = { showCategoryReview = true },
                     onOpenTransaction = { selectedKey = it.key; selectedFallback = it },
                 )
+            }
+        }
+        if (showSpendingChart && viewModel != null) {
+            Surface(Modifier.fillMaxSize()) {
+                SpendingChartScreen(viewModel = viewModel, onBack = { showSpendingChart = false })
             }
         }
         if (showCategoryReview && viewModel != null) {
