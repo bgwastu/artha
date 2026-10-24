@@ -1,5 +1,11 @@
 package net.wastu.artha.ui.screens
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.filled.Category
+import androidx.compose.ui.graphics.Color
+import net.wastu.artha.data.analysis.RecategorizeScope
+import net.wastu.artha.data.analysis.recategorizeLabel
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.rememberScrollState
@@ -127,6 +133,7 @@ fun AnalysisScreen(
     showKnowledgeEditor: Boolean = false,
     onOpenKnowledgeEditor: () -> Unit = {},
     onDismissKnowledgeEditor: () -> Unit = {},
+    onOpenCategoryReview: () -> Unit = {},
 ) {
     val analysis by viewModel.monthAnalysis.collectAsStateWithLifecycle()
     val ledgerState by viewModel.ledgerState.collectAsStateWithLifecycle()
@@ -140,6 +147,7 @@ fun AnalysisScreen(
 
     var showMonthlyNoteDialog by remember { mutableStateOf(false) }
     var showScopeDialog by remember { mutableStateOf(false) }
+    var showAiCategoriesSheet by rememberSaveable { mutableStateOf(false) }
 
     if (!analysisEnabled) {
         Column(
@@ -191,6 +199,7 @@ fun AnalysisScreen(
                 monthlyNote = snapshot.monthlyNotes[selectedMonth.toString()],
                 onEditNote = { showMonthlyNoteDialog = true },
                 onOpenCategories = onOpenCategoriesSheet, onOpenScope = { showScopeDialog = true },
+                onOpenAiCategories = { showAiCategoriesSheet = true },
                 onOpenLargestPayment = largest?.let { { onOpenTransaction(it) } },
                 onPreviousMonth = { viewModel.setAnalysisMonth(selectedMonth.minusMonths(1)) },
                 onNextMonth = { viewModel.setAnalysisMonth(selectedMonth.plusMonths(1)) },
@@ -209,6 +218,74 @@ fun AnalysisScreen(
                 month = selectedMonth,
             )
         }
+        item(key = "ai_categories") {
+            val progressSupporting = AiCategoriesLogic.statusSupportingText(categoryProgress)
+            val reviewLine = AiCategoriesLogic.reviewLine(categoryProgress)
+            val failedLine = AiCategoriesLogic.failedLine(categoryProgress)
+            val isWorking = categoryProgress.state == CategoryAutomationState.WORKING
+            val isError = categoryProgress.state == CategoryAutomationState.ERROR
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            ) {
+                ListItem(
+                    headlineContent = { Text("AI categories") },
+                    supportingContent = {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            if (progressSupporting != null) {
+                                Text(
+                                    text = progressSupporting,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            if (reviewLine != null) {
+                                Text(
+                                    text = reviewLine,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.tertiary,
+                                    modifier = Modifier.clickable { onOpenCategoryReview() },
+                                )
+                            }
+                            if (failedLine != null) {
+                                Text(
+                                    text = failedLine,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        }
+                    },
+                    leadingContent = {
+                        Icon(
+                            imageVector = Icons.Default.Category,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    },
+                    trailingContent = {
+                        if (isWorking) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else if (isError) {
+                            TextButton(onClick = { viewModel.retryAutomaticCategories() }) {
+                                Text("Retry")
+                            }
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = "Open AI categories",
+                            )
+                        }
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    modifier = Modifier.clickable { showAiCategoriesSheet = true },
+                )
+            }
+        }
         item(key = "category_header") {
             Text("Categories", style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.semantics { heading() }.padding(top = 12.dp, bottom = 4.dp), fontWeight = FontWeight.SemiBold)
@@ -217,7 +294,7 @@ fun AnalysisScreen(
             Text("No confirmed spending this month", style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else items(analysis.categories, key = { it.category }) { category ->
-            CategorySpendingRow(category, snapshot.categoryIcons, viewModel::openCategoryTransactions)
+            CategorySpendingRow(category, snapshot.categoryIcons, selectedMonth, viewModel::openCategoryTransactions, viewModel::recategorize)
         }
     }
     if (showScopeDialog) AlertDialog(
@@ -267,12 +344,28 @@ fun AnalysisScreen(
             onRetryAi = viewModel::retryAutomaticCategories,
         )
     }
+    if (showAiCategoriesSheet) {
+        AiCategoriesSheet(
+            categoryProgress = categoryProgress,
+            autoCategorize = snapshot.autoCategorize,
+            selectedMonth = selectedMonth,
+            onDismiss = { showAiCategoriesSheet = false },
+            onSetAutoCategorize = viewModel::setAutoCategorize,
+            onRecategorize = viewModel::recategorize,
+            onRetryAutomaticCategories = viewModel::retryAutomaticCategories,
+            onOpenReview = {
+                showAiCategoriesSheet = false
+                onOpenCategoryReview()
+            },
+        )
+    }
 }
 
 @Composable
 private fun MonthSummaryCard(
     month: YearMonth, analysis: MonthSpendingAnalysis, monthlyNote: String?, editable: Boolean = true,
     onEditNote: () -> Unit, onOpenCategories: () -> Unit, onOpenScope: () -> Unit,
+    onOpenAiCategories: () -> Unit = {},
     onOpenLargestPayment: (() -> Unit)?,
     onPreviousMonth: () -> Unit, onNextMonth: () -> Unit,
 ) {
@@ -298,6 +391,7 @@ private fun MonthSummaryCard(
                         DropdownMenuItem(text = { Text("Largest payment") }, onClick = { showMenu = false; open() })
                     }
                     DropdownMenuItem(enabled = editable, text = { Text("Monthly note") }, onClick = { showMenu = false; onEditNote() })
+                    DropdownMenuItem(text = { Text("AI categories") }, onClick = { showMenu = false; onOpenAiCategories() })
                     DropdownMenuItem(enabled = editable, text = { Text("Manage categories") }, onClick = { showMenu = false; onOpenCategories() })
                     DropdownMenuItem(text = { Text("Spending scope") }, onClick = { showMenu = false; onOpenScope() })
                 }
@@ -454,10 +548,8 @@ internal fun AiInsightsCard(
             )
 
             val showActionRow = AiCardLogic.shouldShowActionRow(hasSummary, expanded, readOnly)
-            val categoryLabel = categoryProgressLabel(categoryProgress)
-            val showCategoryLine = categoryLabel != null && (expanded || !hasSummary)
 
-            if (expanded || showActionRow || showCategoryLine) {
+            if (expanded || showActionRow) {
                 Column(
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -474,43 +566,6 @@ internal fun AiInsightsCard(
                         }
                     }
 
-                    if (categoryLabel != null && (expanded || !hasSummary)) {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            if (categoryProgress.state == CategoryAutomationState.ERROR) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        text = categoryLabel,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.weight(1f, fill = false),
-                                    )
-                                    TextButton(onClick = onRetryCategories) {
-                                        Text("Retry")
-                                    }
-                                }
-                            } else {
-                                Text(
-                                    text = categoryLabel,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                if (categoryProgress.state == CategoryAutomationState.WORKING) {
-                                    val progressFraction = AiCardLogic.categoryProgressFraction(
-                                        categoryProgress.labeled,
-                                        categoryProgress.total,
-                                    )
-                                    LinearProgressIndicator(
-                                        progress = { progressFraction },
-                                        modifier = Modifier.fillMaxWidth(),
-                                    )
-                                }
-                            }
-                        }
-                    }
 
                     if (showActionRow) {
                         val actionLabel = analysisActionLabel(status)
@@ -536,28 +591,53 @@ internal fun AiInsightsCard(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
-private fun CategorySpendingRow(category: CategorySpending, categoryIcons: Map<String, String>, onOpenCategory: (String) -> Unit) {
+private fun CategorySpendingRow(
+    category: CategorySpending,
+    categoryIcons: Map<String, String>,
+    selectedMonth: YearMonth,
+    onOpenCategory: (String) -> Unit,
+    onRecategorize: (RecategorizeScope) -> Unit,
+) {
     val fontScale = LocalDensity.current.fontScale
+    var showMenu by remember { mutableStateOf(false) }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val stackAmount = fontScale > 1.3f || maxWidth < 280.dp
-        ListItem(
-            headlineContent = { Text(category.category) },
-            supportingContent = {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    if (stackAmount) Text(formatAmountMinor(category.amountMinor), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Text("${category.sharePercent.toInt()}%", style = MaterialTheme.typography.bodySmall)
-                        Text("${category.transactions.size} ${if (category.transactions.size == 1) "payment" else "payments"}", style = MaterialTheme.typography.bodySmall)
+        Box {
+            ListItem(
+                headlineContent = { Text(category.category) },
+                supportingContent = {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        if (stackAmount) Text(formatAmountMinor(category.amountMinor), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Text("${category.sharePercent.toInt()}%", style = MaterialTheme.typography.bodySmall)
+                            Text("${category.transactions.size} ${if (category.transactions.size == 1) "payment" else "payments"}", style = MaterialTheme.typography.bodySmall)
+                        }
                     }
-                }
-            },
-            leadingContent = { Icon(categoryIconFor(category.category, categoryIcons), null) },
-            trailingContent = if (stackAmount) null else ({ Text(formatAmountMinor(category.amountMinor), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface) }),
-            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-            modifier = Modifier.clickable(onClickLabel = "Open category payments") { onOpenCategory(category.category) },
-        )
+                },
+                leadingContent = { Icon(categoryIconFor(category.category, categoryIcons), null) },
+                trailingContent = if (stackAmount) null else ({ Text(formatAmountMinor(category.amountMinor), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface) }),
+                colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier.combinedClickable(
+                    onClick = { onOpenCategory(category.category) },
+                    onLongClick = { showMenu = true },
+                    onClickLabel = "Open category payments",
+                ),
+            )
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text(recategorizeLabel(RecategorizeScope.CategoryInMonth(category.category, selectedMonth))) },
+                    onClick = {
+                        showMenu = false
+                        onRecategorize(RecategorizeScope.CategoryInMonth(category.category, selectedMonth))
+                    },
+                )
+            }
+        }
     }
 }
 

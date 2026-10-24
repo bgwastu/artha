@@ -100,6 +100,7 @@ fun HomeScreen(
     var showKnowledgeEditor by rememberSaveable { mutableStateOf(false) }
     var selectedKey by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedFallback by remember { mutableStateOf<UnifiedTransaction?>(null) }
+    var showCategoryReview by rememberSaveable { mutableStateOf(false) }
     val snackbarHost = remember { androidx.compose.material3.SnackbarHostState() }
     val importFeedback by viewModel?.importFeedback?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val automaticImport by viewModel?.automaticImportActive?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
@@ -127,6 +128,10 @@ fun HomeScreen(
 
     BackHandler(enabled = destination == Destination.TRANSACTIONS && categoryFilter != null && selectedKey == null && !showSearch && !showFilter) {
         viewModel?.closeCategoryTransactions()
+    }
+
+    BackHandler(enabled = showCategoryReview) {
+        showCategoryReview = false
     }
 
     val latestTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyList<UnifiedTransaction>()) }
@@ -274,6 +279,7 @@ fun HomeScreen(
                                         showKnowledgeEditor = showKnowledgeEditor,
                                         onDismissKnowledgeEditor = { showKnowledgeEditor = false },
                                         onOpenKnowledgeEditor = { showKnowledgeEditor = true },
+                                        onOpenCategoryReview = { showCategoryReview = true },
                                     )
                                 }
                             }
@@ -291,6 +297,7 @@ fun HomeScreen(
                                 viewModel = viewModel,
                                 onDetailOpenChanged = { settingsSourceOpen = it },
                                 onOpenDemo = { net.wastu.artha.DemoMode.open(context) },
+                                onOpenCategoryReview = { showCategoryReview = true },
                             )
                         }
                     }
@@ -306,6 +313,14 @@ fun HomeScreen(
                     onTransaction = { selectedKey = it.key; selectedFallback = it },
                     viewModel = viewModel,
                     onRetry = onRetryLedger,
+                )
+            }
+        }
+        if (showCategoryReview && viewModel != null) {
+            Surface(Modifier.fillMaxSize()) {
+                CategoryReviewScreen(
+                    viewModel = viewModel,
+                    onBack = { showCategoryReview = false },
                 )
             }
         }

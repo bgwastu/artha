@@ -106,6 +106,7 @@ fun ProvidersScreen(
     viewModel: ArthaViewModel? = null,
     onOpenDemo: (() -> Unit)? = null,
     onDetailOpenChanged: (Boolean) -> Unit = {},
+    onOpenCategoryReview: () -> Unit = {},
 ) {
     var selectedProvider by rememberSaveable { mutableStateOf<Provider?>(null) }
     androidx.compose.runtime.DisposableEffect(selectedProvider) {
@@ -113,6 +114,7 @@ fun ProvidersScreen(
         onDispose { onDetailOpenChanged(false) }
     }
     var showAnalysisSettings by rememberSaveable { mutableStateOf(false) }
+    var showAiCategoriesSheet by rememberSaveable { mutableStateOf(false) }
     var showWidgetHelp by rememberSaveable { mutableStateOf(false) }
     var savingAi by remember { mutableStateOf(false) }
     var aiError by remember { mutableStateOf<String?>(null) }
@@ -322,6 +324,25 @@ fun ProvidersScreen(
             onAnalyzeNow = { viewModel.analyzeCurrentMonth() },
             knowledge = analysisSnapshot.knowledge,
             onApplyKnowledge = { viewModel.applyKnowledgeRewrite(it) },
+            onOpenAiCategories = { showAiCategoriesSheet = true },
+        )
+    }
+    if (showAiCategoriesSheet && snapshot != null && viewModel != null) {
+        val analysisSnapshot = snapshot!!
+        val selectedMonth by viewModel.selectedMonth.collectAsStateWithLifecycle()
+        AiCategoriesSheet(
+            categoryProgress = categoryProgress,
+            autoCategorize = analysisSnapshot.autoCategorize,
+            selectedMonth = selectedMonth,
+            onDismiss = { showAiCategoriesSheet = false },
+            onSetAutoCategorize = viewModel::setAutoCategorize,
+            onRecategorize = viewModel::recategorize,
+            onRetryAutomaticCategories = viewModel::retryAutomaticCategories,
+            onOpenReview = {
+                showAiCategoriesSheet = false
+                showAnalysisSettings = false
+                onOpenCategoryReview()
+            },
         )
     }
     }

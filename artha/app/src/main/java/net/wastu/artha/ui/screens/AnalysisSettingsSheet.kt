@@ -14,6 +14,9 @@ import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -81,6 +84,7 @@ fun AnalysisSettingsSheet(
     onAnalyzeNow: () -> Unit,
     knowledge: String?,
     onApplyKnowledge: (String) -> Unit,
+    onOpenAiCategories: () -> Unit = {},
 ) {
     var showKnowledge by rememberSaveable { mutableStateOf(false) }
     var baseUrl by remember(aiConfig) { mutableStateOf(aiConfig.baseUrl) }
@@ -142,6 +146,18 @@ fun AnalysisSettingsSheet(
                             }
                         },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
+                    ListItem(
+                        headlineContent = { Text("AI categories") },
+                        supportingContent = progressLabel?.let { { Text(it) } },
+                        leadingContent = {
+                            Icon(Icons.Default.Category, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        },
+                        trailingContent = {
+                            Icon(Icons.Default.ChevronRight, contentDescription = "Open AI categories")
+                        },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier = Modifier.clickable(onClick = onOpenAiCategories),
                     )
                     HorizontalDivider(Modifier.padding(vertical = 12.dp))
                     Text("AI provider", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))

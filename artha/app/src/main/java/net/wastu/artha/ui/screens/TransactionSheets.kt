@@ -31,6 +31,9 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
@@ -67,6 +70,10 @@ import net.wastu.artha.data.analysis.BudgetAnalyzer
 import net.wastu.artha.data.analysis.CategorySource
 import net.wastu.artha.data.analysis.aiCategoryReason
 import net.wastu.artha.data.analysis.categorySource
+import net.wastu.artha.data.analysis.AI_REASON_PREFIX
+import net.wastu.artha.data.analysis.CategoryProgress
+import net.wastu.artha.data.analysis.MERCHANT_REASON_PREFIX
+import net.wastu.artha.data.analysis.RecategorizeScope
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.semantics
@@ -105,6 +112,7 @@ import org.json.JSONObject
 import org.json.JSONException
 import androidx.compose.ui.semantics.selected
 
+data class PeerPrompt(val category: String, val merchant: String, val peerCount: Int)
 class TransactionDetailsState internal constructor() {
     internal var editor by mutableStateOf<String?>(null)
     internal var saving by mutableStateOf(false)
@@ -112,6 +120,7 @@ class TransactionDetailsState internal constructor() {
     internal var noteDraft by mutableStateOf("")
     internal var saveError by mutableStateOf<String?>(null)
     internal var savedFeedback by mutableStateOf<String?>(null)
+    internal var peerPrompt by mutableStateOf<PeerPrompt?>(null)
     /** Index into the group records being viewed, or -1 for the transaction itself. */
     internal var recordIndex by mutableStateOf(-1)
     internal var sourceExpanded by mutableStateOf(false)
@@ -236,6 +245,8 @@ private fun TransactionDetailsBody(
         snapshot.userNotes[record.key].orEmpty() else record.userNote.orEmpty()
     val categorySource = if (snapshot != null && snapshot.analysisEnabled) categorySource(record, snapshot) else CategorySource.NONE
     val aiReason = if (categorySource == CategorySource.AI && snapshot != null) aiCategoryReason(snapshot, record.key) else null
+    val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(CategoryProgress()) }
+    val rawReason = snapshot?.reasons?.get(record.key) ?: record.aiReasoning
     val focus = LocalFocusManager.current
     val closeEditor = { focus.clearFocus(); state.editor = null; state.saveError = null }
     val payload = remember(record.rawPayload) {
@@ -262,10 +273,19 @@ private fun TransactionDetailsBody(
 
     if (state.editor == "category") {
         val selectCategory: (String) -> Unit = { category ->
+            val merchant = CategoryReviewLogic.transactionMerchant(record)
             state.chooseCategory(category, currentCategory,
                 persist = { selected, complete ->
                     if (viewModel == null) complete(Result.failure(IllegalStateException("Editor unavailable")))
-                    else viewModel.setTransactionCategory(record, selected, complete)
+                    else viewModel.setTransactionCategory(record, selected) { result ->
+                        complete(result)
+                        if (result.isSuccess) {
+                            val peerCount = viewModel.merchantPeerCount(record, selected)
+                            if (peerCount > 0) {
+                                state.peerPrompt = PeerPrompt(selected, merchant, peerCount)
+                            }
+                        }
+                    }
                 }, onDone = closeEditor)
         }
         CategoryPickerView(
@@ -322,6 +342,41 @@ private fun TransactionDetailsBody(
                 // With records shown, the original charge and net already appear in the Records section.
                 if (!credit && isReversal && records.isEmpty()) DetailRow("Original charge", formatMoney(originalPaymentMoney(record)))
                 state.savedFeedback?.let { SaveFeedback(it, false) }
+                state.peerPrompt?.let { prompt ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                "Apply ${prompt.category} to ${prompt.peerCount} other ${prompt.merchant} payments?",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                TextButton(onClick = { state.peerPrompt = null }) {
+                                    Text("Dismiss")
+                                }
+                                FilledTonalButton(onClick = {
+                                    val count = prompt.peerCount
+                                    viewModel?.applyToMerchant(record, prompt.category) { result ->
+                                        state.peerPrompt = null
+                                        val updated = result.getOrDefault(count)
+                                        state.savedFeedback = "Updated $updated payments"
+                                    }
+                                }) {
+                                    Text("Apply")
+                                }
+                            }
+                        }
+                    }
+                }
                 Text(humanTitle, style = MaterialTheme.typography.titleLarge)
                 TagRow(tags)
                 if (records.isNotEmpty()) GroupRecordsSection(records, record.occurredAt, linkedRecordsExplanation(record)) { state.recordIndex = it }
@@ -335,20 +390,112 @@ private fun TransactionDetailsBody(
                             })
                             CategorySource.AI -> ({
                                 Text("Suggested by AI", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                if (!aiReason.isNullOrBlank()) {
-                                    Text(aiReason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                val reason = rawReason?.removePrefix(AI_REASON_PREFIX)?.takeIf { it.isNotBlank() }
+                                if (reason != null) {
+                                    Text(reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            })
+                            CategorySource.MERCHANT -> ({
+                                Text("Same as earlier payments from this merchant", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                val reason = rawReason?.removePrefix(MERCHANT_REASON_PREFIX)?.takeIf { it.isNotBlank() }
+                                if (reason != null) {
+                                    Text(reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            })
+                            CategorySource.REVIEW -> ({
+                                Text("Needs review", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+                                val reason = rawReason?.removePrefix(AI_REASON_PREFIX)?.takeIf { it.isNotBlank() }
+                                if (reason != null) {
+                                    Text(reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            })
+                            CategorySource.FAILED -> ({
+                                Text("AI couldn't categorize", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                                val failText = snapshot?.categoryFailures?.get(record.key)?.takeIf { it.isNotBlank() }
+                                if (failText != null) {
+                                    Text(failText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                                 }
                             })
                             CategorySource.PENDING -> ({
                                 Text("Waiting for AI", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             })
-                            CategorySource.MERCHANT, CategorySource.REVIEW, CategorySource.FAILED -> null
                             CategorySource.NONE -> null
                         },
                         icon = categoryIconFor(currentCategory, snapshot?.categoryIcons.orEmpty()),
                         enabled = viewModel?.analysisStore != null,
                     ) {
                         state.categoryDraft = currentCategory; state.saveError = null; state.savedFeedback = null; state.editor = "category"
+                    }
+                    var showReplaceManualDialog by remember { mutableStateOf(false) }
+                    val isCategorizing = record.key in categoryProgress.activeKeys
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (categorySource == CategorySource.REVIEW) {
+                            TextButton(
+                                onClick = {
+                                    viewModel?.confirmCategory(record, currentCategory) { result ->
+                                        if (result.isSuccess) {
+                                            state.savedFeedback = "Category saved"
+                                        }
+                                    }
+                                },
+                            ) {
+                                Text("Looks right")
+                            }
+                        }
+                        if (isCategorizing) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Text(
+                                    "Categorizing",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        } else {
+                            TextButton(
+                                onClick = {
+                                    if (categorySource == CategorySource.MANUAL) {
+                                        showReplaceManualDialog = true
+                                    } else {
+                                        viewModel?.recategorize(RecategorizeScope.Payment(record.key))
+                                    }
+                                },
+                            ) {
+                                Text("Re-categorize with AI")
+                            }
+                        }
+                    }
+
+                    if (showReplaceManualDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showReplaceManualDialog = false },
+                            title = { Text("Replace your pick?") },
+                            text = { Text("AI will suggest a category for this payment.") },
+                            confirmButton = {
+                                TextButton(
+                                    onClick = {
+                                        showReplaceManualDialog = false
+                                        viewModel?.recategorize(RecategorizeScope.Payment(record.key, replaceManual = true))
+                                    },
+                                ) {
+                                    Text("Replace")
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showReplaceManualDialog = false }) {
+                                    Text("Cancel")
+                                }
+                            },
+                        )
                     }
                 }
                 DetailEditRow(
