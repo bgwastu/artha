@@ -76,10 +76,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -212,8 +210,7 @@ fun AnalysisScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 16.dp, bottom = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                    .padding(top = 12.dp, bottom = 2.dp),
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -227,7 +224,7 @@ fun AnalysisScreen(
                     )
                     Spacer(Modifier.weight(1f))
                     // Badge on the icon inside the button, so it sits within the button's bounds.
-                    IconButton(onClick = onOpenAiCategories) {
+                    IconButton(onClick = onOpenAiCategories, modifier = Modifier.size(40.dp)) {
                         BadgedBox(badge = { if (categoryProgress.review > 0) Badge { Text(categoryProgress.review.toString()) } }) {
                             Icon(Icons.Outlined.AutoAwesome, contentDescription = "AI categories")
                         }
@@ -360,26 +357,32 @@ private fun CategorySpendingRow(
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val stackAmount = fontScale > 1.3f || maxWidth < 280.dp
         Box {
-            ListItem(
-                headlineContent = { Text(category.category) },
-                supportingContent = {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        if (stackAmount) Text(formatAmountMinor(category.amountMinor), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Text("${category.sharePercent.toInt()}%", style = MaterialTheme.typography.bodySmall)
-                            Text("${category.transactions.size} ${if (category.transactions.size == 1) "payment" else "payments"}", style = MaterialTheme.typography.bodySmall)
-                        }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .combinedClickable(
+                        onClick = { onOpenCategory(category.category) },
+                        onLongClick = { showMenu = true },
+                        onClickLabel = "Open category payments",
+                    )
+                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                verticalAlignment = if (stackAmount) Alignment.Top else Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Icon(categoryIconFor(category.category, categoryIcons), null,
+                    Modifier.padding(top = if (stackAmount) 2.dp else 0.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(category.category)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Text("${category.sharePercent.toInt()}%", style = MaterialTheme.typography.bodySmall)
+                        Text("${category.transactions.size} ${if (category.transactions.size == 1) "payment" else "payments"}", style = MaterialTheme.typography.bodySmall)
                     }
-                },
-                leadingContent = { Icon(categoryIconFor(category.category, categoryIcons), null) },
-                trailingContent = if (stackAmount) null else ({ Text(formatAmountMinor(category.amountMinor), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface) }),
-                colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier.combinedClickable(
-                    onClick = { onOpenCategory(category.category) },
-                    onLongClick = { showMenu = true },
-                    onClickLabel = "Open category payments",
-                ),
-            )
+                    if (stackAmount) Text(formatAmountMinor(category.amountMinor), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                }
+                if (!stackAmount) {
+                    Text(formatAmountMinor(category.amountMinor), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                }
+            }
             DropdownMenu(
                 expanded = showMenu,
                 onDismissRequest = { showMenu = false },
