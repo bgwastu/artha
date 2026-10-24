@@ -94,6 +94,9 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.libsu.core)
     implementation("org.brotli:dec:0.1.2")
+    implementation(libs.ktor.server.core)
+    implementation(libs.ktor.server.cio)
+    implementation(libs.ktor.server.cors)
 
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)

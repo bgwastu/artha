@@ -30,6 +30,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.MoreVert
@@ -113,6 +114,7 @@ fun ProvidersScreen(
         onDetailOpenChanged(selectedProvider != null)
         onDispose { onDetailOpenChanged(false) }
     }
+    var showApiServerSettings by rememberSaveable { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -321,6 +323,25 @@ fun ProvidersScreen(
                         )
                     }
                 }
+                item { SettingsHeading("API & Agent Access") }
+                item {
+                    val isRunning by net.wastu.artha.api.service.ApiServerController.isRunning.collectAsStateWithLifecycle()
+                    val tunnelState by net.wastu.artha.api.service.ApiServerController.tunnelState.collectAsStateWithLifecycle()
+                    val apiSummary = when (val s = tunnelState) {
+                        is net.wastu.artha.api.tunnel.TunnelState.Active -> "Live: ${s.url}"
+                        is net.wastu.artha.api.tunnel.TunnelState.Starting -> "Connecting to Cloudflare..."
+                        is net.wastu.artha.api.tunnel.TunnelState.Downloading -> "Downloading connector..."
+                        is net.wastu.artha.api.tunnel.TunnelState.Failed -> "Tunnel error"
+                        is net.wastu.artha.api.tunnel.TunnelState.Inactive -> if (isRunning) "Running locally" else "Off"
+                    }
+                    SettingsLink(
+                        title = "Cloudflare API Tunnel",
+                        summary = apiSummary,
+                        icon = Icons.Default.Cloud,
+                    ) {
+                        showApiServerSettings = true
+                    }
+                }
             }
 
             if (expanded) {
@@ -372,6 +393,9 @@ fun ProvidersScreen(
             )
         }
 
+        if (showApiServerSettings) {
+            ApiServerSheet(onDismiss = { showApiServerSettings = false })
+        }
     }
 }
 
