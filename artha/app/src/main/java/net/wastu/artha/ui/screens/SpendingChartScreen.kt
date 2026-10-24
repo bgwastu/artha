@@ -19,6 +19,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +33,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
@@ -45,6 +49,8 @@ import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
 import com.patrykandpatrick.vico.compose.common.Fill
 import com.patrykandpatrick.vico.compose.common.ProvideVicoTheme
 import com.patrykandpatrick.vico.compose.common.component.TextComponent
+import com.patrykandpatrick.vico.compose.common.component.rememberTextComponent
+import com.patrykandpatrick.vico.compose.cartesian.marker.rememberDefaultCartesianMarker
 import com.patrykandpatrick.vico.compose.m3.common.rememberM3VicoTheme
 import com.patrykandpatrick.vico.compose.cartesian.data.CartesianValueFormatter
 import com.patrykandpatrick.vico.compose.pie.PieChart
@@ -133,21 +139,29 @@ fun SpendingChartScreen(viewModel: ArthaViewModel, onBack: () -> Unit) {
                 }
             }
 
-            if (analysis.categories.isEmpty()) {
-                Column(
-                    Modifier.fillMaxWidth().padding(vertical = 40.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text("No confirmed spending this month", style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            } else {
-                DailyChartSection(selectedMonth, analysis, today)
-                CategoryPieSection(analysis)
+            var selectedTab by rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
+            TabRow(selectedTabIndex = selectedTab) {
+                Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Daily") })
+                Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Categories") })
+            }
+            val empty = analysis.categories.isEmpty()
+            when (selectedTab) {
+                1 -> if (empty) EmptyChart() else CategoryPieSection(analysis)
+                else -> if (empty) EmptyChart() else DailyChartSection(selectedMonth, analysis, today)
             }
             Spacer(Modifier.height(16.dp))
         }
+    }
+}
+
+@Composable
+private fun EmptyChart() {
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("No confirmed spending this month", style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -160,18 +174,28 @@ private fun DailyChartSection(month: YearMonth, analysis: MonthSpendingAnalysis,
             columnModel { series(daily) }
         }
     }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Daily", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-        CartesianChartHost(
-            chart = rememberCartesianChart(
-                rememberColumnCartesianLayer(),
-                startAxis = VerticalAxis.rememberStart(valueFormatter = compactRupiahFormatter()),
-                bottomAxis = HorizontalAxis.rememberBottom(valueFormatter = dayFormatter(daily.size)),
+    val marker = rememberDefaultCartesianMarker(
+        label = rememberTextComponent(
+            androidx.compose.ui.text.TextStyle(
+                color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp,
             ),
-            modelProducer = producer,
-            modifier = Modifier.fillMaxWidth().height(220.dp),
-        )
-    }
+        ),
+        valueFormatter = { _, targets ->
+            val target = targets.first() as com.patrykandpatrick.vico.compose.cartesian.marker.ColumnCartesianLayerMarkerTarget
+            formatMoney(net.wastu.artha.core.model.Money(target.columns.first().entry.y.toLong()))
+        },
+    )
+    CartesianChartHost(
+        chart = rememberCartesianChart(
+            rememberColumnCartesianLayer(),
+            startAxis = VerticalAxis.rememberStart(valueFormatter = compactRupiahFormatter()),
+            bottomAxis = HorizontalAxis.rememberBottom(valueFormatter = dayFormatter(daily.size)),
+            marker = marker,
+            markerController = com.patrykandpatrick.vico.compose.cartesian.marker.CartesianMarkerController.rememberToggleOnTap(),
+        ),
+        modelProducer = producer,
+        modifier = Modifier.fillMaxWidth().height(240.dp),
+    )
 }
 
 @Composable
