@@ -334,7 +334,7 @@ class CategoryReviewLogicTest {
         assertEquals("Kopi Kenangan", item.merchant)
         assertEquals("Coffee", item.aiCategory)
         assertEquals("Coffee shop detected", item.reason)
-        assertEquals("−Rp25.000", item.amountText)
+        assertEquals("Rp25.000", item.amountText)
         assertTrue(item.dateText.isNotBlank())
     }
 }

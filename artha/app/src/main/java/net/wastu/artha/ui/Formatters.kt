@@ -33,7 +33,7 @@ fun formatTime(instant: Instant): String = TransactionTimeFormatter.format(insta
 internal fun paymentRowAmount(transaction: UnifiedTransaction): String {
     val credit = transaction.direction == Direction.CREDIT
     val reversed = transaction.isReversedRecord
-    return if (!credit && reversed) "Rp0" else "${if (credit) "+" else "−"}${formatMoney(transaction.money)}"
+    return if (!credit && reversed) "Rp0" else "${if (credit) "+" else ""}${formatMoney(transaction.money)}"
 }
 
 /** Keep the original charge available when a refund changes its displayed net amount. */

@@ -49,7 +49,7 @@ class TransactionPresentationTest {
         assertFalse(net.wastu.artha.data.analysis.BudgetAnalyzer.isSpending(credit))
         assertEquals(ordinary.money, credit.money)
         assertEquals("Rp0", paymentRowAmount(ordinary.copy(isReversal = true)))
-        assertEquals("−${formatMoney(ordinary.money)}", paymentRowAmount(ordinary))
+        assertEquals(formatMoney(ordinary.money), paymentRowAmount(ordinary))
     }
 
     @Test fun walletTopUpCodesReadAsWalletFundingNotAGenericExclusion() {

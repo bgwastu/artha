@@ -14,7 +14,7 @@ data class GroupRecord(val role: String, val transaction: UnifiedTransaction) {
     /** Records only show how they were paid; grouping facts belong to the parent row. */
     val tags: List<TransactionTag> get() = transactionTags(transaction)
         .filter { it.kind == TransactionTagKind.QRIS || it.kind == TransactionTagKind.CARD }
-    val signedAmount: String get() = "${if (transaction.direction == Direction.CREDIT) "+" else "−"}${formatMoney(transaction.money)}"
+    val signedAmount: String get() = "${if (transaction.direction == Direction.CREDIT) "+" else ""}${formatMoney(transaction.money)}"
 }
 
 internal fun groupRecords(transaction: UnifiedTransaction): List<GroupRecord> {

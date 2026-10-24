@@ -180,16 +180,19 @@ internal fun periodSummary(
     val totalMinor = spending.sumOf { it.money.amountMinor }
     val count = spending.size
     val label = when {
-        range != null -> when (range) {
-            TransactionPeriod.THIS_MONTH.range(today) -> TransactionPeriod.THIS_MONTH.label
-            TransactionPeriod.LAST_MONTH.range(today) -> TransactionPeriod.LAST_MONTH.label
-            TransactionPeriod.LAST_30_DAYS.range(today) -> TransactionPeriod.LAST_30_DAYS.label
-            else -> rangeLabel(range)
-        }
+        range != null -> periodLabel(range, today)
         category != null -> category
         else -> ""
     }
     return PeriodSummary(totalMinor, count, label)
+}
+
+/** Preset name when the range matches one ("This month"), otherwise the dates. Used by the summary and the chip. */
+internal fun periodLabel(range: Pair<Long?, Long?>, today: LocalDate): String = when (range) {
+    TransactionPeriod.THIS_MONTH.range(today) -> TransactionPeriod.THIS_MONTH.label
+    TransactionPeriod.LAST_MONTH.range(today) -> TransactionPeriod.LAST_MONTH.label
+    TransactionPeriod.LAST_30_DAYS.range(today) -> TransactionPeriod.LAST_30_DAYS.label
+    else -> rangeLabel(range)
 }
 
 private data class ActiveTransactionFilter(val label: String, val clear: () -> Unit)
@@ -226,7 +229,7 @@ fun LedgerScreen(
     val active = buildList {
         category?.let { add(ActiveTransactionFilter(it) { viewModel?.clearCategoryFilter() }) }
         effectiveFilters.provider?.let { add(ActiveTransactionFilter(it.displayName) { onFiltersChanged(filters.copy(provider = null)) }) }
-        dateRange?.let { add(ActiveTransactionFilter(rangeLabel(it)) { viewModel?.clearDateRangeFilter() }) }
+        dateRange?.let { add(ActiveTransactionFilter(periodLabel(it, LocalDate.now(AccountingTime.clock))) { viewModel?.clearDateRangeFilter() }) }
     }
     val today = remember { LocalDate.now(AccountingTime.clock.withZone(AccountingTime.zone)) }
     val allDebitTransactions = remember(state) {
@@ -446,7 +449,7 @@ fun SearchTransactionsScreen(
     fun clearFilters() { filters = TransactionFilters(); firstDay = null; lastDay = null }
     val activeFilters = buildList {
         effectiveFilters.provider?.let { add(ActiveTransactionFilter(it.displayName) { filters = filters.copy(provider = null) }) }
-        dateRange?.let { add(ActiveTransactionFilter(rangeLabel(it)) { firstDay = null; lastDay = null }) }
+        dateRange?.let { add(ActiveTransactionFilter(periodLabel(it, LocalDate.now(AccountingTime.clock))) { firstDay = null; lastDay = null }) }
     }
     // Build the search index off the main thread, outside composition and scrolling.
     val index by produceState<List<SearchEntry>?>(null, transactions, showCategory) {
@@ -787,7 +790,8 @@ fun TransactionRow(
     val movedMoney = tags.any { it.kind == TransactionTagKind.REVERSED || it.kind == TransactionTagKind.REFUND || it.kind == TransactionTagKind.TRANSFER }
     val title = remember(transaction) { transactionHumanLine(transaction) }
     val amount = remember(transaction) { paymentRowAmount(transaction) }
-    val amountColor = if (reversed) MaterialTheme.colorScheme.onSurfaceVariant else expenseColor()
+    // Reversed charges and own transfers aren't spending, so their amounts are not shown as expenses.
+    val amountColor = if (reversed || tags.any { it.kind == TransactionTagKind.TRANSFER }) MaterialTheme.colorScheme.onSurfaceVariant else expenseColor()
     val payloadValues by produceState(initialValue = emptyList<String>(), transaction.rawPayload, highlightQuery.isNotBlank()) {
         value = if (highlightQuery.isBlank()) emptyList() else withContext(Dispatchers.Default) { payloadTextValues(transaction.rawPayload) }
     }

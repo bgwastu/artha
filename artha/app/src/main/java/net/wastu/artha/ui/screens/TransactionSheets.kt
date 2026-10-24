@@ -774,7 +774,7 @@ private fun GroupRecordsSection(records: List<GroupRecord>, parentTime: Instant,
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         headlineContent = { Text("Net", fontWeight = FontWeight.SemiBold) },
                         trailingContent = {
-                            Text(when { net > 0 -> "−$amount"; net < 0 -> "+$amount"; else -> amount },
+                            Text(when { net < 0 -> "+$amount"; else -> amount },
                                 style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
                                 color = if (net < 0) incomeColor() else MaterialTheme.colorScheme.onSurface)
                         },

@@ -1,5 +1,7 @@
 package net.wastu.artha.ui.screens
 
+import androidx.compose.foundation.layout.navigationBarsPadding
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -332,6 +334,7 @@ fun CategoryReviewScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .navigationBarsPadding()
                         .padding(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -428,7 +431,6 @@ fun CategoryReviewScreen(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .verticalScroll(rememberScrollState())
-                                .padding(horizontal = 24.dp)
                                 .padding(top = 16.dp, bottom = 24.dp),
                         ) {
                             Text(
@@ -436,9 +438,10 @@ fun CategoryReviewScreen(
                                 style = MaterialTheme.typography.headlineSmall,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 16.dp),
                             )
                             Row(
-                                modifier = Modifier.padding(top = 4.dp),
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
@@ -460,13 +463,13 @@ fun CategoryReviewScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 3,
                                     overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(top = 12.dp),
+                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
                                 )
                             }
                             Text(
                                 text = "Category",
                                 style = MaterialTheme.typography.labelLarge,
-                                modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 8.dp),
                             )
                             Column(modifier = Modifier.selectableGroup()) {
                                 val isAiSelected = selectedCategory == item.aiCategory
