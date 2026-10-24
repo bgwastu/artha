@@ -6,6 +6,7 @@ import java.time.Clock
 import java.time.YearMonth
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.channels.Channel
 import net.wastu.artha.core.model.*
 import net.wastu.artha.core.root.*
 import net.wastu.artha.data.analysis.*
@@ -47,11 +48,16 @@ class ArthaViewModel(
     val syncingProvider: StateFlow<Provider?> = MutableStateFlow<Provider?>(null).asStateFlow(),
     val analysisStore: AnalysisStore? = null,
     private val computationDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val spendingState: StateFlow<SpendingState>? = null,
     private val retrySpending: (() -> Unit)? = null,
     private val gojekHistoryWalk: (() -> Unit)? = null,
     private val gojekFlashRefresh: (() -> Unit)? = null,
     private val categorize: suspend (AiConfig, AnalysisSnapshot, List<CategoryCandidate>) -> Map<String, CategorySuggestion> = AiCategorization::classify,
+    private val fromMemoryAction: (List<UnifiedTransaction>, AnalysisSnapshot) -> Map<String, CategorySuggestion> = AiCategorization::fromMemory,
+    private val scopeKeysAction: (RecategorizeScope, List<UnifiedTransaction>, AnalysisSnapshot) -> Set<String> = AiCategorization::scopeKeys,
+    private val needsReviewAction: (UnifiedTransaction, AnalysisSnapshot) -> Boolean = AiCategorization::needsReview,
+    private val merchantKeyProvider: (UnifiedTransaction) -> String? = ::merchantKey,
     private val analyzeMonthAction: suspend (
         config: AiConfig,
         knowledge: String,
@@ -285,80 +291,451 @@ class ArthaViewModel(
         }
     }
 
+    private val queuePumpTrigger = MutableStateFlow(0L)
+    private val activeBatchJobs = mutableMapOf<Job, Set<String>>()
+    private val inFlightKeys = mutableSetOf<String>()
+    private val manualQueue = mutableListOf<ManualQueueEntry>()
+    private val replaceManualKeys = mutableSetOf<String>()
+    private val batchAttempts = mutableMapOf<String, Int>()
+    private val backedOffKeys = mutableSetOf<String>()
+    private val backoffJobs = mutableMapOf<String, Job>()
+    private var nonRetryableError: String? = null
+    private val categoryBackoff = listOf(30_000L, 120_000L, 600_000L)
+    private data class ManualQueueEntry(val key: String, val replaceManual: Boolean)
+    private data class QueueInput(
+        val rows: List<UnifiedTransaction>,
+        val snapshot: AnalysisSnapshot,
+        val month: YearMonth,
+    )
+
+    private fun isNonRetryableHttp(e: Exception): Boolean {
+        val http = (e as? AiHttpException) ?: (e.cause as? AiHttpException)
+        return http != null && http.status in setOf(400, 401, 403, 404)
+    }
+
+    private fun triggerPump() {
+        queuePumpTrigger.update { it + 1L }
+    }
+
     private fun observeAutomaticCategories() {
         val store = analysisStore ?: return
         if (categorizationJob?.isActive == true) return
         categorizationJob = viewModelScope.launch {
-            var failedBatch: String? = null
             var previousConfig: AiConfig? = null
-            var previousRetry = 0
+            var previousRows: List<Pair<String, java.time.Instant>>? = null
+            var previousEnabled = false
 
-            fun publish(state: CategoryAutomationState, labeled: Int = 0, total: Int = 0, error: String? = null) {
-                _categoryAutomation.value = state
-                _categoryProgress.value = CategoryProgress(state, labeled, total, error)
-            }
-
-            combine(_reconciledCache, analysisSnapshot.map(AiCategorization::requestSnapshot).distinctUntilChanged(), categoryRetry) { rows, snapshot, retry ->
-                CategoryInput(rows, snapshot, retry)
-            }.debounce(1000).collectLatest { input ->
+            combine(
+                _reconciledCache,
+                analysisSnapshot,
+                _selectedMonth,
+                queuePumpTrigger,
+            ) { rows, snapshot, month, _ ->
+                QueueInput(rows, snapshot, month)
+            }.collect { input ->
                 val config = input.snapshot.aiConfig
-                if (config != previousConfig || input.retry != previousRetry) failedBatch = null
-                previousConfig = config; previousRetry = input.retry
-                // No hashing while analysis is off or unconfigured.
-                if (!input.snapshot.analysisEnabled || config.baseUrl.isBlank() || config.apiKey.isBlank() || config.model.isBlank()) {
-                    publish(CategoryAutomationState.NOT_CONFIGURED)
-                    return@collectLatest
-                }
-                val (total, pending) = withContext(computationDispatcher) { AiCategorization.pending(input.rows, input.snapshot) }
-                val labeled = total - pending.size
-                val batch = withContext(computationDispatcher) { AiCategorization.batchOf(pending, input.snapshot) }
-                if (batch.isEmpty()) {
-                    publish(CategoryAutomationState.READY, labeled, total)
-                    return@collectLatest
-                }
-                val batchId = batch.joinToString(":") { it.fingerprint }
-                if (failedBatch == batchId) return@collectLatest
-                publish(CategoryAutomationState.WORKING, labeled, total)
-                try {
-                    val suggestions = AiCategorization.requestWithRetry { categorize(config, input.snapshot, batch) }
-                    ensureActive()
-                    val currentRows = _reconciledCache.value.associateBy { it.key }
-                    val unchanged = batch.filter { candidate ->
-                        currentRows[candidate.transaction.key]?.let { current ->
-                            !current.classificationIsManual && AiCategorization.fingerprint(current, analysisSnapshot.value) == candidate.fingerprint
-                        } == true
+                val enabled = input.snapshot.analysisEnabled
+                val rowSigs = input.rows.map { it.key to it.occurredAt }
+
+                val configChanged = config != previousConfig
+                val enabledChanged = enabled != previousEnabled
+                val rowsChanged = rowSigs != previousRows
+
+                if (configChanged || enabledChanged || rowsChanged) {
+                    for (job in activeBatchJobs.keys.toList()) job.cancel()
+                    activeBatchJobs.clear()
+                    inFlightKeys.clear()
+                    for (job in backoffJobs.values) job.cancel()
+                    backoffJobs.clear()
+                    backedOffKeys.clear()
+
+                    if (configChanged) {
+                        batchAttempts.clear()
+                        nonRetryableError = null
                     }
-                    val committed = withContext(Dispatchers.IO) { store.commitCategorySuggestions(unchanged, suggestions, input.snapshot) }
-                    // A commit changes the snapshot, which re-emits and picks the next batch; stay WORKING until then.
-                    if (committed == 0 || committed >= pending.size) publish(CategoryAutomationState.READY, labeled + committed, total)
-                    else publish(CategoryAutomationState.WORKING, labeled + committed, total)
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (e: Exception) {
-                    failedBatch = batchId
-                    publish(CategoryAutomationState.ERROR, labeled, total, aiConnectionFailure(e))
-                    // Back off 30 s, 2 min, 10 min, then wait for a manual retry.
-                    val attempt = batchFailures.merge(batchId, 1, Int::plus)!!
-                    categoryBackoff.getOrNull(attempt - 1)?.let { wait -> viewModelScope.launch { delay(wait); retryAutomaticCategories() } }
+                    previousConfig = config
+                    previousEnabled = enabled
+                    previousRows = rowSigs
+                }
+
+                if (!enabled || config.baseUrl.isBlank() || config.apiKey.isBlank() || config.model.isBlank()) {
+                    val progress = CategoryProgress(
+                        state = CategoryAutomationState.NOT_CONFIGURED,
+                        paused = !input.snapshot.autoCategorize,
+                    )
+                    _categoryProgress.value = progress
+                    _categoryAutomation.value = CategoryAutomationState.NOT_CONFIGURED
+                    return@collect
+                }
+
+                if (nonRetryableError != null && manualQueue.isEmpty() && activeBatchJobs.isEmpty()) {
+                    updateCategoryProgress(input.snapshot, input.rows)
+                    return@collect
+                }
+
+                commitMerchantMemory(input.rows, input.snapshot)
+
+                val currentSnapshot = analysisSnapshot.value
+                while (activeBatchJobs.size < 2) {
+                    val batch = getNextCategoryBatch(currentSnapshot, input.rows)
+                    if (batch.isEmpty()) break
+                    launchCategoryBatch(batch, config, currentSnapshot)
+                }
+
+                updateCategoryProgress(analysisSnapshot.value, input.rows)
+            }
+        }
+    }
+
+    private fun isNeedingCategory(tx: UnifiedTransaction, snapshot: AnalysisSnapshot): Boolean {
+        val reason = snapshot.reasons[tx.key]
+        if (reason != null && (reason.startsWith(MERCHANT_REASON_PREFIX) || reason.startsWith(AI_REASON_PREFIX))) {
+            if (reason.startsWith(MERCHANT_REASON_PREFIX)) return false
+        }
+        return AiCategorization.needsLabel(CategoryCandidate(tx, AiCategorization.fingerprint(tx, snapshot)), snapshot)
+    }
+
+    private suspend fun commitMerchantMemory(rows: List<UnifiedTransaction>, snapshot: AnalysisSnapshot) {
+        val store = analysisStore ?: return
+        val memorySuggestions = fromMemoryAction(rows, snapshot)
+        if (memorySuggestions.isEmpty()) return
+
+        withContext(ioDispatcher) {
+            for ((key, suggestion) in memorySuggestions) {
+                val current = store.snapshot.value
+                if (key !in current.manualCategories && current.categories[key] != suggestion.category) {
+                    store.setClassification(key, suggestion.category, suggestion.reason, manual = false)
                 }
             }
         }
     }
 
-    private val batchFailures = mutableMapOf<String, Int>()
-    private val categoryBackoff = listOf(30_000L, 120_000L, 600_000L)
-    private data class CategoryInput(val rows: List<UnifiedTransaction>, val snapshot: AnalysisSnapshot, val retry: Int)
+    private fun getNextCategoryBatch(snapshot: AnalysisSnapshot, rows: List<UnifiedTransaction>): List<CategoryCandidate> {
+        val candidates = mutableListOf<CategoryCandidate>()
+        val rowsByKey = rows.associateBy { it.key }
+
+        // 1. Manual runs first (in request order)
+        for (entry in manualQueue) {
+            if (candidates.size >= AiCategorization.MAX_BATCH) break
+            if (entry.key in inFlightKeys) continue
+            val tx = rowsByKey[entry.key] ?: continue
+            val candidateTx = if (entry.replaceManual) tx.copy(classificationIsManual = false) else tx
+            candidates += CategoryCandidate(candidateTx, AiCategorization.fingerprint(candidateTx, snapshot))
+        }
+
+        // 2. Automatic runs (only if autoCategorize is true and nonRetryableError is null)
+        if (snapshot.autoCategorize && nonRetryableError == null && candidates.size < AiCategorization.MAX_BATCH) {
+            val selected = _selectedMonth.value
+            val eligible = rows.filter { AiCategorization.isEligible(it, snapshot) }.distinctBy { it.key }
+
+            val pendingAutomatic = eligible.filter { tx ->
+                tx.key !in inFlightKeys &&
+                    tx.key !in snapshot.categoryFailures &&
+                    tx.key !in backedOffKeys &&
+                    isNeedingCategory(tx, snapshot)
+            }
+
+            val inSelectedMonth = pendingAutomatic.filter { tx ->
+                YearMonth.from(tx.occurredAt.atZone(AccountingTime.zone)) == selected
+            }.sortedByDescending { it.occurredAt }
+
+            val inOtherMonths = pendingAutomatic.filter { tx ->
+                YearMonth.from(tx.occurredAt.atZone(AccountingTime.zone)) != selected
+            }.sortedByDescending { it.occurredAt }
+
+            val ordered = inSelectedMonth + inOtherMonths
+
+            for (tx in ordered) {
+                if (candidates.size >= AiCategorization.MAX_BATCH) break
+                if (candidates.any { it.transaction.key == tx.key }) continue
+                candidates += CategoryCandidate(tx, AiCategorization.fingerprint(tx, snapshot))
+            }
+        }
+
+        if (candidates.isEmpty()) return emptyList()
+        return AiCategorization.batchOf(candidates, snapshot)
+    }
+
+    private fun launchCategoryBatch(
+        batch: List<CategoryCandidate>,
+        config: AiConfig,
+        snapshot: AnalysisSnapshot,
+    ) {
+        val batchKeys = batch.map { it.transaction.key }.toSet()
+        inFlightKeys.addAll(batchKeys)
+        manualQueue.removeAll { it.key in batchKeys }
+
+        val job = viewModelScope.launch {
+            try {
+                updateCategoryProgress(analysisSnapshot.value, _reconciledCache.value)
+                val suggestions = withContext(computationDispatcher) {
+                    categorize(config, snapshot, batch)
+                }
+                ensureActive()
+
+                val replaceKeys = batch.map { it.transaction.key }.filter { it in replaceManualKeys }.toSet()
+                if (replaceKeys.isNotEmpty()) {
+                    withContext(ioDispatcher) {
+                        for (key in replaceKeys) {
+                            replaceManualKeys.remove(key)
+                            analysisStore?.removeManualCategory(key)
+                            val suggestion = suggestions[key]
+                            if (suggestion != null) {
+                                analysisStore?.setClassification(key, suggestion.category, suggestion.reason, manual = false)
+                            }
+                        }
+                    }
+                }
+
+                val standardBatch = batch.filter { it.transaction.key !in replaceKeys }
+                if (standardBatch.isNotEmpty()) {
+                    val currentRows = _reconciledCache.value.associateBy { it.key }
+                    val currentSnapshot = analysisSnapshot.value
+                    val unchanged = standardBatch.filter { candidate ->
+                        currentRows[candidate.transaction.key]?.let { current ->
+                            AiCategorization.fingerprint(current, currentSnapshot) == candidate.fingerprint
+                        } == true
+                    }
+                    withContext(ioDispatcher) {
+                        analysisStore?.commitCategorySuggestions(unchanged, suggestions, currentSnapshot)
+                    }
+                }
+
+                val batchKey = batch.map { it.transaction.key }.sorted().joinToString(":")
+                batchAttempts.remove(batchKey)
+                backedOffKeys.removeAll(batchKeys)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                if (isNonRetryableHttp(e)) {
+                    nonRetryableError = aiConnectionFailure(e)
+                    for ((otherJob, _) in activeBatchJobs.toList()) {
+                        if (otherJob !== coroutineContext[Job]) otherJob.cancel()
+                    }
+                } else {
+                    val batchKey = batch.map { it.transaction.key }.sorted().joinToString(":")
+                    val attempt = (batchAttempts[batchKey] ?: 0) + 1
+                    batchAttempts[batchKey] = attempt
+                    val waitDelay = categoryBackoff.getOrNull(attempt - 1)
+                    if (waitDelay != null) {
+                        backedOffKeys.addAll(batchKeys)
+                        val backoffJob = viewModelScope.launch {
+                            delay(waitDelay)
+                            backedOffKeys.removeAll(batchKeys)
+                            if (categorizationJob?.isActive == true) {
+                                triggerPump()
+                            }
+                        }
+                        for (k in batchKeys) {
+                            backoffJobs[k]?.cancel()
+                            backoffJobs[k] = backoffJob
+                        }
+                    } else {
+                        val msg = aiConnectionFailure(e)
+                        withContext(ioDispatcher) {
+                            analysisStore?.recordCategoryFailures(batchKeys, msg)
+                        }
+                        backedOffKeys.removeAll(batchKeys)
+                    }
+                }
+            } finally {
+                inFlightKeys.removeAll(batchKeys)
+                activeBatchJobs.remove(coroutineContext[Job])
+                if (categorizationJob?.isActive == true) {
+                    triggerPump()
+                }
+            }
+        }
+        activeBatchJobs[job] = batchKeys
+    }
+
+    private fun updateCategoryProgress(snapshot: AnalysisSnapshot, rows: List<UnifiedTransaction>) {
+        val config = snapshot.aiConfig
+        val configured = snapshot.analysisEnabled && config.baseUrl.isNotBlank() && config.apiKey.isNotBlank() && config.model.isBlank().not()
+        if (!configured) {
+            val progress = CategoryProgress(
+                state = CategoryAutomationState.NOT_CONFIGURED,
+                paused = !snapshot.autoCategorize,
+            )
+            _categoryProgress.value = progress
+            _categoryAutomation.value = CategoryAutomationState.NOT_CONFIGURED
+            return
+        }
+
+        val eligible = rows.filter { AiCategorization.isEligible(it, snapshot) }.distinctBy { it.key }
+        val pendingCount = eligible.count { isNeedingCategory(it, snapshot) }
+        val total = eligible.size
+        val labeled = total - pendingCount
+        val reviewCount = eligible.count { needsReviewAction(it, snapshot) }
+        val failedCount = eligible.count { it.key in snapshot.categoryFailures }
+
+        if (nonRetryableError != null) {
+            val progress = CategoryProgress(
+                state = CategoryAutomationState.ERROR,
+                labeled = labeled,
+                total = total,
+                error = nonRetryableError,
+                review = reviewCount,
+                failed = failedCount,
+                paused = !snapshot.autoCategorize,
+                activeKeys = inFlightKeys.toSet(),
+            )
+            _categoryProgress.value = progress
+            _categoryAutomation.value = CategoryAutomationState.ERROR
+            return
+        }
+
+        val inFlight = inFlightKeys.isNotEmpty()
+        val manualQueued = manualQueue.any { it.key !in inFlightKeys }
+        val automaticQueued = snapshot.autoCategorize && eligible.any { isNeedingCategory(it, snapshot) && it.key !in snapshot.categoryFailures }
+
+        val isWorking = inFlight || manualQueued || automaticQueued
+        val state = if (isWorking) CategoryAutomationState.WORKING else CategoryAutomationState.READY
+
+        val progress = CategoryProgress(
+            state = state,
+            labeled = labeled,
+            total = total,
+            error = null,
+            review = reviewCount,
+            failed = failedCount,
+            paused = !snapshot.autoCategorize,
+            activeKeys = inFlightKeys.toSet(),
+        )
+        _categoryProgress.value = progress
+        _categoryAutomation.value = state
+    }
+
     /** Runs AI categorization for [scope] now, ahead of the automatic queue and regardless of failure back-off. */
-    fun recategorize(scope: RecategorizeScope) { retryAutomaticCategories() }
+    fun recategorize(scope: RecategorizeScope) {
+        val rows = _reconciledCache.value
+        val snapshot = analysisSnapshot.value
+        val keys = scopeKeysAction(scope, rows, snapshot)
+        if (keys.isEmpty()) return
+
+        viewModelScope.launch(ioDispatcher) {
+            analysisStore?.clearCategoryFailures(keys)
+        }
+        backedOffKeys.removeAll(keys)
+        for (k in keys) {
+            backoffJobs.remove(k)?.cancel()
+            batchAttempts.remove(k)
+        }
+
+        val replaceManual = (scope as? RecategorizeScope.Payment)?.replaceManual == true
+        if (replaceManual) {
+            replaceManualKeys.addAll(keys)
+        }
+
+        val entries = keys.filter { it !in inFlightKeys }.map { ManualQueueEntry(it, replaceManual) }
+        val entryKeys = entries.map { it.key }.toSet()
+        manualQueue.removeAll { it.key in entryKeys }
+        manualQueue.addAll(0, entries)
+
+        observeAutomaticCategories()
+        triggerPump()
+    }
+
     /** Pauses or resumes the automatic queue; manual [recategorize] runs still work while paused. */
-    fun setAutoCategorize(enabled: Boolean) {}
+    fun setAutoCategorize(enabled: Boolean) {
+        viewModelScope.launch(ioDispatcher) {
+            analysisStore?.setAutoCategorize(enabled)
+        }
+    }
+
     /** Accepts [category] for a reviewed payment; it becomes the user's pick and teaches merchant memory. */
-    fun confirmCategory(transaction: UnifiedTransaction, category: String, onComplete: (Result<Unit>) -> Unit) =
-        setTransactionCategory(transaction, category, onComplete)
+    fun confirmCategory(transaction: UnifiedTransaction, category: String, onComplete: (Result<Unit>) -> Unit) {
+        setTransactionCategory(transaction, category) { result ->
+            if (result.isSuccess) {
+                viewModelScope.launch(ioDispatcher) {
+                    analysisStore?.clearCategoryFailures(listOf(transaction.key))
+                }
+                backedOffKeys.remove(transaction.key)
+                backoffJobs.remove(transaction.key)?.cancel()
+                batchAttempts.remove(transaction.key)
+                triggerPump()
+            }
+            onComplete(result)
+        }
+    }
+
     /** Other non-manual payments from the same merchant whose category differs from [category]. */
-    fun merchantPeerCount(transaction: UnifiedTransaction, category: String): Int = 0
+    fun merchantPeerCount(transaction: UnifiedTransaction, category: String): Int {
+        val targetKey = merchantKeyProvider(transaction) ?: return 0
+        val snapshot = analysisSnapshot.value
+        return _reconciledCache.value.count { peer ->
+            peer.key != transaction.key &&
+                BudgetAnalyzer.isSpending(peer) &&
+                !peer.classificationIsManual &&
+                peer.key !in snapshot.manualCategories &&
+                merchantKeyProvider(peer) == targetKey &&
+                (snapshot.categories[peer.key] ?: peer.category) != category
+        }
+    }
+
     /** Applies [category] as the user's pick to those peers; reports how many changed. */
-    fun applyToMerchant(transaction: UnifiedTransaction, category: String, onComplete: (Result<Int>) -> Unit) { onComplete(Result.success(0)) }
-    fun retryAutomaticCategories() { categoryRetry.update { it + 1 }; observeAutomaticCategories() }
+    fun applyToMerchant(transaction: UnifiedTransaction, category: String, onComplete: (Result<Int>) -> Unit) {
+        val targetKey = merchantKeyProvider(transaction)
+        if (targetKey == null) {
+            onComplete(Result.success(0))
+            return
+        }
+        val snapshot = analysisSnapshot.value
+        val peers = _reconciledCache.value.filter { peer ->
+            peer.key != transaction.key &&
+                BudgetAnalyzer.isSpending(peer) &&
+                !peer.classificationIsManual &&
+                peer.key !in snapshot.manualCategories &&
+                merchantKeyProvider(peer) == targetKey &&
+                (snapshot.categories[peer.key] ?: peer.category) != category
+        }
+        if (peers.isEmpty()) {
+            onComplete(Result.success(0))
+            return
+        }
+        viewModelScope.launch {
+            val result = withContext(ioDispatcher) {
+                try {
+                    val store = checkNotNull(analysisStore) { "Categories are unavailable" }
+                    for (peer in peers) {
+                        store.setClassification(peer.key, category, "", manual = true)
+                    }
+                    store.clearCategoryFailures(peers.map { it.key })
+                    Result.success(peers.size)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            }
+            if (result.isSuccess) {
+                val peerKeys = peers.map { it.key }
+                backedOffKeys.removeAll(peerKeys)
+                for (k in peerKeys) {
+                    backoffJobs.remove(k)?.cancel()
+                    batchAttempts.remove(k)
+                }
+                triggerPump()
+            }
+            onComplete(result)
+        }
+    }
+
+    fun retryAutomaticCategories() {
+        nonRetryableError = null
+        backedOffKeys.clear()
+        for ((_, job) in backoffJobs) job.cancel()
+        backoffJobs.clear()
+        batchAttempts.clear()
+        val failures = analysisSnapshot.value.categoryFailures.keys
+        if (failures.isNotEmpty()) {
+            viewModelScope.launch(ioDispatcher) {
+                analysisStore?.clearCategoryFailures(failures)
+            }
+        }
+        triggerPump()
+        observeAutomaticCategories()
+    }
 
     private fun visibleLedger(rows: List<UnifiedTransaction>, enabled: Set<Provider>, dates: Pair<Long?, Long?>?, category: String?): LedgerState.Ready {
         val (start, end) = dates ?: (null to null)
@@ -447,6 +824,10 @@ class ArthaViewModel(
     }
     fun lock() {
         stopForegroundImports(); observerJob?.cancel(); categorizationJob?.cancel(); monthJobs.values.forEach(Job::cancel); monthJobs.clear()
+        for ((job, _) in activeBatchJobs.toList()) job.cancel()
+        activeBatchJobs.clear(); inFlightKeys.clear(); backedOffKeys.clear()
+        for ((_, job) in backoffJobs) job.cancel(); backoffJobs.clear()
+        manualQueue.clear()
         _rootGate.value = RootGateState.LOCKED; _ledgerState.value = LedgerState.Loading
     }
     fun setAnalysisMonth(month: YearMonth) {
@@ -592,3 +973,95 @@ private data class AnalysisStatusExecution(
     val stages: Map<YearMonth, AnalysisStage>,
     val failures: Map<String, AnalysisFailure>,
 )
+
+// =========================================================================
+// TODO(engine): Private stubs for Worker A integration.
+// Integrator: Delete this section when merging data/analysis engine functions.
+// =========================================================================
+
+private fun AiCategorization.fromMemory(
+    rows: List<UnifiedTransaction>,
+    snapshot: AnalysisSnapshot,
+): Map<String, CategorySuggestion> = emptyMap()
+
+private fun AiCategorization.scopeKeys(
+    scope: RecategorizeScope,
+    rows: List<UnifiedTransaction>,
+    snapshot: AnalysisSnapshot,
+): Set<String> = when (scope) {
+    is RecategorizeScope.Payment -> setOf(scope.key)
+    is RecategorizeScope.CategoryInMonth -> rows.filter {
+        BudgetAnalyzer.isSpending(it) &&
+            it.category == scope.category &&
+            YearMonth.from(it.occurredAt.atZone(AccountingTime.zone)) == scope.month &&
+            (it.key !in snapshot.manualCategories && !it.classificationIsManual)
+    }.map { it.key }.toSet()
+    is RecategorizeScope.Month -> rows.filter {
+        BudgetAnalyzer.isSpending(it) &&
+            YearMonth.from(it.occurredAt.atZone(AccountingTime.zone)) == scope.month &&
+            (it.key !in snapshot.manualCategories && !it.classificationIsManual)
+    }.map { it.key }.toSet()
+    RecategorizeScope.Uncategorized -> rows.filter {
+        BudgetAnalyzer.isSpending(it) &&
+            (it.category.isNullOrBlank() || it.category == CategoryConstants.UNCATEGORIZED) &&
+            (it.key !in snapshot.manualCategories && !it.classificationIsManual)
+    }.map { it.key }.toSet()
+    RecategorizeScope.NeedsReview -> rows.filter {
+        AiCategorization.needsReview(it, snapshot)
+    }.map { it.key }.toSet()
+    RecategorizeScope.All -> rows.filter {
+        BudgetAnalyzer.isSpending(it) && (it.key !in snapshot.manualCategories && !it.classificationIsManual)
+    }.map { it.key }.toSet()
+}
+
+private fun AiCategorization.needsReview(
+    tx: UnifiedTransaction,
+    snapshot: AnalysisSnapshot,
+): Boolean = false
+
+private fun merchantKey(tx: UnifiedTransaction): String? =
+    tx.description.trim().lowercase().takeIf { it.isNotBlank() }
+
+private fun AnalysisStore.recordCategoryFailures(keys: Collection<String>, message: String) {
+    try {
+        val field = AnalysisStore::class.java.getDeclaredField("_snapshot").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val flow = field.get(this) as? MutableStateFlow<AnalysisSnapshot>
+        flow?.update { current ->
+            current.copy(categoryFailures = current.categoryFailures + keys.associateWith { message })
+        }
+    } catch (_: Exception) {}
+}
+
+private fun AnalysisStore.clearCategoryFailures(keys: Collection<String>) {
+    try {
+        val field = AnalysisStore::class.java.getDeclaredField("_snapshot").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val flow = field.get(this) as? MutableStateFlow<AnalysisSnapshot>
+        flow?.update { current ->
+            current.copy(categoryFailures = current.categoryFailures - keys.toSet())
+        }
+    } catch (_: Exception) {}
+}
+
+private fun AnalysisStore.setAutoCategorize(enabled: Boolean) {
+    try {
+        val field = AnalysisStore::class.java.getDeclaredField("_snapshot").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val flow = field.get(this) as? MutableStateFlow<AnalysisSnapshot>
+        flow?.update { current ->
+            current.copy(autoCategorize = enabled)
+        }
+    } catch (_: Exception) {}
+}
+
+private fun AnalysisStore.removeManualCategory(key: String) {
+    try {
+        val field = AnalysisStore::class.java.getDeclaredField("_snapshot").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val flow = field.get(this) as? MutableStateFlow<AnalysisSnapshot>
+        flow?.update { current ->
+            current.copy(manualCategories = current.manualCategories - key)
+        }
+    } catch (_: Exception) {}
+}
