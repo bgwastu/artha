@@ -64,6 +64,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.wastu.artha.data.analysis.BudgetAnalyzer
+import net.wastu.artha.data.analysis.CategorySource
+import net.wastu.artha.data.analysis.aiCategoryReason
+import net.wastu.artha.data.analysis.categorySource
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.semantics
@@ -231,7 +234,8 @@ private fun TransactionDetailsBody(
     val currentCategory = snapshot?.categories?.get(record.key) ?: record.category ?: "Uncategorized"
     val currentNote = if (snapshot?.updatedAt?.containsKey("note:${record.key}") == true)
         snapshot.userNotes[record.key].orEmpty() else record.userNote.orEmpty()
-    val manualCategory = record.classificationIsManual || snapshot?.manualCategories?.contains(record.key) == true
+    val categorySource = if (snapshot != null && snapshot.analysisEnabled) categorySource(record, snapshot) else CategorySource.NONE
+    val aiReason = if (categorySource == CategorySource.AI && snapshot != null) aiCategoryReason(snapshot, record.key) else null
     val focus = LocalFocusManager.current
     val closeEditor = { focus.clearFocus(); state.editor = null; state.saveError = null }
     val payload = remember(record.rawPayload) {
@@ -325,7 +329,21 @@ private fun TransactionDetailsBody(
                 if (!credit && snapshot?.analysisEnabled != false) {
                     DetailEditRow(
                         label = "Category", value = currentCategory,
-                        supporting = if (manualCategory) "Chosen by you" else null,
+                        supportingContent = when (categorySource) {
+                            CategorySource.MANUAL -> ({
+                                Text("Set by you", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            })
+                            CategorySource.AI -> ({
+                                Text("Suggested by AI", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (!aiReason.isNullOrBlank()) {
+                                    Text(aiReason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            })
+                            CategorySource.PENDING -> ({
+                                Text("Waiting for AI", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            })
+                            CategorySource.NONE -> null
+                        },
                         icon = categoryIconFor(currentCategory, snapshot?.categoryIcons.orEmpty()),
                         enabled = viewModel?.analysisStore != null,
                     ) {
@@ -623,7 +641,9 @@ private fun DetailRow(label: String, value: String) {
 @Composable
 private fun DetailEditRow(
     label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector,
-    enabled: Boolean, supporting: String? = null, onClick: () -> Unit,
+    enabled: Boolean, supporting: String? = null,
+    supportingContent: (@Composable () -> Unit)? = null,
+    onClick: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(vertical = 12.dp),
@@ -633,7 +653,11 @@ private fun DetailEditRow(
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(value, style = MaterialTheme.typography.bodyLarge)
-            supporting?.let { Text(it, style = MaterialTheme.typography.labelMedium) }
+            if (supportingContent != null) {
+                supportingContent()
+            } else {
+                supporting?.let { Text(it, style = MaterialTheme.typography.labelMedium) }
+            }
         }
         if (enabled) Icon(Icons.Default.ChevronRight, contentDescription = "Edit $label")
     }

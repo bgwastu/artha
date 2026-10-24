@@ -17,6 +17,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,6 +49,11 @@ import kotlinx.coroutines.launch
 import net.wastu.artha.data.analysis.AiAnalysisService
 import net.wastu.artha.data.analysis.AiConfig
 import net.wastu.artha.data.analysis.CategoryAutomationState
+import net.wastu.artha.data.analysis.CategoryProgress
+import net.wastu.artha.data.analysis.MonthAnalysisStatus
+import net.wastu.artha.data.analysis.analysisActionLabel
+import net.wastu.artha.data.analysis.analysisStatusLabel
+import net.wastu.artha.data.analysis.categoryProgressLabel
 import net.wastu.artha.data.analysis.aiConfigValidation
 import net.wastu.artha.data.analysis.aiConnectionFailure
 import net.wastu.artha.ui.theme.incomeColor
@@ -58,6 +66,8 @@ fun AnalysisSettingsSheet(
     customCategories: List<String>,
     categoryIcons: Map<String, String>,
     automationState: CategoryAutomationState?,
+    monthStatus: MonthAnalysisStatus,
+    categoryProgress: CategoryProgress,
     savingAi: Boolean,
     aiError: String?,
     onDismiss: () -> Unit,
@@ -68,6 +78,7 @@ fun AnalysisSettingsSheet(
     onSetCategoryIcon: (String, String?) -> Unit,
     onResetCategories: () -> Unit,
     onRetryAi: () -> Unit,
+    onAnalyzeNow: () -> Unit,
     knowledge: String?,
     onApplyKnowledge: (String) -> Unit,
 ) {
@@ -111,6 +122,28 @@ fun AnalysisSettingsSheet(
                 )
             } else {
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                    val actionLabel = analysisActionLabel(monthStatus)
+                    val progressLabel = categoryProgressLabel(categoryProgress)
+                    ListItem(
+                        headlineContent = { Text("Selected month") },
+                        supportingContent = {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(analysisStatusLabel(monthStatus, System.currentTimeMillis()))
+                                if (progressLabel != null) {
+                                    Text(progressLabel)
+                                }
+                            }
+                        },
+                        trailingContent = actionLabel?.takeIf { it in listOf("Analyze now", "Re-analyze", "Retry") }?.let { label ->
+                            {
+                                TextButton(onClick = onAnalyzeNow) {
+                                    Text(label)
+                                }
+                            }
+                        },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
+                    HorizontalDivider(Modifier.padding(vertical = 12.dp))
                     Text("AI provider", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
                     Text(
                         "Sends payment details and personal context to your provider for categorization and summaries.",

@@ -70,6 +70,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.data.analysis.AiConfig
+import net.wastu.artha.data.analysis.CategoryProgress
+import net.wastu.artha.data.analysis.MonthAnalysisStatus
 import net.wastu.artha.data.analysis.AiAnalysisService
 import net.wastu.artha.data.analysis.aiConfigValidation
 import net.wastu.artha.data.analysis.aiConnectionFailure
@@ -161,6 +163,8 @@ fun ProvidersScreen(
     val diagnostics by viewModel?.providerDiagnostics?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap()) }
     val importing by viewModel?.syncingProvider?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(syncingProvider) }
     val categoryAutomation by viewModel?.categoryAutomation?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<net.wastu.artha.data.analysis.CategoryAutomationState?>(null) }
+    val analysisStatus by viewModel?.analysisStatus?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<MonthAnalysisStatus>(MonthAnalysisStatus.NeverRun) }
+    val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(CategoryProgress()) }
     val importBusy by viewModel?.refreshing?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
     val automaticImport by viewModel?.automaticImportActive?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
     val requestedProvider by viewModel?.requestedImportProvider?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<Provider?>(null) }
@@ -296,6 +300,8 @@ fun ProvidersScreen(
             customCategories = analysisSnapshot.customCategories,
             categoryIcons = analysisSnapshot.categoryIcons,
             automationState = categoryAutomation,
+            monthStatus = analysisStatus,
+            categoryProgress = categoryProgress,
             savingAi = savingAi,
             aiError = aiError,
             onDismiss = { if (!savingAi) showAnalysisSettings = false },
@@ -313,6 +319,7 @@ fun ProvidersScreen(
             onSetCategoryIcon = viewModel::setCategoryIcon,
             onResetCategories = viewModel::resetCategoriesToDefault,
             onRetryAi = viewModel::retryAutomaticCategories,
+            onAnalyzeNow = { viewModel.analyzeCurrentMonth() },
             knowledge = analysisSnapshot.knowledge,
             onApplyKnowledge = { viewModel.applyKnowledgeRewrite(it) },
         )
