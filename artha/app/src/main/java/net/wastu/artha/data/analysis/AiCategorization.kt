@@ -47,24 +47,20 @@ object AiCategorization {
         snapshot.aiCategoryFingerprints[candidate.transaction.key] != candidate.fingerprint ||
             snapshot.reasons[candidate.transaction.key]?.startsWith(REASON_PREFIX) != true
 
-    fun progress(rows: List<UnifiedTransaction>, snapshot: AnalysisSnapshot): Pair<Int, Int> {
-        val eligible = rows.asSequence()
-            .filter { isEligible(it, snapshot) }
-            .distinctBy { it.key }
-            .map { CategoryCandidate(it, fingerprint(it, snapshot)) }
-            .toList()
-        val total = eligible.size
-        val pending = eligible.count { needsLabel(it, snapshot) }
-        val labeled = (total - pending).coerceAtLeast(0)
-        return labeled to total
+    /** Eligible payment count plus those still needing an AI label, newest first. Hashes every eligible row once. */
+    fun pending(rows: List<UnifiedTransaction>, snapshot: AnalysisSnapshot): Pair<Int, List<CategoryCandidate>> {
+        val eligible = rows.filter { isEligible(it, snapshot) }.sortedByDescending { it.occurredAt }.distinctBy { it.key }
+        return eligible.size to eligible.map { CategoryCandidate(it, fingerprint(it, snapshot)) }.filter { needsLabel(it, snapshot) }
     }
 
-    fun nextBatch(rows: List<UnifiedTransaction>, snapshot: AnalysisSnapshot): List<CategoryCandidate> {
-        val pending = rows.asSequence()
-            .filter { isEligible(it, snapshot) }
-            .sortedByDescending { it.occurredAt }.distinctBy { it.key }
-            .map { CategoryCandidate(it, fingerprint(it, snapshot)) }
-            .filter { needsLabel(it, snapshot) }
+    /** (labeled, total) eligible payments. */
+    fun progress(rows: List<UnifiedTransaction>, snapshot: AnalysisSnapshot): Pair<Int, Int> =
+        pending(rows, snapshot).let { (total, pending) -> total - pending.size to total }
+
+    fun nextBatch(rows: List<UnifiedTransaction>, snapshot: AnalysisSnapshot): List<CategoryCandidate> =
+        batchOf(pending(rows, snapshot).second, snapshot)
+
+    fun batchOf(pending: List<CategoryCandidate>, snapshot: AnalysisSnapshot): List<CategoryCandidate> {
         val batch = mutableListOf<CategoryCandidate>()
         var bytes = snapshot.knowledge.toByteArray(Charsets.UTF_8).size
         for (candidate in pending) {

@@ -242,6 +242,9 @@ class ArthaViewModel(
                         val key = analysisKey(month)
                         val config = snapshot.aiConfig
                         val configured = config.baseUrl.isNotBlank() && config.model.isNotBlank() && config.apiKey.isNotBlank()
+                        // Hashing every spending row is wasted work while analysis is off or unconfigured.
+                        if (!snapshot.analysisEnabled) return@combine MonthAnalysisStatus.Off
+                        if (!configured) return@combine MonthAnalysisStatus.NotConfigured
                         val hasSpending = rows.any {
                             YearMonth.from(it.occurredAt.atZone(AccountingTime.zone)) <= month && BudgetAnalyzer.isSpending(it)
                         }
@@ -290,10 +293,7 @@ class ArthaViewModel(
             var previousConfig: AiConfig? = null
             var previousRetry = 0
 
-            suspend fun publishProgress(state: CategoryAutomationState, rows: List<UnifiedTransaction> = _reconciledCache.value, snapshot: AnalysisSnapshot = analysisSnapshot.value, error: String? = null) {
-                val (labeled, total) = withContext(computationDispatcher) {
-                    AiCategorization.progress(rows, snapshot)
-                }
+            fun publish(state: CategoryAutomationState, labeled: Int = 0, total: Int = 0, error: String? = null) {
                 _categoryAutomation.value = state
                 _categoryProgress.value = CategoryProgress(state, labeled, total, error)
             }
@@ -304,22 +304,21 @@ class ArthaViewModel(
                 val config = input.snapshot.aiConfig
                 if (config != previousConfig || input.retry != previousRetry) failedBatch = null
                 previousConfig = config; previousRetry = input.retry
-                if (!input.snapshot.analysisEnabled) {
-                    publishProgress(CategoryAutomationState.NOT_CONFIGURED, input.rows, input.snapshot)
+                // No hashing while analysis is off or unconfigured.
+                if (!input.snapshot.analysisEnabled || config.baseUrl.isBlank() || config.apiKey.isBlank() || config.model.isBlank()) {
+                    publish(CategoryAutomationState.NOT_CONFIGURED)
                     return@collectLatest
                 }
-                if (config.baseUrl.isBlank() || config.apiKey.isBlank() || config.model.isBlank()) {
-                    publishProgress(CategoryAutomationState.NOT_CONFIGURED, input.rows, input.snapshot)
-                    return@collectLatest
-                }
-                val batch = withContext(computationDispatcher) { AiCategorization.nextBatch(input.rows, input.snapshot) }
+                val (total, pending) = withContext(computationDispatcher) { AiCategorization.pending(input.rows, input.snapshot) }
+                val labeled = total - pending.size
+                val batch = withContext(computationDispatcher) { AiCategorization.batchOf(pending, input.snapshot) }
                 if (batch.isEmpty()) {
-                    publishProgress(CategoryAutomationState.READY, input.rows, input.snapshot)
+                    publish(CategoryAutomationState.READY, labeled, total)
                     return@collectLatest
                 }
                 val batchId = batch.joinToString(":") { it.fingerprint }
                 if (failedBatch == batchId) return@collectLatest
-                publishProgress(CategoryAutomationState.WORKING, input.rows, input.snapshot)
+                publish(CategoryAutomationState.WORKING, labeled, total)
                 try {
                     val suggestions = AiCategorization.requestWithRetry { categorize(config, input.snapshot, batch) }
                     ensureActive()
@@ -329,17 +328,14 @@ class ArthaViewModel(
                             !current.classificationIsManual && AiCategorization.fingerprint(current, analysisSnapshot.value) == candidate.fingerprint
                         } == true
                     }
-                    withContext(Dispatchers.IO) { store.commitCategorySuggestions(unchanged, suggestions, input.snapshot) }
-                    val (labeled, total) = withContext(computationDispatcher) {
-                        AiCategorization.progress(input.rows, analysisSnapshot.value)
-                    }
-                    _categoryProgress.value = CategoryProgress(_categoryAutomation.value, labeled, total, null)
-                    publishProgress(CategoryAutomationState.READY, input.rows, analysisSnapshot.value)
+                    val committed = withContext(Dispatchers.IO) { store.commitCategorySuggestions(unchanged, suggestions, input.snapshot) }
+                    // A commit changes the snapshot, which re-emits and picks the next batch; stay WORKING until then.
+                    if (committed == 0 || committed >= pending.size) publish(CategoryAutomationState.READY, labeled + committed, total)
+                    else publish(CategoryAutomationState.WORKING, labeled + committed, total)
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (e: Exception) {
                     failedBatch = batchId
-                    val errorMsg = aiConnectionFailure(e)
-                    publishProgress(CategoryAutomationState.ERROR, error = errorMsg)
+                    publish(CategoryAutomationState.ERROR, labeled, total, aiConnectionFailure(e))
                 }
             }
         }
