@@ -158,7 +158,8 @@ enum class TransactionPeriod(val label: String) {
     }
 }
 
-private fun formatAmountMinor(totalMinor: Long): String = formatMoney(Money(totalMinor))
+// Money rejects zero, but an empty period or day legitimately totals nothing.
+internal fun formatSpendingTotal(totalMinor: Long): String = if (totalMinor <= 0L) "Rp0" else formatMoney(Money(totalMinor))
 
 internal fun rangeLabel(range: Pair<Long?, Long?>): String {
     val formatter = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.US)
@@ -290,24 +291,6 @@ private fun TransactionFilterSheet(
     val selectedPeriod = if (dates == null) TransactionPeriod.ALL else
         TransactionPeriod.entries.firstOrNull { it != TransactionPeriod.CUSTOM && it.range(today) == dates } ?: TransactionPeriod.CUSTOM
 
-    val periodTotals = remember(transactions, today) {
-        listOf(
-            TransactionPeriod.THIS_MONTH,
-            TransactionPeriod.LAST_MONTH,
-            TransactionPeriod.LAST_30_DAYS,
-        ).associateWith { period ->
-            val periodRange = period.range(today)
-            val start = periodRange?.first
-            val endExclusive = periodRange?.second?.let(AccountingTime::dayAfter)
-            transactions.filter {
-                val millis = it.occurredAt.toEpochMilli()
-                BudgetAnalyzer.isSpending(it) &&
-                    (start == null || millis >= start) &&
-                    (endExclusive == null || millis < endExclusive)
-            }.sumOf { it.money.amountMinor }
-        }
-    }
-
     // The date picker replaces the filter sheet; changes remain staged until the sheet's Apply.
     if (pickingDates) {
         fun pickerDay(value: Long?) = value?.let {
@@ -344,25 +327,14 @@ private fun TransactionFilterSheet(
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("Dates", style = MaterialTheme.typography.titleSmall)
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TransactionPeriod.entries.forEach { period ->
-                                val total = periodTotals[period]
                                 FilterChip(
                                     selected = selectedPeriod == period,
                                     onClick = {
                                         if (period == TransactionPeriod.CUSTOM) pickingDates = true else dates = period.range(today)
                                     },
-                                    label = {
-                                        Row(
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            Text(period.label)
-                                            if (total != null && period != TransactionPeriod.ALL && period != TransactionPeriod.CUSTOM) {
-                                                Text(formatAmountMinor(total), style = MaterialTheme.typography.bodySmall)
-                                            }
-                                        }
-                                    },
+                                    label = { Text(period.label) },
                                 )
                             }
                         }
@@ -385,7 +357,7 @@ private fun TransactionFilterSheet(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    text = formatAmountMinor(customTotal),
+                                    text = formatSpendingTotal(customTotal),
                                     style = MaterialTheme.typography.titleMedium,
                                 )
                                 Text(
@@ -617,7 +589,7 @@ private fun TransactionList(
                         .padding(top = 8.dp),
                 ) {
                     Text(
-                        text = formatAmountMinor(periodSummary.totalMinor),
+                        text = formatSpendingTotal(periodSummary.totalMinor),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -721,7 +693,7 @@ private fun DateGroupHeader(date: LocalDate, totalMinor: Long = 0L) {
             if (totalMinor > 0L) {
                 Spacer(Modifier.weight(1f))
                 Text(
-                    text = formatAmountMinor(totalMinor),
+                    text = formatSpendingTotal(totalMinor),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,

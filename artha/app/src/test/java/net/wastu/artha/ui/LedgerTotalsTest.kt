@@ -151,4 +151,8 @@ class LedgerTotalsTest {
         assertEquals(listOf(debit), paymentRows.map { it.transaction })
         assertTrue(paymentRows.all { it.transaction.direction == Direction.DEBIT })
     }
+
+    @Test fun emptyPeriodTotalFormatsAsZeroInsteadOfCrashing() {
+        assertEquals("Rp0", net.wastu.artha.ui.screens.formatSpendingTotal(0L))
+    }
 }
