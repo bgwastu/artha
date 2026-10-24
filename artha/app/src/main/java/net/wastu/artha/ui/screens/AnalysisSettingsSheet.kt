@@ -105,7 +105,7 @@ fun AnalysisSettingsSheet(
                 .padding(vertical = 8.dp),
         ) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Transaction Analysis", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).semantics { heading() })
+                Text("AI categorization", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).semantics { heading() })
                 IconButton(onClick = onDismiss, enabled = !savingAi) { Icon(Icons.Default.Close, "Close") }
             }
             ListItem(

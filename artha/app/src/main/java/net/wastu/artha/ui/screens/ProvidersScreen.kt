@@ -1,98 +1,98 @@
 package net.wastu.artha.ui.screens
 
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material.icons.filled.Sync
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.SettingsSuggest
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.SettingsSuggest
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Widgets
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.CancellationException
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import android.widget.Toast
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import net.wastu.artha.core.model.AccountingTime
+import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Provider
-import net.wastu.artha.data.analysis.AiConfig
-import net.wastu.artha.data.analysis.CategoryProgress
-import net.wastu.artha.data.analysis.AiClient
-import net.wastu.artha.data.analysis.aiConfigValidation
-import net.wastu.artha.data.analysis.aiConnectionFailure
-import net.wastu.artha.ui.theme.incomeColor
-import net.wastu.artha.data.providers.AccountStatus
-import net.wastu.artha.data.providers.ProviderDiagnostic
+import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.export.LedgerExportStorage
+import net.wastu.artha.data.providers.AccountStatus
+import net.wastu.artha.data.providers.GojekFlashRecord
+import net.wastu.artha.data.providers.ProviderDiagnostic
 import net.wastu.artha.ui.ArthaViewModel
-
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.selection.toggleable
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Category
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.semantics.Role
-
-import androidx.activity.compose.BackHandler
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import net.wastu.artha.ui.SourceCoverage
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -109,37 +109,35 @@ fun ProvidersScreen(
     onOpenAiCategories: () -> Unit = {},
 ) {
     var selectedProvider by rememberSaveable { mutableStateOf<Provider?>(null) }
-    androidx.compose.runtime.DisposableEffect(selectedProvider) {
+    DisposableEffect(selectedProvider) {
         onDetailOpenChanged(selectedProvider != null)
         onDispose { onDetailOpenChanged(false) }
     }
     var showAnalysisSettings by rememberSaveable { mutableStateOf(false) }
-    var showWidgetHelp by rememberSaveable { mutableStateOf(false) }
     var savingAi by remember { mutableStateOf(false) }
     var aiError by remember { mutableStateOf<String?>(null) }
     var exporting by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var importingFile by remember { mutableStateOf(false) }
+
     val importDocument = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val vm = viewModel ?: return@rememberLauncherForActivityResult
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             importingFile = true
             try {
-                android.util.Log.i("ArthaImport", "picked uri=$uri")
                 vm.importExportFile(context, uri)
-                android.util.Log.i("ArthaImport", "import finished ok")
                 Toast.makeText(context, "Import saved", Toast.LENGTH_SHORT).show()
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                android.util.Log.e("ArthaImport", "jsonl import failed", error)
                 Toast.makeText(context, "Import failed: ${error.message ?: error::class.java.simpleName}", Toast.LENGTH_LONG).show()
                 importingFile = false
             }
         }
     }
+
     val exportDocument = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         val vm = viewModel ?: return@rememberLauncherForActivityResult
         if (uri == null) return@rememberLauncherForActivityResult
@@ -163,224 +161,571 @@ fun ProvidersScreen(
     val importEnabled by viewModel?.importEnabled?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(Provider.entries.toSet()) }
     val diagnostics by viewModel?.providerDiagnostics?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap()) }
     val importing by viewModel?.syncingProvider?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(syncingProvider) }
-    val categoryAutomation by viewModel?.categoryAutomation?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<net.wastu.artha.data.analysis.CategoryAutomationState?>(null) }
-    val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(CategoryProgress()) }
+    val categoryAutomation by viewModel?.categoryAutomation?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(net.wastu.artha.data.analysis.CategoryProgress()) }
     val importBusy by viewModel?.refreshing?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
     val automaticImport by viewModel?.automaticImportActive?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
     val requestedProvider by viewModel?.requestedImportProvider?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<Provider?>(null) }
     val importFeedback by viewModel?.importFeedback?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val coverage by viewModel?.providerCoverage?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap<Provider, SourceCoverage>()) }
-    val gojekFlash by viewModel?.gojekFlash?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<net.wastu.artha.data.providers.GojekFlashRecord?>(null) }
+    val gojekFlash by viewModel?.gojekFlash?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<GojekFlashRecord?>(null) }
+    val allTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyList()) }
+
+    val anyImportRunning = importBusy || importing != null || requestedProvider != null
     fun isImporting(provider: Provider) = importBusy && (importing == provider || requestedProvider == provider)
     fun feedback(provider: Provider) = importFeedback?.takeIf { it.provider == null || it.provider == provider }?.message
-    // Gojek refreshes invisibly through the flash sync; the visible walk stays on deep backfill.
     val syncAction: (Provider) -> Unit = { target ->
         if (target == Provider.GOJEK) viewModel?.requestGojekRefresh() else viewModel?.syncProvider(target)
     }
+
     BoxWithConstraints(Modifier.widthIn(max = 1320.dp).fillMaxSize()) {
-    val expanded = maxWidth >= 840.dp && maxHeight >= 480.dp
-    Row(Modifier.fillMaxSize()) {
-    LazyColumn(modifier = Modifier.weight(1f).widthIn(max = 600.dp).fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
-        item { SettingsHeading("Sources") }
-        items(Provider.entries, key = { it.name }) { provider ->
-            Surface(onClick = { selectedProvider = provider }) {
-                ListItem(
-                    headlineContent = { Text(provider.displayName) },
-                    supportingContent = {
-                        Column {
-                            Text(sourceStateLine(diagnostics[provider], coverage[provider],
-                                providerCounts[provider] ?: 0, provider in importEnabled, importing == provider))
-                            sourceRowHint(diagnostics[provider])?.let {
-                                Text(it, style = MaterialTheme.typography.bodySmall)
+        val expanded = maxWidth >= 840.dp && maxHeight >= 480.dp
+        Row(Modifier.fillMaxSize()) {
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .widthIn(max = 600.dp)
+                    .fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 16.dp),
+            ) {
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "Sources",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.semantics { heading() },
+                        )
+                        Spacer(Modifier.weight(1f))
+                        if (anyImportRunning) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            TextButton(
+                                onClick = { viewModel?.refresh() },
+                                enabled = viewModel != null,
+                            ) {
+                                Text("Sync all")
                             }
                         }
-                    },
-                    leadingContent = {
-                        Image(painterResource(provider.iconRes), null,
-                            Modifier.size(40.dp).clip(MaterialTheme.shapes.small), contentScale = ContentScale.Crop)
-                    },
-                    trailingContent = {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            SourceStatePill(diagnostics[provider], provider in importEnabled, importing == provider)
-                            Icon(Icons.Default.ChevronRight, null)
+                    }
+                }
+
+                items(Provider.entries, key = { it.name }) { provider ->
+                    val diagnostic = diagnostics[provider]
+                    val isProviderImportEnabled = provider in importEnabled
+                    val isProviderImporting = isImporting(provider)
+                    val isProblem = isSourceProblem(diagnostic, isProviderImportEnabled, isProviderImporting)
+                    val statusText = sourceRowStatus(provider, diagnostic, isProviderImportEnabled, isProviderImporting)
+
+                    Surface(onClick = { selectedProvider = provider }) {
+                        ListItem(
+                            headlineContent = { Text(provider.displayName) },
+                            supportingContent = {
+                                Text(
+                                    text = statusText,
+                                    color = if (isProblem) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            },
+                            leadingContent = {
+                                Image(
+                                    painter = painterResource(provider.iconRes),
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(MaterialTheme.shapes.small),
+                                    contentScale = ContentScale.Crop,
+                                )
+                            },
+                            trailingContent = {
+                                if (isProblem) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.ErrorOutline,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error,
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.ChevronRight,
+                                        contentDescription = null,
+                                    )
+                                }
+                            },
+                        )
+                    }
+                }
+
+                if (viewModel != null) {
+                    item { SettingsHeading("AI") }
+                    item {
+                        val isAiEnabled = snapshot?.analysisEnabled == true
+                        val config = snapshot?.aiConfig
+                        val isConfigured = config != null && config.baseUrl.isNotBlank() && config.apiKey.isNotBlank() && config.model.isNotBlank()
+                        val aiSummary = when {
+                            !isConfigured -> "Not set up"
+                            !isAiEnabled -> "Off"
+                            else -> "On"
                         }
-                    },
-                )
+                        SettingsLink(
+                            title = "AI categorization",
+                            summary = aiSummary,
+                            icon = Icons.Default.SettingsSuggest,
+                        ) {
+                            aiError = null
+                            showAnalysisSettings = true
+                        }
+                    }
+
+                    item { SettingsHeading("Data") }
+                    item {
+                        SettingsLink(
+                            title = "Export backup",
+                            summary = if (exporting) "Exporting" else "Save all data to a file",
+                            icon = Icons.Default.FileDownload,
+                        ) {
+                            if (exporting) return@SettingsLink
+                            exportDocument.launch(viewModel.suggestedExportFileName())
+                        }
+                    }
+                    item {
+                        SettingsLink(
+                            title = "Import backup",
+                            summary = if (importingFile) "Importing" else "Restore from a backup file",
+                            icon = Icons.Default.FileUpload,
+                        ) {
+                            if (importingFile) return@SettingsLink
+                            importDocument.launch(arrayOf("application/json", "application/*", "text/*", "*/*"))
+                        }
+                    }
+                }
+
+                item { SettingsHeading("Other") }
+                item {
+                    ListItem(
+                        headlineContent = { Text("Widgets") },
+                        supportingContent = { Text("Add from your home screen") },
+                        leadingContent = { Icon(Icons.Default.Widgets, null) },
+                    )
+                }
+                if (onOpenDemo != null) {
+                    item {
+                        SettingsLink(
+                            title = "Demo mode",
+                            summary = "Explore sample data",
+                            icon = Icons.Default.PlayArrow,
+                            onClick = onOpenDemo,
+                        )
+                    }
+                }
+            }
+
+            if (expanded) {
+                Box(Modifier.weight(1f).fillMaxHeight()) {
+                    val provider = selectedProvider ?: Provider.entries.first()
+                    SourcePage(
+                        provider = provider,
+                        enabled = provider in enabled,
+                        importEnabled = provider in importEnabled,
+                        diagnostic = diagnostics[provider],
+                        coverage = coverage[provider],
+                        importing = isImporting(provider),
+                        allTransactions = allTransactions,
+                        providerCounts = providerCounts,
+                        onEnabled = { onEnabled(provider, it) },
+                        onImportEnabled = { viewModel?.setImportEnabled(provider, it) },
+                        onImport = { syncAction(provider) },
+                        onRequestGojekWalk = { viewModel?.requestGojekWalk() },
+                        busy = importBusy && !automaticImport,
+                        feedback = feedback(provider),
+                        flash = gojekFlash.takeIf { provider == Provider.GOJEK },
+                        onBack = null,
+                    )
+                }
             }
         }
-        if (viewModel != null) {
-            item { SettingsHeading("Transaction Analysis") }
-            item {
-                val enabled = snapshot?.analysisEnabled == true
-                val config = snapshot?.aiConfig
-                val filled = config != null && config.baseUrl.isNotBlank() && config.apiKey.isNotBlank() && config.model.isNotBlank()
-                val summary = when {
-                    !enabled -> "Off"
-                    !filled -> "On - not configured"
-                    else -> "On"
-                }
-                SettingsLink("Transaction Analysis", summary, Icons.Default.SettingsSuggest) {
+
+        if (!expanded) {
+            BackHandler(enabled = selectedProvider != null) { selectedProvider = null }
+        }
+        selectedProvider?.takeIf { !expanded }?.let { provider ->
+            SourcePage(
+                provider = provider,
+                enabled = provider in enabled,
+                importEnabled = provider in importEnabled,
+                diagnostic = diagnostics[provider],
+                coverage = coverage[provider],
+                importing = isImporting(provider),
+                allTransactions = allTransactions,
+                providerCounts = providerCounts,
+                onEnabled = { onEnabled(provider, it) },
+                onImportEnabled = { viewModel?.setImportEnabled(provider, it) },
+                onImport = { syncAction(provider) },
+                onRequestGojekWalk = { viewModel?.requestGojekWalk() },
+                busy = importBusy && !automaticImport,
+                feedback = feedback(provider),
+                flash = gojekFlash.takeIf { provider == Provider.GOJEK },
+                onBack = { selectedProvider = null },
+            )
+        }
+
+        if (showAnalysisSettings && snapshot != null && viewModel != null) {
+            val analysisSnapshot = snapshot!!
+            AnalysisSettingsSheet(
+                aiConfig = analysisSnapshot.aiConfig,
+                analysisEnabled = analysisSnapshot.analysisEnabled,
+                customCategories = analysisSnapshot.customCategories,
+                categoryIcons = analysisSnapshot.categoryIcons,
+                automationState = categoryAutomation,
+                categoryProgress = categoryProgress,
+                savingAi = savingAi,
+                aiError = aiError,
+                onDismiss = { if (!savingAi) showAnalysisSettings = false },
+                onAnalysisEnabled = viewModel::setAnalysisEnabled,
+                onSaveAi = { config ->
+                    savingAi = true
                     aiError = null
-                    showAnalysisSettings = true
-                }
-            }
-            item {
-                SettingsLink(
-                    "Export transactions",
-                    if (exporting) "Exporting..." else null,
-                    Icons.Default.FileDownload,
-                ) {
-                    if (exporting) return@SettingsLink
-                    exportDocument.launch(viewModel.suggestedExportFileName())
-                }
-            }
-            item {
-                SettingsLink(
-                    "Import transactions",
-                    if (importingFile) "Importing..." else null,
-                    Icons.Default.FileUpload,
-                ) {
-                    if (importingFile) return@SettingsLink
-                    // Real exports can resolve as octet-stream (e.g. .jsonl from Files); the
-                    // parser validates content anyway, so accept the stream type blindly.
-                    importDocument.launch(arrayOf("application/json", "application/*", "text/*", "*/*"))
-                }
-            }
+                    viewModel.updateAiConfig(config) { error ->
+                        savingAi = false
+                        aiError = error
+                    }
+                },
+                onAddCategory = viewModel::addCustomCategory,
+                onRemoveCategory = viewModel::removeCustomCategory,
+                onSetCategoryIcon = viewModel::setCategoryIcon,
+                onResetCategories = viewModel::resetCategoriesToDefault,
+                onRetryAi = viewModel::retryAutomaticCategories,
+                knowledge = analysisSnapshot.knowledge,
+                onApplyKnowledge = { viewModel.applyKnowledgeRewrite(it) },
+                onOpenAiCategories = {
+                    showAnalysisSettings = false
+                    onOpenAiCategories()
+                },
+            )
         }
-        item { SettingsLink("Widgets", null, Icons.Default.Widgets) { showWidgetHelp = true } }
-        if (onOpenDemo != null) item { SettingsLink("Demo mode", "Explore sample data", Icons.Default.PlayArrow, onOpenDemo) }
-    }
-
-    if (expanded) {
-        Column(Modifier.weight(1f).imePadding().verticalScroll(rememberScrollState())) {
-            val provider = selectedProvider ?: Provider.entries.first()
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(provider.displayName, style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.weight(1f).semantics { heading() })
-                SyncHeaderAction(isImporting(provider), provider in importEnabled && !importBusy,
-                    { syncAction(provider) })
-            }
-            SourcePageContent(provider, provider in enabled, provider in importEnabled, providerCounts[provider] ?: 0,
-                diagnostics[provider], coverage[provider], isImporting(provider),
-                { onEnabled(provider, it) }, { viewModel?.setImportEnabled(provider, it) }, { syncAction(provider) },
-                busy = importBusy && !automaticImport, feedback = feedback(provider),
-                flash = gojekFlash.takeIf { provider == Provider.GOJEK })
-        }
-    }
-    }
-
-    if (!expanded) {
-        BackHandler(enabled = selectedProvider != null) { selectedProvider = null }
-    }
-    selectedProvider?.takeIf { !expanded }?.let { provider ->
-        SourcePage(provider, provider in enabled, provider in importEnabled, providerCounts[provider] ?: 0,
-            diagnostics[provider], coverage[provider], isImporting(provider),
-            { onEnabled(provider, it) }, { viewModel?.setImportEnabled(provider, it) }, { syncAction(provider) },
-            busy = importBusy && !automaticImport, feedback = feedback(provider),
-            flash = gojekFlash.takeIf { provider == Provider.GOJEK },
-            onBack = { selectedProvider = null })
-    }
-    if (showWidgetHelp) {
-        AlertDialog(onDismissRequest = { showWidgetHelp = false }, title = { Text("Widgets") },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Touch and hold your home screen, choose Widgets, then Artha.")
-                    Text("Analysis opens the month overview. Recent expenses opens Expenses.")
-                    Text("Touch and hold a widget to resize it. Use more space for larger text and complete amounts.")
-                    Text("Widgets use saved payments. Check the update time when history is unavailable.")
-                }
-            },
-            confirmButton = { TextButton(onClick = { showWidgetHelp = false }) { Text("Close") } })
-    }
-    if (showAnalysisSettings && snapshot != null && viewModel != null) {
-        val analysisSnapshot = snapshot!!
-        AnalysisSettingsSheet(
-            aiConfig = analysisSnapshot.aiConfig,
-            analysisEnabled = analysisSnapshot.analysisEnabled,
-            customCategories = analysisSnapshot.customCategories,
-            categoryIcons = analysisSnapshot.categoryIcons,
-            automationState = categoryAutomation,
-            categoryProgress = categoryProgress,
-            savingAi = savingAi,
-            aiError = aiError,
-            onDismiss = { if (!savingAi) showAnalysisSettings = false },
-            onAnalysisEnabled = viewModel::setAnalysisEnabled,
-            onSaveAi = { config ->
-                savingAi = true
-                aiError = null
-                viewModel.updateAiConfig(config) { error ->
-                    savingAi = false
-                    aiError = error
-                }
-            },
-            onAddCategory = viewModel::addCustomCategory,
-            onRemoveCategory = viewModel::removeCustomCategory,
-            onSetCategoryIcon = viewModel::setCategoryIcon,
-            onResetCategories = viewModel::resetCategoriesToDefault,
-            onRetryAi = viewModel::retryAutomaticCategories,
-            knowledge = analysisSnapshot.knowledge,
-            onApplyKnowledge = { viewModel.applyKnowledgeRewrite(it) },
-            onOpenAiCategories = {
-                showAnalysisSettings = false
-                onOpenAiCategories()
-            },
-        )
-    }
-    }
-}
-
-/** Human wording for the last invisible GoPay flash outcome, shown on the provider card. */
-private fun flashExplanation(result: String): String = when (result) {
-    "FLASHED" -> "captured page one while the screen slept"
-    "QUIET" -> "screen slept; Gojek served no fresh history page"
-    "SKIPPED_SCREEN_ON" -> "deferred; the screen was on"
-    "SKIPPED" -> "not run; Gojek import is disabled or missing"
-    "ROOT_UNAVAILABLE" -> "not run; root access was unavailable"
-    else -> result
-}
-
-@Composable
-private fun SettingsHeading(title: String) {
-    Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.semantics { heading() }.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp))
-}
-
-@Composable
-private fun SettingsLink(title: String, summary: String?, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
-    Surface(onClick = onClick) {
-        ListItem(headlineContent = { Text(title) },
-            supportingContent = summary?.let { { Text(it) } },
-            leadingContent = { Icon(icon, null) }, trailingContent = { Icon(Icons.Default.ChevronRight, null) })
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SourceStatePill(diagnostic: ProviderDiagnostic?, importEnabled: Boolean, importing: Boolean) {
-    val status = diagnostic?.accountStatus ?: AccountStatus.UNKNOWN
-    val colors = when {
-        importing -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
-        !importEnabled -> MaterialTheme.colorScheme.surfaceContainerHighest to MaterialTheme.colorScheme.onSurfaceVariant
-        status in PROBLEM_STATUSES -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
-        status == AccountStatus.PARTIAL -> MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
-        else -> MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+private fun SourcePage(
+    provider: Provider,
+    enabled: Boolean,
+    importEnabled: Boolean,
+    diagnostic: ProviderDiagnostic?,
+    coverage: SourceCoverage?,
+    importing: Boolean,
+    allTransactions: List<UnifiedTransaction>,
+    providerCounts: Map<Provider, Int> = emptyMap(),
+    onEnabled: (Boolean) -> Unit,
+    onImportEnabled: (Boolean) -> Unit,
+    onImport: () -> Unit,
+    onRequestGojekWalk: () -> Unit,
+    busy: Boolean = false,
+    feedback: String? = null,
+    flash: GojekFlashRecord? = null,
+    onBack: (() -> Unit)? = null,
+) {
+    val snackbarHostState = remember { SnackbarHostState() }
+    var showGojekWalkDialog by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(feedback) {
+        if (!feedback.isNullOrBlank()) {
+            snackbarHostState.showSnackbar(feedback)
+        }
     }
-    Surface(color = colors.first, contentColor = colors.second, shape = MaterialTheme.shapes.small) {
-        Text(sourceStatusLabel(status, importEnabled, importing),
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                painter = painterResource(provider.iconRes),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(MaterialTheme.shapes.extraSmall),
+                                contentScale = ContentScale.Crop,
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                text = provider.displayName,
+                                modifier = Modifier.semantics { heading() },
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        if (onBack != null) {
+                            IconButton(onClick = onBack) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            }
+                        }
+                    },
+                    actions = {
+                        SyncHeaderAction(
+                            importing = importing,
+                            enabled = importEnabled && !busy,
+                            onSync = onImport,
+                        )
+                        if (provider == Provider.GOJEK) {
+                            var menuExpanded by remember { mutableStateOf(false) }
+                            Box {
+                                IconButton(onClick = { menuExpanded = true }) {
+                                    Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                                }
+                                DropdownMenu(
+                                    expanded = menuExpanded,
+                                    onDismissRequest = { menuExpanded = false },
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Load older history") },
+                                        onClick = {
+                                            menuExpanded = false
+                                            showGojekWalkDialog = true
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    },
+                )
+            },
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+        ) { padding ->
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .imePadding()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 24.dp),
+            ) {
+                SourcePageContent(
+                    provider = provider,
+                    enabled = enabled,
+                    importEnabled = importEnabled,
+                    diagnostic = diagnostic,
+                    coverage = coverage,
+                    importing = importing,
+                    allTransactions = allTransactions,
+                    providerCounts = providerCounts,
+                    onEnabled = onEnabled,
+                    onImportEnabled = onImportEnabled,
+                    onImport = onImport,
+                    onOpenGojekWalkDialog = { showGojekWalkDialog = true },
+                    flash = flash,
+                )
+            }
+        }
+    }
+
+    if (showGojekWalkDialog) {
+        AlertDialog(
+            onDismissRequest = { showGojekWalkDialog = false },
+            title = { Text("Load older history") },
+            text = { Text("Artha opens Gojek and scrolls through your history. Keep the phone unlocked until it finishes.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showGojekWalkDialog = false
+                    onRequestGojekWalk()
+                }) {
+                    Text("Start")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGojekWalkDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 }
 
-private val PROBLEM_STATUSES = setOf(
-    AccountStatus.NEEDS_LOGIN, AccountStatus.ERROR,
-    AccountStatus.RATE_LIMITED, AccountStatus.APP_NOT_INSTALLED,
-)
+@Composable
+private fun SourcePageContent(
+    provider: Provider,
+    enabled: Boolean,
+    importEnabled: Boolean,
+    diagnostic: ProviderDiagnostic?,
+    coverage: SourceCoverage?,
+    importing: Boolean,
+    allTransactions: List<UnifiedTransaction>,
+    providerCounts: Map<Provider, Int> = emptyMap(),
+    onEnabled: (Boolean) -> Unit,
+    onImportEnabled: (Boolean) -> Unit,
+    onImport: () -> Unit,
+    onOpenGojekWalkDialog: () -> Unit,
+    flash: GojekFlashRecord? = null,
+) {
+    val context = LocalContext.current
+    val isProblem = isSourceProblem(diagnostic, importEnabled, importing)
+    val status = diagnostic?.accountStatus
 
-/** App-bar style sync action: the standard 48dp icon target with its own accessible name. */
+    // Status (first, no card)
+    ListItem(
+        headlineContent = {
+            Text(
+                text = sourceHeadline(provider, diagnostic, importEnabled, importing),
+                color = if (isProblem) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            )
+        },
+        supportingContent = {
+            val supportingText = if (diagnostic?.lastSyncEpochMillis != null) {
+                "Last synced ${formatRelativeTime(diagnostic.lastSyncEpochMillis)}"
+            } else {
+                "Not synced yet"
+            }
+            Text(supportingText)
+        },
+    )
+
+    if (isProblem) {
+        if (status == AccountStatus.ERROR && !diagnostic?.lastError.isNullOrBlank()) {
+            Text(
+                text = diagnostic!!.lastError!!,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Row(modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp)) {
+            if (status == AccountStatus.ERROR) {
+                FilledTonalButton(onClick = onImport) {
+                    Text("Retry")
+                }
+            } else {
+                FilledTonalButton(onClick = {
+                    val pm = context.packageManager
+                    val launchIntent = pm.getLaunchIntentForPackage(provider.appPackage)
+                    if (launchIntent != null) {
+                        context.startActivity(launchIntent)
+                    } else {
+                        val playStoreIntent = Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("market://details?id=${provider.appPackage}"),
+                        ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                        runCatching { context.startActivity(playStoreIntent) }
+                            .onFailure {
+                                val webIntent = Intent(
+                                    Intent.ACTION_VIEW,
+                                    Uri.parse("https://play.google.com/store/apps/details?id=${provider.appPackage}"),
+                                ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                                runCatching { context.startActivity(webIntent) }
+                            }
+                    }
+                }) {
+                    Text("Open ${provider.displayName}")
+                }
+            }
+        }
+    }
+
+    // SettingsHeading "History"
+    SettingsHeading("History")
+
+    val expenseCount = remember(allTransactions, provider, providerCounts) {
+        if (allTransactions.isNotEmpty()) {
+            countExpenses(allTransactions, provider)
+        } else {
+            providerCounts[provider] ?: 0
+        }
+    }
+    ListItem(
+        headlineContent = { Text("Expenses") },
+        trailingContent = { Text(expenseCount.toString()) },
+    )
+
+    val coversText = remember(coverage) {
+        val early = coverage?.earliest
+        val late = coverage?.latest
+        when {
+            early != null && late != null -> {
+                val e = formatSavedDay(early)
+                val l = formatSavedDay(late)
+                if (e == l) e else "$e to $l"
+            }
+            late != null -> formatSavedDay(late)
+            early != null -> formatSavedDay(early)
+            else -> null
+        }
+    }
+    if (coversText != null) {
+        ListItem(
+            headlineContent = { Text("Covers") },
+            supportingContent = { Text(coversText) },
+        )
+    }
+
+    diagnostic?.coverageHint?.takeIf { it.isNotBlank() }?.let { hint ->
+        ListItem(
+            headlineContent = { Text("What Artha reads") },
+            supportingContent = { Text(hint, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+        )
+    }
+
+    lastSyncText(diagnostic?.lastSyncSummary)?.let { syncSummary ->
+        ListItem(
+            headlineContent = { Text("Last sync") },
+            supportingContent = { Text(syncSummary) },
+        )
+    }
+
+    diagnostic?.accountIdentifier?.takeIf { it.isNotBlank() }?.let { accountId ->
+        ListItem(
+            headlineContent = { Text("Account") },
+            supportingContent = { Text(accountId) },
+        )
+    }
+
+    // GOJEK only, SettingsHeading "Gojek"
+    if (provider == Provider.GOJEK) {
+        SettingsHeading("Gojek")
+        ListItem(
+            modifier = Modifier.clickable(onClick = onOpenGojekWalkDialog),
+            headlineContent = { Text("Load older history") },
+            supportingContent = { Text("Opens Gojek and scrolls your history") },
+            trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) },
+        )
+        val backgroundRefreshText = flash?.millis?.let { ms ->
+            val stamp = DateTimeFormatter.ofPattern("d MMM, HH:mm", Locale.US)
+                .format(Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()))
+            "Last run $stamp"
+        } ?: "Not run yet"
+        ListItem(
+            headlineContent = { Text("Background refresh") },
+            supportingContent = { Text(backgroundRefreshText) },
+        )
+    }
+
+    // SettingsHeading "Settings"
+    SettingsHeading("Settings")
+    SettingsSwitch(
+        title = "Sync new payments",
+        checked = importEnabled,
+        onChange = onImportEnabled,
+        sourceName = provider.displayName,
+    )
+    SettingsSwitch(
+        title = "Show in Expenses",
+        checked = enabled,
+        onChange = onEnabled,
+        sourceName = provider.displayName,
+    )
+}
+
 @Composable
 private fun SyncHeaderAction(importing: Boolean, enabled: Boolean, onSync: () -> Unit) {
-    IconButton(onClick = onSync, enabled = enabled) {
+    IconButton(onClick = onSync, enabled = enabled && !importing) {
         if (importing) {
             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         } else {
@@ -389,263 +734,133 @@ private fun SyncHeaderAction(importing: Boolean, enabled: Boolean, onSync: () ->
     }
 }
 
-/** Body shared by the wide pane and the phone source page; ordered status → data → last import → settings. */
 @Composable
-private fun SourcePageContent(
-    provider: Provider, enabled: Boolean, importEnabled: Boolean, count: Int,
-    diagnostic: ProviderDiagnostic?, coverage: SourceCoverage?, importing: Boolean,
-    onEnabled: (Boolean) -> Unit, onImportEnabled: (Boolean) -> Unit, onImport: () -> Unit,
-    busy: Boolean = false, feedback: String? = null,
-    flash: net.wastu.artha.data.providers.GojekFlashRecord? = null,
+private fun SettingsHeading(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .semantics { heading() }
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
+    )
+}
+
+@Composable
+private fun SettingsLink(
+    title: String,
+    summary: String?,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
 ) {
-    val isEnabled = enabled && importEnabled
-    val status = diagnostic?.accountStatus ?: AccountStatus.UNKNOWN
+    Surface(onClick = onClick) {
+        ListItem(
+            headlineContent = { Text(title) },
+            supportingContent = summary?.let { { Text(it) } },
+            leadingContent = { Icon(icon, null) },
+            trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+        )
+    }
+}
+
+@Composable
+private fun SettingsSwitch(
+    title: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+    sourceName: String? = null,
+) {
     ListItem(
-        headlineContent = { Text("Status") },
-        supportingContent = {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(sourceStateDescription(status, count > 0))
-                Text(sourceStateLine(diagnostic, coverage, count, importEnabled, importing),
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        },
-        trailingContent = { SourceStatePill(diagnostic, importEnabled, importing) },
+        modifier = Modifier
+            .toggleable(checked, role = Role.Switch, onValueChange = onChange)
+            .semantics { if (sourceName != null) contentDescription = "$sourceName, $title" },
+        headlineContent = { Text(title) },
+        trailingContent = { Switch(checked = checked, onCheckedChange = null) },
     )
+}
 
-    SettingsHeading("Data")
-    ListItem(headlineContent = { Text("Saved payments") }, trailingContent = { Text(count.toString()) })
-    coverage?.latest?.let { ListItem(headlineContent = { Text("Latest payment") }, trailingContent = { Text(formatSavedDay(it)) }) }
-    coverage?.earliest?.takeIf { coverage.latest != null && it != coverage.latest }?.let {
-        ListItem(headlineContent = { Text("Earliest payment") }, trailingContent = { Text(formatSavedDay(it)) })
-    }
-    diagnostic?.accountIdentifier?.takeIf { it.isNotBlank() }?.let {
-        ListItem(headlineContent = { Text("Account") }, supportingContent = { Text(it) })
-    }
-    diagnostic?.coverageHint?.takeIf { it.isNotBlank() }?.let { hint ->
-        Text(hint, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-
-    val hasImportDetails = diagnostic?.lastSyncSummary?.isNotBlank() == true || diagnostic?.lastImportWindow != null ||
-        diagnostic?.lastError?.isNotBlank() == true
-    if (hasImportDetails) {
-        SettingsHeading("Last import")
-        diagnostic?.lastImportWindow?.let { window ->
-            ListItem(headlineContent = { Text("Payments read") }, trailingContent = { Text(window.paymentCount.toString()) })
-            if (window.earliestMillis != null && window.latestMillis != null) {
-                val first = formatSavedDay(java.time.Instant.ofEpochMilli(window.earliestMillis))
-                val last = formatSavedDay(java.time.Instant.ofEpochMilli(window.latestMillis))
-                ListItem(headlineContent = { Text("Import range") },
-                    supportingContent = { Text(if (first == last) first else "$first to $last") })
-            }
-        }
-        diagnostic?.lastSyncSummary?.takeIf { it.isNotBlank() }?.let {
-            Text(it.replace(" \u00b7 ", ". "), Modifier.padding(horizontal = 16.dp, vertical = 2.dp), style = MaterialTheme.typography.bodySmall)
-        }
-        diagnostic?.lastError?.takeIf { it.isNotBlank() }?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp, vertical = 2.dp), style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error)
-        }
-    }
-
-    SettingsHeading("Settings")
-    SettingsSwitch(
-        title = "Enabled",
-        checked = isEnabled,
-        onChange = { checked -> onEnabled(checked); onImportEnabled(checked) },
-        summary = if (isEnabled) "New payments import in every sync" else "Imports are paused; saved payments stay",
-        sourceName = provider.displayName,
-    )
-    if (provider == Provider.GOJEK) {
-        flash?.let { record ->
-            val stamp = record.millis?.let { ms ->
-                java.time.format.DateTimeFormatter.ofPattern("d MMM, HH:mm")
-                    .format(java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault()))
-            } ?: "never"
-            Text("GoPay background refresh: $stamp — ${flashExplanation(record.result)}",
-                Modifier.padding(horizontal = 16.dp, vertical = 2.dp), style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Text("Refresh runs invisibly: Artha opens Gojek's history once the screen is off, captures the update, and imports it. Deep backfill opens Gojek visibly and scrolls older history in.",
-            Modifier.padding(horizontal = 16.dp, vertical = 2.dp), style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-    feedback?.let {
-        Text(it, Modifier.padding(horizontal = 16.dp).semantics { liveRegion = LiveRegionMode.Polite },
-            style = MaterialTheme.typography.bodyMedium)
+internal fun isSourceProblem(diagnostic: ProviderDiagnostic?, importEnabled: Boolean, importing: Boolean): Boolean {
+    if (importing || !importEnabled) return false
+    return when (diagnostic?.accountStatus) {
+        AccountStatus.NEEDS_LOGIN,
+        AccountStatus.APP_NOT_INSTALLED,
+        AccountStatus.RATE_LIMITED,
+        AccountStatus.ERROR -> true
+        else -> false
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SourcePage(
-    provider: Provider, enabled: Boolean, importEnabled: Boolean, count: Int,
-    diagnostic: ProviderDiagnostic?, coverage: SourceCoverage?, importing: Boolean,
-    onEnabled: (Boolean) -> Unit, onImportEnabled: (Boolean) -> Unit, onImport: () -> Unit,
-    busy: Boolean = false, feedback: String? = null, onBack: () -> Unit,
-    flash: net.wastu.artha.data.providers.GojekFlashRecord? = null,
-) {
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-    androidx.compose.material3.Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(provider.displayName, modifier = Modifier.semantics { heading() }) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-                },
-                actions = { SyncHeaderAction(importing, importEnabled && !busy, onImport) },
-            )
-        },
-    ) { padding ->
-        Column(
-            Modifier.fillMaxSize().imePadding().padding(padding).verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
-        ) {
-            SourcePageContent(provider, enabled, importEnabled, count, diagnostic, coverage, importing,
-                onEnabled, onImportEnabled, onImport, busy = busy, feedback = feedback,
-                flash = flash)
-        }
-    }
-    }
-    }
-
-@Composable
-private fun SettingsSwitch(title: String, checked: Boolean, onChange: (Boolean) -> Unit, summary: String? = null, sourceName: String? = null) {
-    ListItem(modifier = Modifier.toggleable(checked, role = Role.Switch, onValueChange = onChange).semantics { if (sourceName != null) contentDescription = "$sourceName, $title" },
-        headlineContent = { Text(title) }, supportingContent = summary?.let { { Text(it) } },
-        trailingContent = { Switch(checked, onCheckedChange = null) })
-}
-
-internal fun sourceStatusLabel(status: AccountStatus, importEnabled: Boolean, importing: Boolean): String = when {
-    importing -> "Syncing"
-    !importEnabled -> "Paused"
-    else -> when (status) {
-        AccountStatus.PARTIAL -> "Partial"
-        AccountStatus.NEEDS_LOGIN -> "Sign in"
-        AccountStatus.APP_NOT_INSTALLED -> "No app"
-        AccountStatus.RATE_LIMITED -> "Limited"
-        AccountStatus.ERROR -> "Error"
-        AccountStatus.UNKNOWN -> "New"
-        else -> "Connected"
-    }
-}
-
-/** Sentence state description for the source page; problems carry their recovery step. */
-internal fun sourceStateDescription(status: AccountStatus, hasSavedRows: Boolean): String = when (status) {
-    AccountStatus.PARTIAL -> "This import captured only what the source offers; the details below say what stayed out."
-    AccountStatus.NEEDS_LOGIN -> "Sign in in the source app, then import again."
-    AccountStatus.APP_NOT_INSTALLED -> "Install the source app to import its history."
-    AccountStatus.RATE_LIMITED -> "The source is limiting imports. Wait a little, then import again."
-    AccountStatus.ERROR -> "The last import failed. The details below say why."
-    else -> if (hasSavedRows) "Imports are healthy. New payments appear after each sync." else "No history has been imported yet."
-}
-
-/** Row-level state summary: data freshness first, then sync recency. */
-internal fun sourceStateLine(
+internal fun sourceRowStatus(
+    provider: Provider,
     diagnostic: ProviderDiagnostic?,
-    coverage: SourceCoverage?,
-    count: Int,
     importEnabled: Boolean,
     importing: Boolean,
-): String = listOfNotNull(
-    when {
-        importing -> "Checking for new payments"
-        !importEnabled -> "Import paused"
-        coverage?.latest != null -> "Payments to ${formatSavedDay(coverage.latest)}"
-        count > 0 -> null
-        else -> "No saved payments yet"
-    },
-    diagnostic?.lastSyncEpochMillis?.takeIf { !importing }?.let { "synced ${it.formatRelativeTime()}" },
-).joinToString(", ").ifBlank { "Not imported yet" }
-
-/** Short recovery hint under problem rows; gets its own line so states stay scannable. */
-internal fun sourceRowHint(diagnostic: ProviderDiagnostic?): String? = when (diagnostic?.accountStatus) {
-    AccountStatus.NEEDS_LOGIN -> "Open the source app, sign in, then import again"
-    AccountStatus.APP_NOT_INSTALLED -> "Install the source app to import"
-    AccountStatus.ERROR -> diagnostic.lastError?.substringBefore(". ")?.takeIf(String::isNotBlank)
-    else -> null
+    now: Long = System.currentTimeMillis(),
+): String {
+    if (importing) return "Syncing"
+    if (!importEnabled) return "Paused"
+    return when (diagnostic?.accountStatus) {
+        AccountStatus.NEEDS_LOGIN -> "Sign in to ${provider.displayName}"
+        AccountStatus.APP_NOT_INSTALLED -> "${provider.displayName} app not installed"
+        AccountStatus.RATE_LIMITED -> "Limited by ${provider.displayName}. Try later"
+        AccountStatus.ERROR -> "Last sync failed"
+        else -> {
+            val lastSync = diagnostic?.lastSyncEpochMillis
+            if (lastSync == null) {
+                "Not synced yet"
+            } else if ((now - lastSync) in 0 until 15 * 60 * 1000L) {
+                "Up to date"
+            } else {
+                "Synced ${formatRelativeTime(lastSync, now)}"
+            }
+        }
+    }
 }
 
-private fun Long.formatRelativeTime(): String {
-    val diffSec = ((System.currentTimeMillis() - this) / 1000).coerceAtLeast(0)
+internal fun sourceHeadline(
+    provider: Provider,
+    diagnostic: ProviderDiagnostic?,
+    importEnabled: Boolean,
+    importing: Boolean,
+): String = when {
+    importing -> "Syncing"
+    !importEnabled -> "Paused"
+    diagnostic?.accountStatus == AccountStatus.NEEDS_LOGIN -> "Sign in to ${provider.displayName}"
+    diagnostic?.accountStatus == AccountStatus.APP_NOT_INSTALLED -> "${provider.displayName} app not installed"
+    diagnostic?.accountStatus == AccountStatus.RATE_LIMITED -> "Limited by ${provider.displayName}"
+    diagnostic?.accountStatus == AccountStatus.ERROR -> "Last sync failed"
+    else -> "Up to date"
+}
+
+internal fun formatRelativeTime(epochMillis: Long, now: Long = System.currentTimeMillis()): String {
+    val diffSec = ((now - epochMillis) / 1000).coerceAtLeast(0)
     val diffMin = diffSec / 60
     val diffHours = diffMin / 60
     val diffDays = diffHours / 24
     return when {
         diffSec < 60 -> "just now"
         diffMin < 60 -> "$diffMin min ago"
-        diffHours < 24 -> "$diffHours hours ago"
+        diffHours < 24 -> "$diffHours h ago"
         diffDays == 1L -> "yesterday"
         else -> "$diffDays days ago"
     }
 }
 
-internal fun formatSavedDay(instant: java.time.Instant, zone: java.time.ZoneId = net.wastu.artha.core.model.AccountingTime.zone): String =
-    java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale.US).withZone(zone).format(instant)
+private val ADDED_REGEX = Regex("""\b(\d+)\s+added\b""", RegexOption.IGNORE_CASE)
 
-
-
-
-@Composable
-fun AiConfigDialog(currentConfig: AiConfig, onDismiss: () -> Unit, onSave: (AiConfig) -> Unit,
-    saving: Boolean = false, error: String? = null,
-) {
-    var baseUrl by remember { mutableStateOf(currentConfig.baseUrl) }
-    var apiKey by remember { mutableStateOf(currentConfig.apiKey) }
-    var model by remember { mutableStateOf(currentConfig.model) }
-    var validationError by remember { mutableStateOf<String?>(null) }
-    var testing by remember { mutableStateOf(false) }
-    var testResult by remember { mutableStateOf<String?>(null) }
-    var testSucceeded by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val feedbackRequester = remember { BringIntoViewRequester() }
-    fun draft() = currentConfig.copy(baseUrl = baseUrl.trim(), apiKey = apiKey.trim(), model = model.trim())
-    AlertDialog(onDismissRequest = { if (!saving) onDismiss() },
-        title = { Text("AI") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Automatically categorizes payments and writes summaries. Sends payment details and personal context to this provider", style = MaterialTheme.typography.bodyMedium)
-                OutlinedTextField(baseUrl, { baseUrl = it; validationError = null; testResult = null }, label = { Text("Endpoint URL") },
-                    singleLine = true, enabled = !saving && !testing, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(apiKey, { apiKey = it; validationError = null; testResult = null }, label = { Text("API key") },
-                    visualTransformation = PasswordVisualTransformation(), singleLine = true, enabled = !saving && !testing, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(model, { model = it; validationError = null; testResult = null }, label = { Text("Model") },
-                    singleLine = true, enabled = !saving && !testing, modifier = Modifier.fillMaxWidth())
-                OutlinedButton(enabled = !saving && !testing, onClick = {
-                    val config = draft()
-                    validationError = aiConfigValidation(config)
-                    testResult = null
-                    if (validationError == null) {
-                        testing = true
-                        scope.launch {
-                            try {
-                                AiClient.testConnection(config)
-                                testSucceeded = true; testResult = "Connected"
-                            } catch (cancelled: CancellationException) { throw cancelled }
-                            catch (failure: Exception) { testSucceeded = false; testResult = aiConnectionFailure(failure) }
-                            finally { testing = false }
-                        }
-                    }
-                }) { Text(if (testing) "Testing" else "Test connection") }
-                if (testResult != null || validationError != null || error != null) {
-                    Column(Modifier.bringIntoViewRequester(feedbackRequester)) {
-                        testResult?.let { Text(it, color = if (testSucceeded) incomeColor() else MaterialTheme.colorScheme.error,
-                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
-                        (validationError ?: error)?.let { Text(it, color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
-                    }
-                    LaunchedEffect(testResult, validationError, error) {
-                        feedbackRequester.bringIntoView()
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            FilledTonalButton(enabled = !saving && !testing, onClick = {
-                val config = draft()
-                validationError = aiConfigValidation(config)
-                if (validationError == null) onSave(config)
-            }) { Text(if (saving) "Saving" else "Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !saving) { Text("Cancel") } })
+internal fun lastSyncText(summary: String?): String? {
+    if (summary.isNullOrBlank()) return null
+    val match = ADDED_REGEX.find(summary) ?: return null
+    val count = match.groupValues[1].toIntOrNull() ?: return null
+    return when (count) {
+        0 -> "No new payments"
+        1 -> "1 new payment"
+        else -> "$count new payments"
+    }
 }
+
+internal fun countExpenses(transactions: List<UnifiedTransaction>, provider: Provider): Int =
+    transactions.count { it.provider == provider && it.direction == Direction.DEBIT }
+
+internal fun formatSavedDay(instant: Instant, zone: ZoneId = AccountingTime.zone): String =
+    DateTimeFormatter.ofPattern("d MMM yyyy", Locale.US).withZone(zone).format(instant)
