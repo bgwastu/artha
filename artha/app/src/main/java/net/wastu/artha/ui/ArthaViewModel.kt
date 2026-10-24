@@ -78,6 +78,8 @@ class ArthaViewModel(
     val dateRangeFilter = _dateRangeFilter.asStateFlow()
     private val _categoryFilter = MutableStateFlow<String?>(null)
     val categoryFilter = _categoryFilter.asStateFlow()
+    private val _categoryFilterSet = MutableStateFlow<Set<String>?>(null)
+    val categoryFilterSet = _categoryFilterSet.asStateFlow()
     private var categoryReturnDates: Pair<Long?, Long?>? = null
     private var categoryDrillActive = false
     private val _targetDestination = MutableStateFlow<String?>(null)
@@ -156,12 +158,12 @@ class ArthaViewModel(
                 }.flowOn(computationDispatcher).catch { emit(SpendingState.Failed) }
                     .stateIn(this, SharingStarted.Eagerly, SpendingState.Loading)
                 launch {
-                    combine(state, enabledProviders, _dateRangeFilter, _categoryFilter) { projection, enabled, dates, category ->
+                    combine(state, enabledProviders, _dateRangeFilter, _categoryFilter, _categoryFilterSet) { projection, enabled, dates, category, categorySet ->
                         when (projection) {
-                            SpendingState.Loading -> if (hasSavedProjection) visibleLedger(_reconciledCache.value, enabled, dates, category) else LedgerState.Loading
+                            SpendingState.Loading -> if (hasSavedProjection) visibleLedger(_reconciledCache.value, enabled, dates, category, categorySet) else LedgerState.Loading
                             SpendingState.Failed -> {
                                 _ledgerLoadFailed.value = true
-                                if (hasSavedProjection) visibleLedger(_reconciledCache.value, enabled, dates, category) else LedgerState.Failed
+                                if (hasSavedProjection) visibleLedger(_reconciledCache.value, enabled, dates, category, categorySet) else LedgerState.Failed
                             }
                             is SpendingState.Ready -> {
                                 _ledgerLoadFailed.value = false
@@ -169,7 +171,7 @@ class ArthaViewModel(
                                 _providerCounts.value = projection.providerCounts
                                 _providerCoverage.value = sourceCoverage(projection.transactions)
                                 _reconciledCache.value = projection.transactions
-                                visibleLedger(projection.transactions, enabled, dates, category)
+                                visibleLedger(projection.transactions, enabled, dates, category, categorySet)
                             }
                         }
                     }.flowOn(computationDispatcher).collect { _ledgerState.value = it }
@@ -721,11 +723,19 @@ class ArthaViewModel(
         observeAutomaticCategories()
     }
 
-    private fun visibleLedger(rows: List<UnifiedTransaction>, enabled: Set<Provider>, dates: Pair<Long?, Long?>?, category: String?): LedgerState.Ready {
+    private fun visibleLedger(
+        rows: List<UnifiedTransaction>,
+        enabled: Set<Provider>,
+        dates: Pair<Long?, Long?>?,
+        category: String?,
+        categorySet: Set<String>? = _categoryFilterSet.value,
+    ): LedgerState.Ready {
         val (start, end) = dates ?: (null to null)
+        val activeSet = categorySet ?: category?.let { setOf(it) }
         return LedgerState.Ready(rows.filter { tx ->
             val millis = tx.occurredAt.toEpochMilli()
-            (category != null || tx.provider in enabled) && (category == null || tx.category == category && BudgetAnalyzer.isSpending(tx)) &&
+            (activeSet != null || tx.provider in enabled) &&
+                (activeSet == null || (tx.category in activeSet && BudgetAnalyzer.isSpending(tx))) &&
                 (start == null || millis >= start) && (end == null || millis < AccountingTime.dayAfter(end))
         })
     }
@@ -823,14 +833,21 @@ class ArthaViewModel(
         _dateRangeFilter.value = if (startMillis == null && endMillis == null) null else startMillis to endMillis
     }
     fun clearDateRangeFilter() { _dateRangeFilter.value = null }
-    fun clearCategoryFilter() { _categoryFilter.value = null; categoryDrillActive = false; categoryReturnDates = null }
-    fun openCategoryTransactions(category: String) {
+    fun clearCategoryFilter() {
+        _categoryFilter.value = null
+        _categoryFilterSet.value = null
+        categoryDrillActive = false
+        categoryReturnDates = null
+    }
+    fun openCategoryTransactions(category: String, categories: Set<String> = setOf(category)) {
         if (!categoryDrillActive) categoryReturnDates = _dateRangeFilter.value
         categoryDrillActive = true
         val month = selectedMonth.value
         setDateRangeFilter(month.atDay(1).atStartOfDay(AccountingTime.zone).toInstant().toEpochMilli(),
             month.atEndOfMonth().atStartOfDay(AccountingTime.zone).toInstant().toEpochMilli())
-        _categoryFilter.value = category; setTargetDestination("TRANSACTIONS")
+        _categoryFilter.value = category
+        _categoryFilterSet.value = categories
+        setTargetDestination("TRANSACTIONS")
     }
     fun closeCategoryTransactions() {
         if (!categoryDrillActive) return

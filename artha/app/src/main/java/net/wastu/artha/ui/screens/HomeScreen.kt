@@ -103,6 +103,7 @@ fun HomeScreen(
     var showCategoryReview by rememberSaveable { mutableStateOf(false) }
     var showAiCategories by rememberSaveable { mutableStateOf(false) }
     var showSpendingChart by rememberSaveable { mutableStateOf(false) }
+    var categoryDrillFromChart by rememberSaveable { mutableStateOf(false) }
     val snackbarHost = remember { androidx.compose.material3.SnackbarHostState() }
     val importFeedback by viewModel?.importFeedback?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val automaticImport by viewModel?.automaticImportActive?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
@@ -123,12 +124,21 @@ fun HomeScreen(
             viewModel?.setTargetDestination(null)
         }
     }
+    androidx.compose.runtime.LaunchedEffect(categoryFilter) {
+        if (categoryFilter == null) {
+            categoryDrillFromChart = false
+        }
+    }
 
     BackHandler(enabled = destination != Destination.TRANSACTIONS && selectedKey == null) {
         destination = Destination.TRANSACTIONS
     }
 
     BackHandler(enabled = destination == Destination.TRANSACTIONS && categoryFilter != null && selectedKey == null && !showSearch && !showFilter) {
+        if (categoryDrillFromChart) {
+            categoryDrillFromChart = false
+            showSpendingChart = true
+        }
         viewModel?.closeCategoryTransactions()
     }
 
@@ -163,8 +173,17 @@ fun HomeScreen(
                 TopAppBar(
                     navigationIcon = {
                         if (destination == Destination.TRANSACTIONS && categoryFilter != null) {
-                            IconButton(onClick = { viewModel?.closeCategoryTransactions() }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Analysis")
+                            IconButton(onClick = {
+                                if (categoryDrillFromChart) {
+                                    categoryDrillFromChart = false
+                                    showSpendingChart = true
+                                }
+                                viewModel?.closeCategoryTransactions()
+                            }) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = if (categoryDrillFromChart) "Back to Chart" else "Back to Analysis",
+                                )
                             }
                         }
                     },
@@ -341,7 +360,15 @@ fun HomeScreen(
         }
         if (showSpendingChart && viewModel != null) {
             Surface(Modifier.fillMaxSize()) {
-                SpendingChartScreen(viewModel = viewModel, onBack = { showSpendingChart = false })
+                SpendingChartScreen(
+                    viewModel = viewModel,
+                    onBack = { showSpendingChart = false },
+                    onOpenCategory = { slice ->
+                        categoryDrillFromChart = true
+                        viewModel.openCategoryTransactions(slice.name, slice.categories)
+                        showSpendingChart = false
+                    },
+                )
             }
         }
         if (showCategoryReview && viewModel != null) {

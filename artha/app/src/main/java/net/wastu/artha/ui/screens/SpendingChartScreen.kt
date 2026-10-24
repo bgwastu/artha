@@ -4,8 +4,9 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,10 +38,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -71,6 +74,7 @@ object SpendingChartLogic {
         val amountMinor: Long,
         val percent: Int,
         val isOther: Boolean = false,
+        val categories: Set<String> = setOf(name),
     )
 
     /** Top categories by spend, with remaining categories merged into "Others". */
@@ -79,23 +83,29 @@ object SpendingChartLogic {
         if (nonZero.isEmpty()) return emptyList()
 
         val sorted = nonZero.sortedByDescending { it.amountMinor }
-        val rawList: List<Triple<String, Long, Boolean>> = if (sorted.size <= 7) {
-            sorted.map { Triple(it.category, it.amountMinor, false) }
+        val rawList: List<Triple<String, Long, Set<String>>> = if (sorted.size <= 7) {
+            sorted.map { Triple(it.category, it.amountMinor, setOf(it.category)) }
         } else {
             val kept = sorted.take(7)
-            val rest = sorted.drop(7).sumOf { it.amountMinor }
-            if (rest > 0) kept.map { Triple(it.category, it.amountMinor, false) } + Triple("Others", rest, true)
-            else kept.map { Triple(it.category, it.amountMinor, false) }
+            val restCategories = sorted.drop(7)
+            val rest = restCategories.sumOf { it.amountMinor }
+            if (rest > 0) {
+                kept.map { Triple(it.category, it.amountMinor, setOf(it.category)) } +
+                    Triple("Others", rest, restCategories.map { it.category }.toSet())
+            } else {
+                kept.map { Triple(it.category, it.amountMinor, setOf(it.category)) }
+            }
         }
 
         val amounts = rawList.map { it.second }
         val percentages = calculatePercentages(amounts)
-        return rawList.mapIndexed { index, (name, amount, isOther) ->
+        return rawList.mapIndexed { index, (name, amount, cats) ->
             Slice(
                 name = name,
                 amountMinor = amount,
                 percent = percentages[index],
-                isOther = isOther,
+                isOther = name == "Others",
+                categories = cats,
             )
         }
     }
@@ -150,15 +160,22 @@ private fun sliceColor(index: Int, isOther: Boolean = false) = Color(
     }
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun SpendingChartScreen(viewModel: ArthaViewModel, onBack: () -> Unit) {
+fun SpendingChartScreen(
+    viewModel: ArthaViewModel,
+    onBack: () -> Unit,
+    onOpenCategory: (SpendingChartLogic.Slice) -> Unit = { slice ->
+        viewModel.openCategoryTransactions(slice.name, slice.categories)
+        onBack()
+    },
+) {
     val analysis by viewModel.monthAnalysis.collectAsStateWithLifecycle()
     val snapshot by viewModel.analysisSnapshot.collectAsStateWithLifecycle()
     val selectedMonth by viewModel.selectedMonth.collectAsStateWithLifecycle()
     val canGoNext = selectedMonth < YearMonth.now(AccountingTime.clock)
     val slices = remember(analysis) { SpendingChartLogic.categorySlices(analysis) }
-    var selected by remember(analysis) { mutableStateOf<Int?>(null) }
+    var selected by rememberSaveable(analysis.month) { mutableStateOf<Int?>(null) }
     val total = slices.sumOf { it.amountMinor }.coerceAtLeast(1)
     val listState = rememberLazyListState()
 
@@ -215,6 +232,7 @@ fun SpendingChartScreen(viewModel: ArthaViewModel, onBack: () -> Unit) {
                     icons = snapshot.categoryIcons,
                     selected = selected,
                     onSelect = { index -> selected = if (selected == index) null else index },
+                    onOpenCategory = onOpenCategory,
                     total = total,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -235,11 +253,16 @@ fun SpendingChartScreen(viewModel: ArthaViewModel, onBack: () -> Unit) {
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { selected = if (isSelected) null else index }
+                                .clip(RoundedCornerShape(12.dp))
+                                .combinedClickable(
+                                    onClick = { selected = if (isSelected) null else index },
+                                    onLongClick = { onOpenCategory(slice) },
+                                    onClickLabel = "Select category",
+                                    onLongClickLabel = "Filter transactions",
+                                )
                                 .background(
                                     if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh
                                     else MaterialTheme.colorScheme.surface,
-                                    RoundedCornerShape(12.dp),
                                 )
                                 .padding(horizontal = 10.dp, vertical = 8.dp),
                         ) {
@@ -285,12 +308,14 @@ private data class DonutSlice(
  * so slices and gaps are pixel-perfect. Selected slice explodes outward smoothly while other slices dim,
  * and the center hole displays category breakdown on selection or total when idle.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DonutChart(
     slices: List<SpendingChartLogic.Slice>,
     icons: Map<String, String>,
     selected: Int?,
     onSelect: (Int?) -> Unit,
+    onOpenCategory: (SpendingChartLogic.Slice) -> Unit,
     total: Long,
     modifier: Modifier = Modifier,
 ) {
@@ -324,35 +349,62 @@ private fun DonutChart(
             Modifier
                 .fillMaxSize()
                 .pointerInput(items, total) {
-                    detectTapGestures { tap ->
-                        val center = Offset(size.width / 2f, size.height / 2f)
-                        val maxRadius = min(size.width, size.height) / 2f
-                        val outerRadius = maxRadius * 0.82f
-                        val ringThickness = 28.dp.toPx()
-                        val innerRadius = outerRadius - ringThickness
+                    detectTapGestures(
+                        onTap = { tap ->
+                            val center = Offset(size.width / 2f, size.height / 2f)
+                            val maxRadius = min(size.width, size.height) / 2f
+                            val outerRadius = maxRadius * 0.82f
+                            val ringThickness = 28.dp.toPx()
+                            val innerRadius = outerRadius - ringThickness
 
-                        val dx = tap.x - center.x
-                        val dy = tap.y - center.y
-                        val radius = hypot(dx.toDouble(), dy.toDouble()).toFloat()
-                        val selection = currentSelection
+                            val dx = tap.x - center.x
+                            val dy = tap.y - center.y
+                            val radius = hypot(dx.toDouble(), dy.toDouble()).toFloat()
+                            val selection = currentSelection
 
-                        if (radius < innerRadius) {
-                            // Tapping the hole clears the selection.
-                            if (selection != null) onSelect(null)
-                        } else if (radius <= outerRadius + 16.dp.toPx()) {
-                            var degrees = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble()))
-                            degrees = ((degrees + 90) + 360) % 360
-                            var running = 0.0
-                            var picked = -1
-                            items.forEachIndexed { index, item ->
-                                val sweep = item.amountMinor.toDouble() / total * 360.0
-                                if (picked < 0 && degrees < running + sweep) picked = index
-                                running += sweep
+                            if (radius < innerRadius) {
+                                // Tapping the hole clears the selection.
+                                if (selection != null) onSelect(null)
+                            } else if (radius <= outerRadius + 16.dp.toPx()) {
+                                var degrees = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble()))
+                                degrees = ((degrees + 90) + 360) % 360
+                                var running = 0.0
+                                var picked = -1
+                                items.forEachIndexed { index, item ->
+                                    val sweep = item.amountMinor.toDouble() / total * 360.0
+                                    if (picked < 0 && degrees < running + sweep) picked = index
+                                    running += sweep
+                                }
+                                if (picked < 0) picked = items.lastIndex
+                                if (picked == selection) onSelect(null) else onSelect(picked)
                             }
-                            if (picked < 0) picked = items.lastIndex
-                            if (picked == selection) onSelect(null) else onSelect(picked)
-                        }
-                    }
+                        },
+                        onLongPress = { tap ->
+                            val center = Offset(size.width / 2f, size.height / 2f)
+                            val maxRadius = min(size.width, size.height) / 2f
+                            val outerRadius = maxRadius * 0.82f
+                            val ringThickness = 28.dp.toPx()
+                            val innerRadius = outerRadius - ringThickness
+
+                            val dx = tap.x - center.x
+                            val dy = tap.y - center.y
+                            val radius = hypot(dx.toDouble(), dy.toDouble()).toFloat()
+
+                            if (radius in (innerRadius - 8.dp.toPx())..(outerRadius + 16.dp.toPx())) {
+                                var degrees = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble()))
+                                degrees = ((degrees + 90) + 360) % 360
+                                var running = 0.0
+                                var picked = -1
+                                items.forEachIndexed { index, item ->
+                                    val sweep = item.amountMinor.toDouble() / total * 360.0
+                                    if (picked < 0 && degrees < running + sweep) picked = index
+                                    running += sweep
+                                }
+                                if (picked < 0) picked = items.lastIndex
+                                slices.getOrNull(picked)?.let(onOpenCategory)
+                            }
+                        },
+                    )
                 },
         ) {
             val center = Offset(size.width / 2f, size.height / 2f)
@@ -393,7 +445,27 @@ private fun DonutChart(
         val picked = selected?.let { items.getOrNull(it) }
         Crossfade(targetState = picked, label = "hole") { state ->
             Column(
-                Modifier.widthIn(max = 160.dp).padding(horizontal = 8.dp),
+                Modifier
+                    .widthIn(max = 160.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .then(
+                        if (state != null) {
+                            Modifier.combinedClickable(
+                                onClick = {
+                                    val sel = selected
+                                    if (sel != null) slices.getOrNull(sel)?.let(onOpenCategory)
+                                },
+                                onLongClick = {
+                                    val sel = selected
+                                    if (sel != null) slices.getOrNull(sel)?.let(onOpenCategory)
+                                },
+                                onClickLabel = "Filter transactions",
+                            )
+                        } else {
+                            Modifier
+                        }
+                    )
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
