@@ -50,6 +50,7 @@ import com.patrykandpatrick.vico.compose.common.Fill
 import com.patrykandpatrick.vico.compose.common.ProvideVicoTheme
 import com.patrykandpatrick.vico.compose.common.component.TextComponent
 import com.patrykandpatrick.vico.compose.common.component.rememberTextComponent
+import com.patrykandpatrick.vico.compose.common.component.rememberShapeComponent
 import com.patrykandpatrick.vico.compose.cartesian.marker.rememberDefaultCartesianMarker
 import com.patrykandpatrick.vico.compose.m3.common.rememberM3VicoTheme
 import com.patrykandpatrick.vico.compose.cartesian.data.CartesianValueFormatter
@@ -104,6 +105,7 @@ object SpendingChartLogic {
 fun SpendingChartScreen(viewModel: ArthaViewModel, onBack: () -> Unit) {
     val analysis by viewModel.monthAnalysis.collectAsStateWithLifecycle()
     val selectedMonth by viewModel.selectedMonth.collectAsStateWithLifecycle()
+    val snapshot by viewModel.analysisSnapshot.collectAsStateWithLifecycle()
     val today = remember { java.time.LocalDate.now(AccountingTime.clock.withZone(AccountingTime.zone)) }
     val canGoNext = selectedMonth < YearMonth.now(AccountingTime.clock)
 
@@ -146,7 +148,7 @@ fun SpendingChartScreen(viewModel: ArthaViewModel, onBack: () -> Unit) {
             }
             val empty = analysis.categories.isEmpty()
             when (selectedTab) {
-                1 -> if (empty) EmptyChart() else CategoryPieSection(analysis)
+                1 -> if (empty) EmptyChart() else CategoryPieSection(analysis, snapshot.categoryIcons)
                 else -> if (empty) EmptyChart() else DailyChartSection(selectedMonth, analysis, today)
             }
             Spacer(Modifier.height(16.dp))
@@ -174,22 +176,39 @@ private fun DailyChartSection(month: YearMonth, analysis: MonthSpendingAnalysis,
             columnModel { series(daily) }
         }
     }
+    val colors = MaterialTheme.colorScheme
+    val indicatorComponent = rememberShapeComponent(
+        fill = com.patrykandpatrick.vico.compose.common.Fill(colors.primary),
+        shape = androidx.compose.foundation.shape.CircleShape,
+    )
     val marker = rememberDefaultCartesianMarker(
         label = rememberTextComponent(
-            androidx.compose.ui.text.TextStyle(
-                color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp,
+            androidx.compose.ui.text.TextStyle(color = colors.onSurface, fontSize = 12.sp),
+            padding = com.patrykandpatrick.vico.compose.common.Insets(all = 8.dp),
+            margins = com.patrykandpatrick.vico.compose.common.Insets(all = 4.dp),
+            background = rememberShapeComponent(
+                fill = com.patrykandpatrick.vico.compose.common.Fill(colors.surfaceContainerHigh),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
             ),
         ),
         valueFormatter = { _, targets ->
             val target = targets.first() as com.patrykandpatrick.vico.compose.cartesian.marker.ColumnCartesianLayerMarkerTarget
             formatMoney(net.wastu.artha.core.model.Money(target.columns.first().entry.y.toLong()))
         },
+        indicator = { indicatorComponent },
+        indicatorSize = 12.dp,
+        guideline = com.patrykandpatrick.vico.compose.cartesian.axis.rememberAxisGuidelineComponent(),
     )
     CartesianChartHost(
         chart = rememberCartesianChart(
             rememberColumnCartesianLayer(),
             startAxis = VerticalAxis.rememberStart(valueFormatter = compactRupiahFormatter()),
-            bottomAxis = HorizontalAxis.rememberBottom(valueFormatter = dayFormatter(daily.size)),
+            bottomAxis = HorizontalAxis.rememberBottom(
+                valueFormatter = dayFormatter(month),
+                itemPlacer = remember {
+                    com.patrykandpatrick.vico.compose.cartesian.axis.HorizontalAxis.ItemPlacer.aligned(spacing = { 4 })
+                },
+            ),
             marker = marker,
             markerController = com.patrykandpatrick.vico.compose.cartesian.marker.CartesianMarkerController.rememberToggleOnTap(),
         ),
@@ -199,7 +218,7 @@ private fun DailyChartSection(month: YearMonth, analysis: MonthSpendingAnalysis,
 }
 
 @Composable
-private fun CategoryPieSection(analysis: MonthSpendingAnalysis) {
+private fun CategoryPieSection(analysis: MonthSpendingAnalysis, categoryIcons: Map<String, String>) {
     val slices = remember(analysis) { SpendingChartLogic.categorySlices(analysis) }
     val producer = remember { PieChartModelProducer() }
     val values = slices.map { (_, amount) -> amount.toDouble() }
@@ -251,7 +270,7 @@ private fun CategoryPieSection(analysis: MonthSpendingAnalysis) {
             )
             slices.forEachIndexed { index, (name, amount) ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Box(Modifier.size(12.dp).background(theme.pieChartColors[index % theme.pieChartColors.size], CircleShape))
+                    androidx.compose.material3.Icon(net.wastu.artha.ui.categoryIconFor(name, categoryIcons), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Text(name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                     Text("${slices.firstOrNull { it.first == name }?.let { it.second * 100 / total } ?: 0}%",
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -271,7 +290,6 @@ private fun compactRupiahFormatter(): CartesianValueFormatter = CartesianValueFo
     }
 }
 
-private fun dayFormatter(days: Int): CartesianValueFormatter = CartesianValueFormatter { _, x, _ ->
-    val index = x.toInt()
-    if (index < 0 || index >= days) "" else "${index + 1}"
+private fun dayFormatter(month: YearMonth): CartesianValueFormatter = CartesianValueFormatter { _, x, _ ->
+    (x.toInt().coerceIn(1, month.lengthOfMonth())).toString()
 }
