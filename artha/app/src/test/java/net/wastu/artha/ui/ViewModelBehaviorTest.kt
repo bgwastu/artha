@@ -337,6 +337,29 @@ class ViewModelBehaviorTest {
     }
 
     @Test
+    fun retryOfChangedButNotNewPaymentRunsOnceAndGoesIdle() = runTest(dispatcher) {
+        val prefs = FixturePreferences(configuredPrefs())
+        val store = AnalysisStore(prefs.context)
+        val p1 = testPayment("p1")
+        store.setClassification(p1.key, "Groceries", "AI suggestion: Food", manual = false)
+        store.setUserNote(p1.key, "Changed evidence") // needs a label again, but is not new
+        val calls = AtomicInteger(0)
+        val model = ArthaViewModel(RootAccess { true }, { ledger }, clock = fixedClock, analysisStore = store,
+            computationDispatcher = dispatcher, ioDispatcher = dispatcher, spendingState = MutableStateFlow(readySpending(listOf(p1))),
+            categorize = { _, _, batch ->
+                calls.incrementAndGet()
+                batch.associate { it.transaction.key to CategorySuggestion("Dining Out", "AI suggestion: Cafe") }
+            })
+        model.enterForeground(); advanceUntilIdle()
+        model.retryAutomaticCategories(); advanceUntilIdle()
+        assertEquals(1, calls.get())
+        assertTrue(model.categoryProgress.value.queuedKeys.isEmpty())
+        assertEquals(CategoryAutomationState.READY, model.categoryProgress.value.state)
+        assertEquals("Dining Out", store.snapshot.value.categories[p1.key])
+        model.lock()
+    }
+
+    @Test
     fun stopCancelsAndSetsStoppedRetryClearsIt() = runTest(dispatcher) {
         val prefs = FixturePreferences(configuredPrefs())
         val store = AnalysisStore(prefs.context)

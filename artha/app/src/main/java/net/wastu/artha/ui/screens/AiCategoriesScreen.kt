@@ -130,7 +130,8 @@ fun AiCategoriesScreen(
 
     val currentMonth = remember { YearMonth.now(AccountingTime.zone) }
     val newScope = remember(currentMonth) { RecategorizeScope.New(currentMonth) }
-    val newCount = viewModel.recategorizeCount(newScope)
+    // Counts scan every saved payment; recompute only when payments or labels change, not on every progress tick.
+    val newCount = remember(allTransactions, snapshot, newScope) { viewModel.recategorizeCount(newScope) }
 
     val isWorking = categoryProgress.state == CategoryAutomationState.WORKING
     val isError = categoryProgress.state == CategoryAutomationState.ERROR
@@ -250,7 +251,7 @@ fun AiCategoriesScreen(
 
             item(key = "recategorize_month") {
                 val monthScope = remember(selectedMonth) { RecategorizeScope.Month(selectedMonth) }
-                val count = viewModel.recategorizeCount(monthScope)
+                val count = remember(allTransactions, snapshot, monthScope) { viewModel.recategorizeCount(monthScope) }
                 val enabled = !isWorking && count > 0
                 ListItem(
                     headlineContent = {
@@ -268,7 +269,7 @@ fun AiCategoriesScreen(
 
             item(key = "recategorize_uncategorized") {
                 val uncategorizedScope = RecategorizeScope.Uncategorized
-                val count = viewModel.recategorizeCount(uncategorizedScope)
+                val count = remember(allTransactions, snapshot, uncategorizedScope) { viewModel.recategorizeCount(uncategorizedScope) }
                 val enabled = !isWorking && count > 0
                 ListItem(
                     headlineContent = {
@@ -286,7 +287,7 @@ fun AiCategoriesScreen(
 
             item(key = "recategorize_all") {
                 val allScope = RecategorizeScope.All
-                val count = viewModel.recategorizeCount(allScope)
+                val count = remember(allTransactions, snapshot, allScope) { viewModel.recategorizeCount(allScope) }
                 val enabled = !isWorking && count > 0
                 ListItem(
                     headlineContent = {

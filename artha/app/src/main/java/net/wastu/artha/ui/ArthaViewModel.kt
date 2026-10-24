@@ -414,6 +414,11 @@ class ArthaViewModel(
                     return@collect
                 }
 
+                // Keys that stopped being new (labeled elsewhere, failed, gone) would otherwise stay "queued" forever.
+                val byKey = rows.associateBy { it.key }
+                pendingAutomaticKeys.retainAll { key ->
+                    key !in snapshot.categoryFailures && byKey[key]?.let { AiCategorization.isNew(it, snapshot) } == true
+                }
                 // Memory commits only for pendingAutomaticKeys (new current-month payments)
                 if (snapshot.autoCategorize && !stopped && nonRetryableError == null && pendingAutomaticKeys.isNotEmpty()) {
                     val mem = plan.memory.filterKeys { it in pendingAutomaticKeys }
@@ -826,21 +831,20 @@ class ArthaViewModel(
         for ((_, job) in backoffJobs) job.cancel()
         backoffJobs.clear()
         batchAttempts.clear()
-        val failures = analysisSnapshot.value.categoryFailures.keys
-        if (failures.isNotEmpty()) {
-            viewModelScope.launch(ioDispatcher) {
-                analysisStore?.clearCategoryFailures(failures)
-            }
-        }
         val rows = _reconciledCache.value
         val snapshot = analysisSnapshot.value
         val curMonth = currentMonth()
-        val needingCurrentMonth = rows.filter { tx ->
+        // Retry this month's unlabeled and failed payments as a forced run: they may not be "new",
+        // and the automatic list only sends new payments, so they would sit queued forever.
+        val retryKeys = rows.filter { tx ->
             YearMonth.from(tx.occurredAt.atZone(AccountingTime.zone)) == curMonth &&
                 AiCategorization.isEligible(tx, snapshot) &&
-                isNeedingCategory(tx, snapshot)
-        }.map { it.key }
-        pendingAutomaticKeys.addAll(needingCurrentMonth)
+                (tx.key in snapshot.categoryFailures || isNeedingCategory(tx, snapshot))
+        }.map { it.key }.toSet()
+        val failed = retryKeys.filter { it in snapshot.categoryFailures }
+        if (failed.isNotEmpty()) viewModelScope.launch(ioDispatcher) { analysisStore?.clearCategoryFailures(failed) }
+        val queued = manualQueue.map { it.key }.toSet()
+        manualQueue.addAll(retryKeys.filter { it !in inFlightKeys && it !in queued }.map { ManualQueueEntry(it, replaceManual = false) })
         triggerPump()
         observeAutomaticCategories()
     }
