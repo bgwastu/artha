@@ -74,16 +74,21 @@ object MerchantMemory {
         return text
     }
 
+    /** Spending payments by merchant key. Build once per pass: merchantKey parses each payload. */
+    fun index(rows: List<UnifiedTransaction>): Map<String, List<UnifiedTransaction>> =
+        rows.filter(BudgetAnalyzer::isSpending).groupBy { merchantKey(it) ?: "" } - ""
+
     fun remembered(
         tx: UnifiedTransaction,
         rows: List<UnifiedTransaction>,
         snapshot: AnalysisSnapshot,
+        byMerchant: Map<String, List<UnifiedTransaction>> = index(rows),
     ): CategorySuggestion? {
         if (!BudgetAnalyzer.isSpending(tx)) return null
         val key = merchantKey(tx) ?: return null
         val display = displayMerchant(tx) ?: return null
 
-        val peers = rows.filter { it.key != tx.key && BudgetAnalyzer.isSpending(it) && merchantKey(it) == key }
+        val peers = byMerchant[key].orEmpty().filter { it.key != tx.key }
         if (peers.isEmpty()) return null
 
         // 1. User manually picked a category for 1+ payments of that merchant (latest pick wins)
