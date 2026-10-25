@@ -102,10 +102,10 @@ data class TransactionDetailDto(
     val sourceData: Any?,
     val canonicalKey: String?,
 ) {
-    fun toJson(): JSONObject {
+    fun toJson(includeRaw: Boolean = false): JSONObject {
         val json = summary.toJson()
         json.put("canonicalKey", canonicalKey ?: JSONObject.NULL)
-        json.put("rawPayload", rawPayload)
+        if (includeRaw) json.put("rawPayload", rawPayload)
         json.put("sourceData", sourceData ?: JSONObject.NULL)
         return json
     }

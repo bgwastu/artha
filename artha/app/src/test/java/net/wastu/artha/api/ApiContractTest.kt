@@ -4,7 +4,6 @@ import net.wastu.artha.api.model.BatchUpdateRequest
 import net.wastu.artha.api.model.BatchUpdateResponse
 import net.wastu.artha.api.model.TransactionSummaryDto
 import net.wastu.artha.api.model.UpdateTransactionRequest
-import net.wastu.artha.api.spec.AgentTools
 import net.wastu.artha.api.spec.OpenApiGenerator
 import net.wastu.artha.api.spec.ScalarDocs
 import net.wastu.artha.core.model.Direction
@@ -39,7 +38,6 @@ class ApiContractTest {
             "/api/v1/categories/{name}",
             "/api/v1/knowledge",
             "/api/v1/actions/sync",
-            "/api/v1/agent/tools",
         )
 
         for (endpoint in expectedEndpoints) {
@@ -48,35 +46,9 @@ class ApiContractTest {
     }
 
     @Test
-    fun agentToolsDefinitionContainsRequiredTools() {
-        val jsonStr = AgentTools.generateJson()
-        val root = JSONObject(jsonStr)
-        val tools = root.getJSONArray("tools")
-
-        val toolNames = mutableListOf<String>()
-        for (i in 0 until tools.length()) {
-            val t = tools.getJSONObject(i)
-            assertEquals("function", t.getString("type"))
-            val fn = t.getJSONObject("function")
-            toolNames.add(fn.getString("name"))
-        }
-
-        val expectedTools = listOf(
-            "list_transactions",
-            "get_transaction_details",
-            "update_transaction",
-            "batch_update_transactions",
-            "get_spending_summary",
-            "list_categories",
-            "create_category",
-            "get_knowledge",
-            "update_knowledge",
-            "trigger_sync",
-        )
-
-        for (expected in expectedTools) {
-            assertTrue("Expected tool $expected in agent tools list", toolNames.contains(expected))
-        }
+    fun openApiSpecHasNoAgentToolsEndpoint() {
+        val paths = JSONObject(OpenApiGenerator.generateJson()).getJSONObject("paths")
+        assertTrue(!paths.has("/api/v1/agent/tools"))
     }
 
     @Test

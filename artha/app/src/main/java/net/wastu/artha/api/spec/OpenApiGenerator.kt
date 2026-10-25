@@ -37,6 +37,7 @@ object OpenApiGenerator {
                 put(param("unreviewedOnly", "query", "boolean", "Only return transactions needing classification review"))
                 put(param("minAmountMinor", "query", "integer", "Minimum amount in minor units (1 IDR = 100 minor units)"))
                 put(param("maxAmountMinor", "query", "integer", "Maximum amount in minor units"))
+                put(param("sort", "query", "string", "Sort order: date_desc, date_asc, amount_desc or amount_asc. Defaults to the app's own order."))
             }
             put("parameters", params)
             put("responses", jsonResponse("200", "List of transactions and pagination metadata"))
@@ -50,7 +51,9 @@ object OpenApiGenerator {
             put("summary", "Get transaction details")
             put("description", "Get full details for a transaction including parsed food order items, ride routes, and sanitized source evidence.")
             put("operationId", "getTransactionDetails")
-            put("parameters", JSONArray().put(param("key", "path", "string", "Transaction key (e.g. JAGO:12345)", required = true)))
+            put("parameters", JSONArray()
+                .put(param("key", "path", "string", "Transaction key (e.g. JAGO:12345)", required = true))
+                .put(param("include", "query", "string", "Set to 'raw' to also return the unparsed source payload")))
             put("responses", jsonResponse("200", "Detailed transaction information"))
         }
         val txKeyPatch = JSONObject().apply {
@@ -188,17 +191,6 @@ object OpenApiGenerator {
         syncPath.put("post", syncPost)
         paths.put("/api/v1/actions/sync", syncPath)
 
-        // /api/v1/agent/tools
-        val toolsPath = JSONObject()
-        val toolsGet = JSONObject().apply {
-            put("summary", "Get AI agent tool definitions")
-            put("description", "Returns ready-to-use OpenAI / Anthropic format tool definitions for AI agents.")
-            put("operationId", "getAgentTools")
-            put("responses", jsonResponse("200", "Tools schema"))
-        }
-        toolsPath.put("get", toolsGet)
-        paths.put("/api/v1/agent/tools", toolsPath)
-
         root.put("paths", paths)
         return root.toString(2)
     }
@@ -227,158 +219,6 @@ object OpenApiGenerator {
                 put("description", description)
                 put("content", JSONObject().put("application/json", JSONObject().put("schema", JSONObject().put("type", "object"))))
             })
-        }
-}
-
-object AgentTools {
-    fun generateJson(): String {
-        val root = JSONObject()
-        val tools = JSONArray()
-
-        tools.put(tool(
-            name = "list_transactions",
-            description = "List and filter spending transactions in Artha. Supports filtering by date, month (YYYY-MM), provider (JAGO, GOJEK, SHOPEE, GRAB), category, direction (DEBIT/CREDIT), search keyword, and amounts.",
-            properties = mapOf(
-                "limit" to prop("integer", "Maximum number of transactions to return (default 50, max 200)"),
-                "offset" to prop("integer", "Pagination offset (default 0)"),
-                "month" to prop("string", "Year-Month format (e.g. 2026-04)"),
-                "from" to prop("string", "Filter transactions on or after this ISO timestamp"),
-                "to" to prop("string", "Filter transactions before this ISO timestamp"),
-                "provider" to prop("string", "Provider name (JAGO, GOJEK, SHOPEE, GRAB)", enumValues = listOf("JAGO", "GOJEK", "SHOPEE", "GRAB")),
-                "direction" to prop("string", "Money direction (DEBIT for expense, CREDIT for income)", enumValues = listOf("DEBIT", "CREDIT")),
-                "category" to prop("string", "Category name"),
-                "search" to prop("string", "Keyword search across description, merchant, and user note"),
-                "unreviewedOnly" to prop("boolean", "If true, only returns transactions needing review"),
-                "minAmountMinor" to prop("integer", "Minimum amount in minor units (1 rupiah = 100 minor units)"),
-                "maxAmountMinor" to prop("integer", "Maximum amount in minor units")
-            )
-        ))
-
-        tools.put(tool(
-            name = "get_transaction_details",
-            description = "Get full detailed evidence for a specific transaction key, including itemized food dishes, route, merchant, and source evidence.",
-            properties = mapOf(
-                "key" to prop("string", "Transaction key (e.g. JAGO:12345 or GOJEK:67890)")
-            ),
-            required = listOf("key")
-        ))
-
-        tools.put(tool(
-            name = "update_transaction",
-            description = "Update the category, user note, or classification reasoning for a transaction in Artha.",
-            properties = mapOf(
-                "key" to prop("string", "Transaction key"),
-                "category" to prop("string", "Target category name"),
-                "userNote" to prop("string", "Custom note to attach to the transaction"),
-                "reason" to prop("string", "Reasoning for the categorization")
-            ),
-            required = listOf("key")
-        ))
-
-        tools.put(tool(
-            name = "batch_update_transactions",
-            description = "Update categories and/or notes for multiple transactions at once in a single roundtrip.",
-            properties = mapOf(
-                "updates" to JSONObject().apply {
-                    put("type", "array")
-                    put("description", "List of transaction updates")
-                    put("items", JSONObject().apply {
-                        put("type", "object")
-                        put("required", JSONArray().put("key"))
-                        put("properties", JSONObject().apply {
-                            put("key", prop("string", "Transaction key"))
-                            put("category", prop("string", "Target category name"))
-                            put("userNote", prop("string", "Custom user note"))
-                            put("reason", prop("string", "Reasoning for this category"))
-                        })
-                    })
-                }
-            ),
-            required = listOf("updates")
-        ))
-
-        tools.put(tool(
-            name = "get_spending_summary",
-            description = "Get monthly spending analysis, total personal spending, category breakdown with percentages, and month-over-month comparison.",
-            properties = mapOf(
-                "month" to prop("string", "Year-Month in YYYY-MM format (e.g. 2026-04). Defaults to current month if omitted.")
-            )
-        ))
-
-        tools.put(tool(
-            name = "list_categories",
-            description = "List all spending categories in Artha with transaction counts.",
-            properties = emptyMap()
-        ))
-
-        tools.put(tool(
-            name = "create_category",
-            description = "Create a new custom spending category in Artha.",
-            properties = mapOf(
-                "name" to prop("string", "Name of the new category")
-            ),
-            required = listOf("name")
-        ))
-
-        tools.put(tool(
-            name = "get_knowledge",
-            description = "Get user knowledge guidelines that guide spending categorization.",
-            properties = emptyMap()
-        ))
-
-        tools.put(tool(
-            name = "update_knowledge",
-            description = "Update user knowledge guidelines for spending categorization.",
-            properties = mapOf(
-                "knowledge" to prop("string", "Guidelines or context for categorization")
-            ),
-            required = listOf("knowledge")
-        ))
-
-        tools.put(tool(
-            name = "trigger_sync",
-            description = "Request transaction refresh from installed banking/shopping apps on the phone.",
-            properties = mapOf(
-                "provider" to prop("string", "Specific provider to sync, or omit to sync all", enumValues = listOf("JAGO", "GOJEK", "SHOPEE", "GRAB"))
-            )
-        ))
-
-        root.put("tools", tools)
-        return root.toString(2)
-    }
-
-    private fun tool(name: String, description: String, properties: Map<String, Any>, required: List<String> = emptyList()): JSONObject {
-        val fn = JSONObject().apply {
-            put("name", name)
-            put("description", description)
-            val params = JSONObject().apply {
-                put("type", "object")
-                val props = JSONObject()
-                properties.forEach { (k, v) -> props.put(k, v) }
-                put("properties", props)
-                if (required.isNotEmpty()) {
-                    val req = JSONArray()
-                    required.forEach { req.put(it) }
-                    put("required", req)
-                }
-            }
-            put("parameters", params)
-        }
-        return JSONObject().apply {
-            put("type", "function")
-            put("function", fn)
-        }
-    }
-
-    private fun prop(type: String, description: String, enumValues: List<String>? = null): JSONObject =
-        JSONObject().apply {
-            put("type", type)
-            put("description", description)
-            if (!enumValues.isNullOrEmpty()) {
-                val arr = JSONArray()
-                enumValues.forEach { arr.put(it) }
-                put("enum", arr)
-            }
         }
 }
 
