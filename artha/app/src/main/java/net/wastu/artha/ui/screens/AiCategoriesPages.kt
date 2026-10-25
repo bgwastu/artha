@@ -74,6 +74,7 @@ internal fun AiSubPage(
     onBack: () -> Unit,
     snackbarHostState: SnackbarHostState? = null,
     busy: Boolean = false,
+    progress: Float? = null,
     actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
     titleContent: (@Composable () -> Unit)? = null,
     content: @Composable (androidx.compose.foundation.layout.PaddingValues) -> Unit,
@@ -90,7 +91,8 @@ internal fun AiSubPage(
                     },
                     actions = actions,
                 )
-                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (busy && progress != null) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                else if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             }
         },
         snackbarHost = { snackbarHostState?.let { SnackbarHost(it) } },

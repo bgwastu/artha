@@ -18,7 +18,19 @@ data class CategoryProgress(
     val queuedKeys: Set<String> = emptySet(),
     /** The user pressed Stop; cleared by Retry, a manual run, or the next new payment. */
     val stopped: Boolean = false,
+    /** Payments finished and queued in the current manual run; both 0 when no run is active. */
+    val runDone: Int = 0,
+    val runTotal: Int = 0,
 )
+
+/** Emitted once when a manual run drains its queue without being stopped. */
+data class CategoryRunResult(val total: Int, val review: Int, val failed: Int)
+
+fun categoryRunMessage(result: CategoryRunResult): String = buildList {
+    add("${result.total} categorized")
+    if (result.review > 0) add("${result.review} to review")
+    if (result.failed > 0) add("${result.failed} failed")
+}.joinToString(", ")
 
 /** Per-payment lock while AI categorization owns it: editing that payment is disabled. */
 enum class PaymentCategoryState { IDLE, QUEUED, CATEGORIZING }
@@ -40,7 +52,7 @@ enum class CategorySource { MANUAL, AI, MERCHANT, REVIEW, FAILED, PENDING, NONE 
 
 fun categoryProgressLabel(progress: CategoryProgress): String? = when (progress.state) {
     CategoryAutomationState.NOT_CONFIGURED -> null
-    CategoryAutomationState.WORKING -> "Categorizing ${progress.labeled} of ${progress.total}"
+    CategoryAutomationState.WORKING -> if (progress.runTotal > 0) "Categorizing ${progress.runDone} of ${progress.runTotal}" else "Categorizing ${progress.labeled} of ${progress.total}"
     CategoryAutomationState.READY -> when {
         progress.stopped -> "Stopped"
         progress.total == 0 -> null

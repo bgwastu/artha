@@ -142,6 +142,11 @@ fun HomeScreen(
     androidx.compose.runtime.LaunchedEffect(importFeedback?.sequence) {
         importFeedback?.let { snackbarHost.showSnackbar(it.message) }
     }
+    androidx.compose.runtime.LaunchedEffect(viewModel, showAiCategories) {
+        if (!showAiCategories) viewModel?.categoryRunResults?.collect {
+            snackbarHost.showSnackbar(net.wastu.artha.data.analysis.categoryRunMessage(it))
+        }
+    }
     val ledgerLoadFailed by viewModel?.ledgerLoadFailed?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
     val rootGate by viewModel?.rootGate?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(net.wastu.artha.core.root.RootGateState.LOCKED) }
     val categoryFilter by viewModel?.categoryFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<String?>(null) }

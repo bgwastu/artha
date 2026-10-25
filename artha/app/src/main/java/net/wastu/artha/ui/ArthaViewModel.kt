@@ -103,6 +103,9 @@ class ArthaViewModel(
     private val _importFeedback = MutableStateFlow<ImportFeedback?>(null)
     val importFeedback = _importFeedback.asStateFlow()
     private var importSequence = 0L
+    private val _categoryRunResults = kotlinx.coroutines.flow.MutableSharedFlow<CategoryRunResult>(extraBufferCapacity = 1)
+    val categoryRunResults = _categoryRunResults.asSharedFlow()
+    private var runTotal = 0
     private val _categoryAutomation = MutableStateFlow(CategoryAutomationState.NOT_CONFIGURED)
     val categoryAutomation = _categoryAutomation.asStateFlow()
     private val categoryRetry = MutableStateFlow(0)
@@ -187,6 +190,8 @@ class ArthaViewModel(
     private val activeBatchJobs = mutableMapOf<Job, Set<String>>()
     private val inFlightKeys = mutableSetOf<String>()
     private val manualQueue = mutableListOf<ManualQueueEntry>()
+    /** Keys of the current manual run, so in-flight automatic work is not counted as part of it. */
+    private val runKeys = mutableSetOf<String>()
     private val replaceManualKeys = mutableSetOf<String>()
     private val batchAttempts = mutableMapOf<String, Int>()
     private val backedOffKeys = mutableSetOf<String>()
@@ -524,6 +529,19 @@ class ArthaViewModel(
             CategoryActivity.publish(activeKeys + queuedKeys)
         }
 
+        val runRemaining = (manualKeys + activeKeys.filter { it in runKeys }).size
+        val runDone = (runTotal - runRemaining).coerceAtLeast(0)
+        val runFinished = runTotal > 0 && runRemaining == 0
+        val finishedTotal = runTotal
+        if (runFinished) {
+            runTotal = 0
+            runKeys.clear()
+            if (!stopped && nonRetryableError == null) {
+                _categoryRunResults.tryEmit(CategoryRunResult(finishedTotal, reviewCount, failedCount))
+            }
+        }
+        val shownRunTotal = if (runFinished) 0 else runTotal
+
         if (nonRetryableError != null && activeKeys.isEmpty() && manualKeys.isEmpty()) {
             val progress = CategoryProgress(
                 state = CategoryAutomationState.ERROR,
@@ -536,6 +554,8 @@ class ArthaViewModel(
                 activeKeys = activeKeys,
                 queuedKeys = queuedKeys,
                 stopped = stopped,
+                runDone = runDone,
+                runTotal = shownRunTotal,
             )
             _categoryProgress.value = progress
             _categoryAutomation.value = CategoryAutomationState.ERROR
@@ -560,6 +580,8 @@ class ArthaViewModel(
             activeKeys = activeKeys,
             queuedKeys = queuedKeys,
             stopped = stopped,
+            runDone = runDone,
+            runTotal = shownRunTotal,
         )
         _categoryProgress.value = progress
         _categoryAutomation.value = state
@@ -590,9 +612,16 @@ class ArthaViewModel(
         val entryKeys = entries.map { it.key }.toSet()
         manualQueue.removeAll { it.key in entryKeys }
         manualQueue.addAll(0, entries)
+        noteRunQueued(keys)
 
         observeAutomaticCategories()
         triggerPump()
+    }
+
+    /** Counts [keys] toward the current run's progress; keys already counted are not added twice. */
+    private fun noteRunQueued(keys: Set<String>) {
+        val added = keys.filter { runKeys.add(it) }.size
+        runTotal += added
     }
 
     /** Payments a [recategorize] run for [scope] would touch, for confirmation dialogs. */
@@ -604,6 +633,8 @@ class ArthaViewModel(
         activeBatchJobs.clear()
         inFlightKeys.clear()
         manualQueue.clear()
+        runKeys.clear()
+        runTotal = 0
         replaceManualKeys.clear()
         pendingAutomaticKeys.clear()
         for ((_, job) in backoffJobs) job.cancel()
@@ -718,7 +749,9 @@ class ArthaViewModel(
         val failed = retryKeys.filter { it in snapshot.categoryFailures }
         if (failed.isNotEmpty()) viewModelScope.launch(ioDispatcher) { analysisStore?.clearCategoryFailures(failed) }
         val queued = manualQueue.map { it.key }.toSet()
-        manualQueue.addAll(retryKeys.filter { it !in inFlightKeys && it !in queued }.map { ManualQueueEntry(it, replaceManual = false) })
+        val retryEntries = retryKeys.filter { it !in inFlightKeys && it !in queued }
+        manualQueue.addAll(retryEntries.map { ManualQueueEntry(it, replaceManual = false) })
+        noteRunQueued(retryEntries.toSet())
         triggerPump()
         observeAutomaticCategories()
     }

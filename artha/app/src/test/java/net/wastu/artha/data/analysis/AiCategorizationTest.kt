@@ -205,6 +205,33 @@ class AiCategorizationTest {
     }
 
     @Test
+    fun monthPendingCoversUnlabeledAndFailedButNotLabeledReviewOrManualPayments() {
+        val month = YearMonth.of(1970, 1)
+        val unlabeled = payment
+        val labeled = payment.copy(providerTransactionId = "l1")
+        val review = payment.copy(providerTransactionId = "r1")
+        val failed = payment.copy(providerTransactionId = "f1")
+        val manual = payment.copy(providerTransactionId = "m1", classificationIsManual = true)
+        val otherMonth = payment.copy(providerTransactionId = "o1", occurredAt = Instant.parse("1970-03-10T00:00:00Z"))
+        val rows = listOf(unlabeled, labeled, review, failed, manual, otherMonth)
+        fun aiLabeled(tx: UnifiedTransaction) = Triple(
+            tx.key, "Groceries", AiCategorization.fingerprint(tx, snapshot),
+        )
+        val snap = snapshot.copy(
+            categories = listOf(labeled, review, failed).associate { it.key to "Groceries" },
+            reasons = listOf(labeled, review, failed).associate { it.key to AI_REASON_PREFIX + "Evidence" },
+            aiCategoryFingerprints = listOf(labeled, review, failed).associate { aiLabeled(it).first to aiLabeled(it).third },
+            aiConfidence = mapOf(review.key to CategoryConfidence.LOW),
+            categoryFailures = mapOf(failed.key to "Timed out"),
+            manualCategories = setOf(manual.key),
+        )
+        assertEquals(
+            setOf(unlabeled.key, failed.key),
+            AiCategorization.scopeKeys(RecategorizeScope.MonthPending(month), rows, snap),
+        )
+    }
+
+    @Test
     fun scopeKeysNeverIncludeManualPicksExceptPaymentReplaceManual() {
         val manualTx = payment.copy(providerTransactionId = "m1", classificationIsManual = true, description = "Manual tx")
         val snapshotManual = snapshot.copy(

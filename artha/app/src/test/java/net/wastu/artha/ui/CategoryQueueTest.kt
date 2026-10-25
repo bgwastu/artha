@@ -281,6 +281,70 @@ class CategoryQueueTest {
     }
 
     @Test
+    fun manualRunReportsRunProgressThenOneResultAndResets() = runTest(dispatcher) {
+        val store = AnalysisStore(FixturePreferences(configuredPrefs()).context)
+        val older = listOf("sep-1", "sep-2", "sep-3").map { testPayment(it, instant = Instant.parse("2026-09-10T10:00:00Z")) }
+        val state = MutableStateFlow(readySpending(older))
+        val release = CompletableDeferred<Unit>()
+        val model = createModel(
+            store = store,
+            state = state,
+            categorize = { _, _, batch ->
+                release.await()
+                batch.associate { it.transaction.key to CategorySuggestion("Dining Out", "AI suggestion: Cafe") }
+            },
+            scopeKeysAction = { scope, _, _ -> if (scope is RecategorizeScope.Month) older.map { it.key }.toSet() else emptySet() },
+        )
+        val results = mutableListOf<CategoryRunResult>()
+        val collector = launch { model.categoryRunResults.collect { results += it } }
+        model.enterForeground()
+        advanceUntilIdle()
+
+        model.recategorize(RecategorizeScope.Month(YearMonth.of(2026, 9)))
+        advanceUntilIdle()
+        assertEquals(3, model.categoryProgress.value.runTotal)
+        assertEquals(0, model.categoryProgress.value.runDone)
+        assertTrue(results.isEmpty())
+
+        release.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(0, model.categoryProgress.value.runTotal)
+        assertEquals(listOf(3), results.map { it.total })
+
+        collector.cancel()
+        model.lock()
+    }
+
+    @Test
+    fun stoppingARunClearsProgressWithoutAResult() = runTest(dispatcher) {
+        val store = AnalysisStore(FixturePreferences(configuredPrefs()).context)
+        val older = listOf("sep-1", "sep-2").map { testPayment(it, instant = Instant.parse("2026-09-10T10:00:00Z")) }
+        val state = MutableStateFlow(readySpending(older))
+        val model = createModel(
+            store = store,
+            state = state,
+            categorize = { _, _, _ -> awaitCancellation() },
+            scopeKeysAction = { scope, _, _ -> if (scope is RecategorizeScope.Month) older.map { it.key }.toSet() else emptySet() },
+        )
+        val results = mutableListOf<CategoryRunResult>()
+        val collector = launch { model.categoryRunResults.collect { results += it } }
+        model.enterForeground()
+        advanceUntilIdle()
+
+        model.recategorize(RecategorizeScope.Month(YearMonth.of(2026, 9)))
+        advanceUntilIdle()
+        assertEquals(2, model.categoryProgress.value.runTotal)
+
+        model.stopCategorization()
+        advanceUntilIdle()
+        assertEquals(0, model.categoryProgress.value.runTotal)
+        assertTrue(results.isEmpty())
+
+        collector.cancel()
+        model.lock()
+    }
+
+    @Test
     fun recategorizeRunsWhilePausedAndWhenAutoCategorizeOff() = runTest(dispatcher) {
         val prefs = FixturePreferences(configuredPrefs())
         val store = AnalysisStore(prefs.context)

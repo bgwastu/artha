@@ -150,6 +150,13 @@ object AiCategorization {
                         tx.key !in snapshot.manualCategories
                 }.map { it.key }.toSet()
             }
+            is RecategorizeScope.MonthPending -> rows.filter { tx ->
+                isEligible(tx, snapshot) &&
+                    YearMonth.from(tx.occurredAt.atZone(net.wastu.artha.core.model.AccountingTime.zone)) == scope.month &&
+                    (tx.key in snapshot.categoryFailures ||
+                        (snapshot.categories[tx.key] ?: tx.category).let { it.isNullOrBlank() || it == CategoryConstants.UNCATEGORIZED } ||
+                        needsLabel(CategoryCandidate(tx, fingerprint(tx, snapshot)), snapshot))
+            }.map { it.key }.toSet()
             is RecategorizeScope.New -> rows.filter { tx -> isNew(tx, snapshot) &&
                 YearMonth.from(tx.occurredAt.atZone(net.wastu.artha.core.model.AccountingTime.zone)) == scope.month
             }.map { it.key }.toSet()

@@ -39,6 +39,11 @@ import androidx.compose.foundation.layout.width
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.runtime.produceState
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AssistChip
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.DonutLarge
@@ -141,6 +146,12 @@ fun AnalysisScreen(
     val analysisEnabled = snapshot.analysisEnabled
 
     var showScopeDialog by remember { mutableStateOf(false) }
+    var showRecategorizeMonth by remember { mutableStateOf(false) }
+    val monthPendingScope = remember(selectedMonth) { RecategorizeScope.MonthPending(selectedMonth) }
+    val pendingCount by produceState(0, savedTransactions, snapshot, selectedMonth) {
+        value = withContext(Dispatchers.Default) { viewModel.recategorizeCount(monthPendingScope) }
+    }
+    val aiConfigured = snapshot.aiConfig.let { it.baseUrl.isNotBlank() && it.apiKey.isNotBlank() && it.model.isNotBlank() }
 
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -198,7 +209,7 @@ fun AnalysisScreen(
             MonthSummaryCard(
                 month = selectedMonth, analysis = analysis, editable = viewModel.analysisStore != null,
                 onOpenCategories = onOpenCategories, onOpenScope = { showScopeDialog = true },
-                onOpenChart = onOpenChart,
+                onOpenChart = onOpenChart, onOpenAi = onOpenAiCategories,
                 onOpenLargestPayment = largest?.let { { onOpenTransaction(it) } },
                 onPreviousMonth = { viewModel.setAnalysisMonth(selectedMonth.minusMonths(1)) },
                 onNextMonth = { viewModel.setAnalysisMonth(selectedMonth.plusMonths(1)) },
@@ -225,18 +236,36 @@ fun AnalysisScreen(
                     IconButton(onClick = onOpenChart, modifier = Modifier.size(40.dp)) {
                         Icon(Icons.Outlined.DonutLarge, contentDescription = "Spending chart")
                     }
-                    IconButton(onClick = onOpenAiCategories, modifier = Modifier.size(40.dp)) {
-                        BadgedBox(badge = { if (categoryProgress.review > 0) Badge { Text(categoryProgress.review.toString()) } }) {
-                            Icon(Icons.Outlined.AutoAwesome, contentDescription = "AI categories")
-                        }
-                    }
+                    val working = categoryProgress.state == CategoryAutomationState.WORKING
+                    AssistChip(
+                        onClick = {
+                            when {
+                                working -> viewModel.stopCategorization()
+                                !aiConfigured -> onOpenAiCategories()
+                                pendingCount > 0 -> viewModel.recategorize(monthPendingScope)
+                                else -> showRecategorizeMonth = true
+                            }
+                        },
+                        label = { Text(if (working) "Stop" else if (pendingCount > 0) "Categorize $pendingCount" else "Categorize") },
+                        leadingIcon = {
+                            if (working) Icon(Icons.Default.Stop, null, Modifier.size(18.dp))
+                            else BadgedBox(badge = { if (categoryProgress.review > 0) Badge() }) {
+                                Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp))
+                            }
+                        },
+                    )
                 }
                 if (categoryProgress.state == CategoryAutomationState.WORKING) {
-                    val fraction = AiCardLogic.categoryProgressFraction(categoryProgress.labeled, categoryProgress.total)
-                    LinearProgressIndicator(
-                        progress = { fraction },
-                        modifier = Modifier.fillMaxWidth(),
+                    val run = categoryProgress.runTotal > 0
+                    val fraction = if (run) AiCardLogic.categoryProgressFraction(categoryProgress.runDone, categoryProgress.runTotal)
+                        else AiCardLogic.categoryProgressFraction(categoryProgress.labeled, categoryProgress.total)
+                    Text(
+                        categoryProgressLabel(categoryProgress) ?: "Categorizing",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
                     )
+                    LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
                 }
             }
         }
@@ -245,6 +274,18 @@ fun AnalysisScreen(
                 modifier = Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else items(analysis.categories, key = { it.category }) { category ->
             CategorySpendingRow(category, snapshot.categoryIcons, selectedMonth, viewModel::openCategoryTransactions, viewModel::recategorize, viewModel::recategorizeCount)
+        }
+    }
+    if (showRecategorizeMonth) {
+        val monthScope = RecategorizeScope.Month(selectedMonth)
+        val label = selectedMonth.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US))
+        recategorizeConfirmation(monthScope, viewModel.recategorizeCount(monthScope), label)?.let { text ->
+            AlertDialog(
+                onDismissRequest = { showRecategorizeMonth = false },
+                text = { Text(text) },
+                confirmButton = { TextButton(onClick = { showRecategorizeMonth = false; viewModel.recategorize(monthScope) }) { Text("Re-categorize") } },
+                dismissButton = { TextButton(onClick = { showRecategorizeMonth = false }) { Text("Cancel") } },
+            )
         }
     }
     if (showScopeDialog) AlertDialog(
@@ -259,7 +300,7 @@ fun AnalysisScreen(
 private fun MonthSummaryCard(
     month: YearMonth, analysis: MonthSpendingAnalysis, editable: Boolean = true,
     onOpenCategories: () -> Unit, onOpenScope: () -> Unit,
-    onOpenChart: () -> Unit, onOpenLargestPayment: (() -> Unit)?,
+    onOpenChart: () -> Unit, onOpenAi: () -> Unit, onOpenLargestPayment: (() -> Unit)?,
     onPreviousMonth: () -> Unit, onNextMonth: () -> Unit,
 ) {
     val monthTitle = remember(month) { month.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)) }
@@ -284,6 +325,7 @@ private fun MonthSummaryCard(
                     onOpenLargestPayment?.let { open ->
                         DropdownMenuItem(text = { Text("Largest payment") }, onClick = { showMenu = false; open() })
                     }
+                    DropdownMenuItem(text = { Text("AI categorization") }, onClick = { showMenu = false; onOpenAi() })
                     DropdownMenuItem(enabled = editable, text = { Text("Manage categories") }, onClick = { showMenu = false; onOpenCategories() })
                     DropdownMenuItem(text = { Text("Spending scope") }, onClick = { showMenu = false; onOpenScope() })
                 }

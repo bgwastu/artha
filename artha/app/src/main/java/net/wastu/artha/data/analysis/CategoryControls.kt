@@ -18,6 +18,8 @@ sealed interface RecategorizeScope {
     data object All : RecategorizeScope
     /** Payments in [month] that have never been categorized (no category, AI, merchant or manual label). */
     data class New(val month: YearMonth) : RecategorizeScope
+    /** What a month still needs: unlabeled, stale, uncategorized or failed payments. Low-confidence picks stay in review. */
+    data class MonthPending(val month: YearMonth) : RecategorizeScope
 }
 
 fun recategorizeLabel(scope: RecategorizeScope): String = when (scope) {
@@ -28,6 +30,7 @@ fun recategorizeLabel(scope: RecategorizeScope): String = when (scope) {
     RecategorizeScope.NeedsReview -> "Re-check payments to review"
     RecategorizeScope.All -> "Re-categorize all"
     is RecategorizeScope.New -> "Categorize new payments"
+    is RecategorizeScope.MonthPending -> "Categorize this month"
 }
 
 /** Confirmation text for runs that relabel many payments; null when no confirmation is needed. */
@@ -36,7 +39,7 @@ fun recategorizeConfirmation(scope: RecategorizeScope, count: Int, monthLabel: S
     is RecategorizeScope.CategoryInMonth -> "Re-categorize $count ${scope.category} payments? Your own picks stay the same."
     RecategorizeScope.Uncategorized -> "Re-categorize $count Uncategorized payments? Your own picks stay the same."
     RecategorizeScope.All -> "Re-categorize all $count payments? Your own picks stay the same."
-    is RecategorizeScope.Payment, RecategorizeScope.NeedsReview, is RecategorizeScope.New -> null
+    is RecategorizeScope.Payment, RecategorizeScope.NeedsReview, is RecategorizeScope.New, is RecategorizeScope.MonthPending -> null
 }
 
 /** Process-wide in-flight keys so home-screen widgets can show "Categorizing" without the ViewModel. */

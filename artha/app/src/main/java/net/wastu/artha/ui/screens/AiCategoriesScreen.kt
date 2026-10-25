@@ -3,7 +3,7 @@ package net.wastu.artha.ui.screens
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,7 +13,6 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -21,8 +20,8 @@ import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -35,6 +34,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,6 +60,7 @@ import net.wastu.artha.data.analysis.CategorySource
 import net.wastu.artha.data.analysis.PaymentCategoryState
 import net.wastu.artha.data.analysis.RecategorizeScope
 import net.wastu.artha.data.analysis.categoryProgressLabel
+import net.wastu.artha.data.analysis.categoryRunMessage
 import net.wastu.artha.data.analysis.recategorizeConfirmation
 import net.wastu.artha.ui.ArthaViewModel
 
@@ -161,9 +162,11 @@ private fun AiCategoriesHub(
     val uncategorizedCount = remember(allTransactions, snapshot) { viewModel.recategorizeCount(RecategorizeScope.Uncategorized) }
     val allCount = remember(allTransactions, snapshot) { viewModel.recategorizeCount(RecategorizeScope.All) }
 
-    var pendingConfirmScope by remember { mutableStateOf<RecategorizeScope?>(null) }
-    var showOverflowMenu by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(Unit) {
+        viewModel.categoryRunResults.collect { snackbarHostState.showSnackbar(categoryRunMessage(it)) }
+    }
+    var pendingConfirmScope by remember { mutableStateOf<RecategorizeScope?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
     AiSubPage(
@@ -171,28 +174,12 @@ private fun AiCategoriesHub(
         onBack = onBack,
         snackbarHostState = snackbarHostState,
         busy = working,
+        progress = if (progress.runTotal > 0) AiCardLogic.categoryProgressFraction(progress.runDone, progress.runTotal)
+            else if (progress.total > 0) AiCardLogic.categoryProgressFraction(progress.labeled, progress.total) else null,
         actions = {
             if (working) {
                 IconButton(onClick = { viewModel.stopCategorization() }) {
                     Icon(Icons.Default.Stop, contentDescription = "Stop categorization")
-                }
-            }
-            Box {
-                IconButton(onClick = { showOverflowMenu = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "More options")
-                }
-                DropdownMenu(expanded = showOverflowMenu, onDismissRequest = { showOverflowMenu = false }) {
-                    listOf(
-                        Triple("Re-categorize this month", monthScope, monthCount),
-                        Triple("Re-categorize uncategorized", RecategorizeScope.Uncategorized, uncategorizedCount),
-                        Triple("Re-categorize all", RecategorizeScope.All, allCount),
-                    ).forEach { (label, scope, count) ->
-                        DropdownMenuItem(
-                            text = { Text(label) },
-                            enabled = !working && count > 0,
-                            onClick = { showOverflowMenu = false; pendingConfirmScope = scope },
-                        )
-                    }
                 }
             }
         },
@@ -248,6 +235,24 @@ private fun AiCategoriesHub(
                     },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 )
+            }
+
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf(
+                    Triple("This month", monthScope, monthCount),
+                    Triple("Uncategorized", RecategorizeScope.Uncategorized, uncategorizedCount),
+                    Triple("All", RecategorizeScope.All, allCount),
+                ).forEach { (label, scope, count) ->
+                    OutlinedButton(
+                        onClick = { pendingConfirmScope = scope },
+                        enabled = !working && count > 0,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                    ) { Text(label, maxLines = 1) }
+                }
             }
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
