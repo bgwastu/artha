@@ -81,6 +81,8 @@ import net.wastu.artha.data.analysis.AnalysisSnapshot
 import net.wastu.artha.data.analysis.BudgetAnalyzer
 import net.wastu.artha.data.analysis.CategoryConstants
 import net.wastu.artha.data.analysis.CategorySource
+import net.wastu.artha.data.analysis.attentionSource
+import net.wastu.artha.data.analysis.inMonth
 import net.wastu.artha.data.analysis.RecategorizeScope
 import net.wastu.artha.data.analysis.MERCHANT_REASON_PREFIX
 import net.wastu.artha.data.analysis.MerchantMemory
@@ -143,6 +145,7 @@ internal fun buildReviewQueue(
     snapshot: AnalysisSnapshot,
     busyKeys: Set<String>,
     today: LocalDate = LocalDate.now(AccountingTime.clock.withZone(AccountingTime.zone)),
+    month: java.time.YearMonth? = null,
 ): List<ReviewItem> {
     // 1. Merchant index built once across all transactions
     val merchantIndex: Map<String, List<UnifiedTransaction>> = rows.groupBy { txMerchantKey(it) }
@@ -176,11 +179,7 @@ internal fun buildReviewQueue(
 
     // 3. Filter candidates: spending payments whose categorySource is REVIEW or FAILED, newest first, excluding busy
     val candidates: List<UnifiedTransaction> = rows.filter { tx ->
-        if (tx.key in busyKeys) return@filter false
-        if (tx.classificationIsManual || tx.key in snapshot.manualCategories) return@filter false
-        if (!BudgetAnalyzer.isSpending(tx)) return@filter false
-        val source = categorySource(tx, snapshot)
-        source == CategorySource.REVIEW || source == CategorySource.FAILED
+        tx.key !in busyKeys && inMonth(tx, month) && attentionSource(tx, snapshot) != null
     }.sortedWith(compareByDescending<UnifiedTransaction> { it.occurredAt }.thenByDescending { it.key })
 
     // 4. Precompute sibling grouping within the queue items
@@ -271,6 +270,7 @@ internal fun buildReviewQueue(
 fun CategoryReviewScreen(
     viewModel: ArthaViewModel,
     onBack: () -> Unit,
+    month: java.time.YearMonth,
     onOpenTransaction: (UnifiedTransaction) -> Unit = {},
 ) {
     val snapshot by viewModel.analysisSnapshot.collectAsStateWithLifecycle()
@@ -283,7 +283,7 @@ fun CategoryReviewScreen(
             val progress = viewModel.categoryProgress.value
             val busyKeys = progress.activeKeys + progress.queuedKeys
             val today = LocalDate.now(AccountingTime.clock.withZone(AccountingTime.zone))
-            buildReviewQueue(rows, initialSnapshot, busyKeys, today)
+            buildReviewQueue(rows, initialSnapshot, busyKeys, today, month)
         }
     }
 
@@ -331,7 +331,7 @@ fun CategoryReviewScreen(
         topBar = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 TopAppBar(
-                    title = { Text("Categorization") },
+                    title = { Text(month.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.US))) },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

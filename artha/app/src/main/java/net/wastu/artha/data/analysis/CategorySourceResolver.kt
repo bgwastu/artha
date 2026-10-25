@@ -1,5 +1,6 @@
 package net.wastu.artha.data.analysis
 
+import java.time.YearMonth
 import net.wastu.artha.core.model.UnifiedTransaction
 
 import java.util.Locale
@@ -46,11 +47,7 @@ fun needsReview(tx: UnifiedTransaction, snapshot: AnalysisSnapshot): Boolean {
     val isManual = tx.classificationIsManual || tx.key in snapshot.manualCategories
     if (isManual) return false
     val confidence = snapshot.aiConfidence[tx.key] ?: return false
-    return when (confidence) {
-        CategoryConfidence.LOW -> true
-        CategoryConfidence.MEDIUM -> !hasItemDetails(tx)
-        CategoryConfidence.HIGH -> false
-    }
+    return confidence == CategoryConfidence.LOW
 }
 
 fun aiCategoryReason(snapshot: AnalysisSnapshot, key: String): String? {
@@ -81,4 +78,32 @@ fun categorySource(tx: UnifiedTransaction, snapshot: AnalysisSnapshot): Category
         snapshot.aiConfig.apiKey.isNotBlank()
     if (BudgetAnalyzer.isSpending(tx) && snapshot.analysisEnabled && aiConfigured) return CategorySource.PENDING
     return CategorySource.NONE
+}
+
+/** Payments the user has to look at: the AI was under 70% sure (REVIEW) or could not decide (FAILED). */
+data class CategoryAttention(val review: Int = 0, val failed: Int = 0) {
+    val total: Int get() = review + failed
+}
+
+fun attentionSource(tx: UnifiedTransaction, snapshot: AnalysisSnapshot): CategorySource? {
+    if (tx.classificationIsManual || tx.key in snapshot.manualCategories) return null
+    if (!BudgetAnalyzer.isSpending(tx)) return null
+    return categorySource(tx, snapshot).takeIf { it == CategorySource.REVIEW || it == CategorySource.FAILED }
+}
+
+fun inMonth(tx: UnifiedTransaction, month: YearMonth?): Boolean =
+    month == null || YearMonth.from(tx.occurredAt.atZone(net.wastu.artha.core.model.AccountingTime.zone)) == month
+
+fun categoryAttention(rows: List<UnifiedTransaction>, snapshot: AnalysisSnapshot, month: YearMonth?): CategoryAttention {
+    var review = 0
+    var failed = 0
+    for (tx in rows) {
+        if (!inMonth(tx, month)) continue
+        when (attentionSource(tx, snapshot)) {
+            CategorySource.REVIEW -> review++
+            CategorySource.FAILED -> failed++
+            else -> Unit
+        }
+    }
+    return CategoryAttention(review, failed)
 }

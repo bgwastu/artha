@@ -88,6 +88,29 @@ class CategoryReviewLogicTest {
     }
 
     @Test
+    fun reviewQueueAndAttentionCountsStayInTheSelectedMonth() {
+        val march = sampleTx("m", occurredAt = Instant.parse("2026-03-10T10:00:00Z"))
+        val marchFailed = sampleTx("mf", occurredAt = Instant.parse("2026-03-11T10:00:00Z"))
+        val february = sampleTx("f", occurredAt = Instant.parse("2026-02-10T10:00:00Z"))
+        val medium = sampleTx("md", occurredAt = Instant.parse("2026-03-12T10:00:00Z"))
+        val snapshot = baseSnapshot.copy(
+            aiConfidence = mapOf(
+                march.key to CategoryConfidence.LOW,
+                february.key to CategoryConfidence.LOW,
+                medium.key to CategoryConfidence.MEDIUM,
+            ),
+            categoryFailures = mapOf(marchFailed.key to "No answer"),
+        )
+        val rows = listOf(march, marchFailed, february, medium)
+        val ym = java.time.YearMonth.of(2026, 3)
+
+        val queue = buildReviewQueue(rows, snapshot, emptySet(), today, ym)
+        assertEquals(setOf(march.key, marchFailed.key), queue.map { it.tx.key }.toSet())
+        assertEquals(net.wastu.artha.data.analysis.CategoryAttention(review = 1, failed = 1), net.wastu.artha.data.analysis.categoryAttention(rows, snapshot, ym))
+        assertEquals(3, buildReviewQueue(rows, snapshot, emptySet(), today).size)
+    }
+
+    @Test
     fun buildReviewQueueExcludesBusyAndManual() {
         val txBusy = sampleTx("tx_busy", description = "Busy Merchant")
         val txManualField = sampleTx("tx_man_field", description = "Manual Field", manual = true)

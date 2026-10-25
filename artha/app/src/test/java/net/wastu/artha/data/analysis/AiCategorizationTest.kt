@@ -97,7 +97,7 @@ class AiCategorizationTest {
     @Test fun aiMaySuggestLabelsButCannotChangePaymentFacts() {
         val original = payment.copy()
         val result = AiCategorization.parse("""{"classifications":[{"id":"p0","category":"Groceries","reason":"Food shop","amountMinor":1,"date":"2099","isConfirmed":false}]}""", batch, AiCategorization.categories(snapshot))
-        assertEquals(CategorySuggestion("Groceries", "AI suggestion: Food shop", CategoryConfidence.MEDIUM), result[payment.key])
+        assertEquals(CategorySuggestion("Groceries", "AI suggestion: Food shop", CategoryConfidence.LOW), result[payment.key])
         assertEquals(original, payment)
     }
 
@@ -111,17 +111,24 @@ class AiCategorizationTest {
         assertEquals(CategoryConfidence.HIGH, sug.confidence)
         assertTrue(sug.merchantConsistent)
 
-        // Missing confidence defaults to MEDIUM, missing merchantConsistent defaults to false
+        // Missing confidence is treated as unsure (LOW, so it gets reviewed), missing merchantConsistent defaults to false
         val minimal = """{"classifications":[{"id":"p0","category":"Groceries","reason":"Food"}]}"""
         val minResult = AiCategorization.parse(minimal, batch, AiCategorization.categories(snapshot))
         val minSug = minResult.getValue(payment.key)
-        assertEquals(CategoryConfidence.MEDIUM, minSug.confidence)
+        assertEquals(CategoryConfidence.LOW, minSug.confidence)
         assertFalse(minSug.merchantConsistent)
 
-        // Unknown confidence defaults to MEDIUM
+        // Unknown confidence is unsure too
         val unknownConf = """{"classifications":[{"id":"p0","category":"Groceries","reason":"Food","confidence":"uncertain","merchantConsistent":false}]}"""
         val unkResult = AiCategorization.parse(unknownConf, batch, AiCategorization.categories(snapshot))
-        assertEquals(CategoryConfidence.MEDIUM, unkResult.getValue(payment.key).confidence)
+        assertEquals(CategoryConfidence.LOW, unkResult.getValue(payment.key).confidence)
+
+        assertEquals(CategoryConfidence.LOW, AiCategorization.parseConfidence(69))
+        assertEquals(CategoryConfidence.MEDIUM, AiCategorization.parseConfidence(70))
+        assertEquals(CategoryConfidence.MEDIUM, AiCategorization.parseConfidence(84))
+        assertEquals(CategoryConfidence.HIGH, AiCategorization.parseConfidence(85))
+        assertEquals(CategoryConfidence.HIGH, AiCategorization.parseConfidence(0.92))
+        assertEquals(CategoryConfidence.LOW, AiCategorization.parseConfidence("55%"))
 
         // Low confidence
         val lowConf = """{"classifications":[{"id":"p0","category":"Groceries","reason":"Food","confidence":"low"}]}"""

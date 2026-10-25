@@ -144,7 +144,11 @@ fun HomeScreen(
     }
     androidx.compose.runtime.LaunchedEffect(viewModel, showAiCategories) {
         if (!showAiCategories) viewModel?.categoryRunResults?.collect {
-            snackbarHost.showSnackbar(net.wastu.artha.data.analysis.categoryRunMessage(it))
+            val result = snackbarHost.showSnackbar(
+                net.wastu.artha.data.analysis.categoryRunMessage(it),
+                actionLabel = if (it.review > 0 || it.failed > 0) "Review" else null,
+            )
+            if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) showCategoryReview = true
         }
     }
     val ledgerLoadFailed by viewModel?.ledgerLoadFailed?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
@@ -416,6 +420,7 @@ fun HomeScreen(
                 CategoryReviewScreen(
                     viewModel = viewModel,
                     onBack = { showCategoryReview = false },
+                    month = viewModel.selectedMonth.collectAsStateWithLifecycle().value,
                     onOpenTransaction = { selectedKey = it.key; selectedFallback = it },
                 )
             }

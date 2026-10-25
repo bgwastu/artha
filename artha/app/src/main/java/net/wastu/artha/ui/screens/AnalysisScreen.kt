@@ -122,6 +122,8 @@ import net.wastu.artha.data.analysis.CategoryProgress
 import net.wastu.artha.data.analysis.categoryProgressLabel
 import net.wastu.artha.data.analysis.recategorizeConfirmation
 import net.wastu.artha.ui.categoryIconFor
+import net.wastu.artha.data.analysis.CategoryAttention
+import net.wastu.artha.data.analysis.categoryAttention
 import net.wastu.artha.ui.formatDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -150,6 +152,9 @@ fun AnalysisScreen(
     val monthPendingScope = remember(selectedMonth) { RecategorizeScope.MonthPending(selectedMonth) }
     val pendingCount by produceState(0, savedTransactions, snapshot, selectedMonth) {
         value = withContext(Dispatchers.Default) { viewModel.recategorizeCount(monthPendingScope) }
+    }
+    val attention by produceState(CategoryAttention(), savedTransactions, snapshot, selectedMonth) {
+        value = withContext(Dispatchers.Default) { categoryAttention(savedTransactions, snapshot, selectedMonth) }
     }
     val aiConfigured = snapshot.aiConfig.let { it.baseUrl.isNotBlank() && it.apiKey.isNotBlank() && it.model.isNotBlank() }
 
@@ -249,7 +254,7 @@ fun AnalysisScreen(
                         label = { Text(if (working) "Stop" else if (pendingCount > 0) "Categorize $pendingCount" else "Categorize") },
                         leadingIcon = {
                             if (working) Icon(Icons.Default.Stop, null, Modifier.size(18.dp))
-                            else BadgedBox(badge = { if (categoryProgress.review > 0) Badge() }) {
+                            else BadgedBox(badge = { if (attention.total > 0) Badge() }) {
                                 Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp))
                             }
                         },
@@ -266,6 +271,22 @@ fun AnalysisScreen(
                         modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
                     )
                     LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+                } else if (attention.total > 0) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            buildList {
+                                if (attention.review > 0) add("${attention.review} need review")
+                                if (attention.failed > 0) add("${attention.failed} failed")
+                            }.joinToString(", "),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (attention.failed > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        TextButton(onClick = onOpenCategoryReview) { Text("Review") }
+                    }
                 }
             }
         }

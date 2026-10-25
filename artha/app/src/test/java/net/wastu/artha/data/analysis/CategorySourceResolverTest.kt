@@ -147,10 +147,8 @@ class CategorySourceResolverTest {
         assertFalse(needsReview(tx, AnalysisSnapshot(aiConfidence = mapOf(tx.key to CategoryConfidence.HIGH))))
         assertFalse(needsReview(txWithItems, AnalysisSnapshot(aiConfidence = mapOf(txWithItems.key to CategoryConfidence.HIGH))))
 
-        // MEDIUM confidence without item details -> true
-        assertTrue(needsReview(tx, AnalysisSnapshot(aiConfidence = mapOf(tx.key to CategoryConfidence.MEDIUM))))
-
-        // MEDIUM confidence with item details -> false
+        // MEDIUM (70% and up) is trusted whether or not the payment has item details
+        assertFalse(needsReview(tx, AnalysisSnapshot(aiConfidence = mapOf(tx.key to CategoryConfidence.MEDIUM))))
         assertFalse(needsReview(txWithItems, AnalysisSnapshot(aiConfidence = mapOf(txWithItems.key to CategoryConfidence.MEDIUM))))
     }
 

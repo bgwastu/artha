@@ -29,6 +29,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import net.wastu.artha.data.analysis.categoryAttention
+import net.wastu.artha.data.analysis.REVIEW_CONFIDENCE_PERCENT
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -162,9 +165,17 @@ private fun AiCategoriesHub(
     val uncategorizedCount = remember(allTransactions, snapshot) { viewModel.recategorizeCount(RecategorizeScope.Uncategorized) }
     val allCount = remember(allTransactions, snapshot) { viewModel.recategorizeCount(RecategorizeScope.All) }
 
+    val attention = remember(allTransactions, snapshot, selectedMonth) { categoryAttention(allTransactions, snapshot, selectedMonth) }
+
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
-        viewModel.categoryRunResults.collect { snackbarHostState.showSnackbar(categoryRunMessage(it)) }
+        viewModel.categoryRunResults.collect {
+            val result = snackbarHostState.showSnackbar(
+                categoryRunMessage(it),
+                actionLabel = if (it.review > 0 || it.failed > 0) "Review" else null,
+            )
+            if (result == SnackbarResult.ActionPerformed) onOpenReview()
+        }
     }
     var pendingConfirmScope by remember { mutableStateOf<RecategorizeScope?>(null) }
     val coroutineScope = rememberCoroutineScope()
@@ -205,12 +216,13 @@ private fun AiCategoriesHub(
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             )
 
-            if (progress.review > 0) {
+            if (attention.review > 0) {
                 ListItem(
-                    headlineContent = { Text("Needs review") },
+                    headlineContent = { Text("Review") },
+                    supportingContent = { Text("Under $REVIEW_CONFIDENCE_PERCENT% sure") },
                     trailingContent = {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Badge { Text(progress.review.toString()) }
+                            Badge { Text(attention.review.toString()) }
                             Icon(Icons.Default.ChevronRight, contentDescription = null)
                         }
                     },
@@ -218,7 +230,7 @@ private fun AiCategoriesHub(
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 )
             }
-            if (progress.failed > 0) {
+            if (attention.failed > 0) {
                 ListItem(
                     leadingContent = {
                         Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
@@ -229,7 +241,7 @@ private fun AiCategoriesHub(
                             Badge(
                                 containerColor = MaterialTheme.colorScheme.errorContainer,
                                 contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                            ) { Text(progress.failed.toString()) }
+                            ) { Text(attention.failed.toString()) }
                             TextButton(onClick = { viewModel.recategorize(RecategorizeScope.NeedsReview) }) { Text("Retry") }
                         }
                     },
