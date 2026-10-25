@@ -113,7 +113,7 @@ fun HomeScreen(
 
     var showSearch by rememberSaveable { mutableStateOf(false) }
     var showFilter by rememberSaveable { mutableStateOf(false) }
-    var aiCategoriesPage by rememberSaveable { mutableStateOf("HUB") }
+    var aiScrollToCategories by rememberSaveable { mutableStateOf(false) }
     var selectedKey by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedFallback by remember { mutableStateOf<UnifiedTransaction?>(null) }
 
@@ -351,10 +351,10 @@ fun HomeScreen(
                                     AnalysisScreen(
                                         viewModel = viewModel,
                                         onOpenTransaction = { selectedKey = it.key; selectedFallback = it },
-                                        onOpenCategories = { aiCategoriesPage = "CATEGORIES"; showAiCategories = true },
+                                        onOpenCategories = { aiScrollToCategories = true; showAiCategories = true },
                                         onOpenChart = { showSpendingChart = true },
                                         onOpenCategoryReview = { showCategoryReview = true },
-                                        onOpenAiCategories = { aiCategoriesPage = "HUB"; showAiCategories = true },
+                                        onOpenAiCategories = { aiScrollToCategories = false; showAiCategories = true },
                                     )
                                 }
                             }
@@ -373,7 +373,7 @@ fun HomeScreen(
                                 onDetailOpenChanged = { settingsSourceOpen = it },
                                 onOpenDemo = { net.wastu.artha.DemoMode.open(context) },
                                 onOpenCategoryReview = { showCategoryReview = true },
-                                onOpenAiCategories = { aiCategoriesPage = "HUB"; showAiCategories = true },
+                                onOpenAiCategories = { aiScrollToCategories = false; showAiCategories = true },
                             )
                         }
                     }
@@ -398,7 +398,7 @@ fun HomeScreen(
                     viewModel = viewModel,
                     onBack = { showAiCategories = false },
                     onOpenReview = { showCategoryReview = true },
-                    initialPage = aiCategoriesPage,
+                    scrollToCategories = aiScrollToCategories,
                 )
             }
         }

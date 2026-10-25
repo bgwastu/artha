@@ -1,41 +1,43 @@
 package net.wastu.artha.ui.screens
 
-import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.outlined.Category
-import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material.icons.outlined.Memory
-import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Badge
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import net.wastu.artha.data.analysis.categoryAttention
-import net.wastu.artha.data.analysis.REVIEW_CONFIDENCE_PERCENT
-import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,30 +46,30 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.launch
-import net.wastu.artha.core.model.AccountingTime
+import net.wastu.artha.data.analysis.AiClient
 import net.wastu.artha.data.analysis.CategoryAutomationState
 import net.wastu.artha.data.analysis.CategoryProgress
 import net.wastu.artha.data.analysis.CategorySource
 import net.wastu.artha.data.analysis.PaymentCategoryState
 import net.wastu.artha.data.analysis.RecategorizeScope
+import net.wastu.artha.data.analysis.aiConfigValidation
+import net.wastu.artha.data.analysis.aiConnectionFailure
 import net.wastu.artha.data.analysis.categoryProgressLabel
 import net.wastu.artha.data.analysis.categoryRunMessage
 import net.wastu.artha.data.analysis.recategorizeConfirmation
 import net.wastu.artha.ui.ArthaViewModel
-
-internal enum class AiCategoriesPage { HUB, PROVIDER, CATEGORIES, ADD_CATEGORY, CONTEXT }
+import net.wastu.artha.ui.categoryIconFor
 
 internal object AiCategoriesLogic {
     fun headerStatusText(progress: CategoryProgress): String? = when {
@@ -106,219 +108,316 @@ internal object AiCategoriesLogic {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AiCategoriesScreen(
     viewModel: ArthaViewModel,
     onBack: () -> Unit,
     onOpenReview: () -> Unit,
-    initialPage: String = AiCategoriesPage.HUB.name,
+    scrollToCategories: Boolean = false,
 ) {
-    val entry = remember { AiCategoriesPage.entries.firstOrNull { it.name == initialPage } ?: AiCategoriesPage.HUB }
-    var page by rememberSaveable { mutableStateOf(entry) }
     val snapshot by viewModel.analysisSnapshot.collectAsStateWithLifecycle()
-
-    fun back() {
-        page = when {
-            page == entry -> { onBack(); page }
-            page == AiCategoriesPage.ADD_CATEGORY -> AiCategoriesPage.CATEGORIES
-            else -> AiCategoriesPage.HUB
-        }
-    }
-    BackHandler(enabled = page != AiCategoriesPage.HUB) { back() }
-
-    when (page) {
-        AiCategoriesPage.HUB -> AiCategoriesHub(
-            viewModel = viewModel,
-            onBack = onBack,
-            onOpenReview = onOpenReview,
-            onOpenPage = { page = it },
-        )
-        AiCategoriesPage.PROVIDER -> AiProviderPage(viewModel, snapshot, ::back)
-        AiCategoriesPage.CATEGORIES -> AiCategoryListPage(viewModel, snapshot, ::back, onAdd = { page = AiCategoriesPage.ADD_CATEGORY })
-        AiCategoriesPage.ADD_CATEGORY -> AiAddCategoryPage(viewModel, snapshot, ::back)
-        AiCategoriesPage.CONTEXT -> AiContextPage(viewModel, snapshot, ::back)
-    }
-}
-
-@Composable
-private fun AiCategoriesHub(
-    viewModel: ArthaViewModel,
-    onBack: () -> Unit,
-    onOpenReview: () -> Unit,
-    onOpenPage: (AiCategoriesPage) -> Unit,
-) {
     val progress by viewModel.categoryProgress.collectAsStateWithLifecycle()
-    val snapshot by viewModel.analysisSnapshot.collectAsStateWithLifecycle()
     val selectedMonth by viewModel.selectedMonth.collectAsStateWithLifecycle()
     val allTransactions by viewModel.allTransactions.collectAsStateWithLifecycle()
-
     val working = progress.state == CategoryAutomationState.WORKING
-    val isError = progress.state == CategoryAutomationState.ERROR
-    val config = snapshot.aiConfig
-    val configured = config.baseUrl.isNotBlank() && config.apiKey.isNotBlank() && config.model.isNotBlank()
 
-    val currentMonth = remember { YearMonth.now(AccountingTime.zone) }
-    val newScope = remember(currentMonth) { RecategorizeScope.New(currentMonth) }
-    val monthScope = remember(selectedMonth) { RecategorizeScope.Month(selectedMonth) }
-    val newCount = remember(allTransactions, snapshot, newScope) { viewModel.recategorizeCount(newScope) }
-    val monthCount = remember(allTransactions, snapshot, monthScope) { viewModel.recategorizeCount(monthScope) }
-    val uncategorizedCount = remember(allTransactions, snapshot) { viewModel.recategorizeCount(RecategorizeScope.Uncategorized) }
-    val allCount = remember(allTransactions, snapshot) { viewModel.recategorizeCount(RecategorizeScope.All) }
+    val saved = snapshot.aiConfig
+    var baseUrl by remember(saved.baseUrl) { mutableStateOf(saved.baseUrl) }
+    var apiKey by remember(saved.apiKey) { mutableStateOf(saved.apiKey) }
+    var model by remember(saved.model) { mutableStateOf(saved.model) }
+    var context by rememberSaveable(snapshot.knowledge) { mutableStateOf(snapshot.knowledge.orEmpty()) }
+    var testing by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
 
-    val attention = remember(allTransactions, snapshot, selectedMonth) { categoryAttention(allTransactions, snapshot, selectedMonth) }
+    var menu by remember { mutableStateOf(false) }
+    var rowMenu by rememberSaveable { mutableStateOf<String?>(null) }
+    var editingIcon by rememberSaveable { mutableStateOf<String?>(null) }
+    var removing by rememberSaveable { mutableStateOf<String?>(null) }
+    var adding by rememberSaveable { mutableStateOf(false) }
+    var resetting by rememberSaveable { mutableStateOf(false) }
+    var pendingScope by remember { mutableStateOf<RecategorizeScope?>(null) }
 
-    val snackbarHostState = remember { SnackbarHostState() }
+    val snackbar = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+    fun say(message: String) { coroutineScope.launch { snackbar.showSnackbar(message) } }
+
     LaunchedEffect(Unit) {
         viewModel.categoryRunResults.collect {
-            val result = snackbarHostState.showSnackbar(
+            val result = snackbar.showSnackbar(
                 categoryRunMessage(it),
                 actionLabel = if (it.review > 0 || it.failed > 0) "Review" else null,
             )
             if (result == SnackbarResult.ActionPerformed) onOpenReview()
         }
     }
-    var pendingConfirmScope by remember { mutableStateOf<RecategorizeScope?>(null) }
-    val coroutineScope = rememberCoroutineScope()
+    LaunchedEffect(scrollToCategories) { if (scrollToCategories) listState.scrollToItem(CATEGORIES_INDEX) }
 
-    AiSubPage(
-        title = "AI categorization",
-        onBack = onBack,
-        snackbarHostState = snackbarHostState,
-        busy = working,
-        progress = if (progress.runTotal > 0) AiCardLogic.categoryProgressFraction(progress.runDone, progress.runTotal)
-            else if (progress.total > 0) AiCardLogic.categoryProgressFraction(progress.labeled, progress.total) else null,
-        actions = {
-            if (working) {
-                IconButton(onClick = { viewModel.stopCategorization() }) {
-                    Icon(Icons.Default.Stop, contentDescription = "Stop categorization")
-                }
-            }
-        },
-    ) { innerPadding ->
-        Column(Modifier.fillMaxSize().padding(innerPadding).verticalScroll(rememberScrollState())) {
-            val showRetry = AiCategoriesLogic.showRetryAction(progress)
-            val showCategorizeNew = !showRetry && AiCategoriesLogic.showCategorizeNewAction(progress, newCount)
-            ListItem(
-                headlineContent = {
-                    Text(
-                        text = AiCategoriesLogic.headerStatusText(progress)
-                            ?: if (configured) "Up to date" else "Not set up",
-                        color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                    )
-                },
-                trailingContent = {
-                    if (showRetry) {
-                        FilledTonalButton(onClick = { viewModel.retryAutomaticCategories() }) { Text("Retry") }
-                    } else if (showCategorizeNew) {
-                        FilledTonalButton(onClick = { viewModel.recategorize(newScope) }) { Text("Categorize new") }
-                    }
-                },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            )
+    fun draft() = saved.copy(baseUrl = baseUrl.trim(), apiKey = apiKey.trim(), model = model.trim())
+    val providerDirty = draft() != saved
+    val contextDirty = context != snapshot.knowledge.orEmpty()
+    val busy = testing || saving
+    val providerEnabled = !busy && snapshot.analysisEnabled
 
-            if (attention.review > 0) {
-                ListItem(
-                    headlineContent = { Text("Review") },
-                    supportingContent = { Text("Under $REVIEW_CONFIDENCE_PERCENT% sure") },
-                    trailingContent = {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Badge { Text(attention.review.toString()) }
-                            Icon(Icons.Default.ChevronRight, contentDescription = null)
-                        }
-                    },
-                    modifier = Modifier.clickable(onClick = onOpenReview),
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
-            if (attention.failed > 0) {
-                ListItem(
-                    leadingContent = {
-                        Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                    },
-                    headlineContent = { Text("Couldn't categorize") },
-                    trailingContent = {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Badge(
-                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                            ) { Text(attention.failed.toString()) }
-                            TextButton(onClick = { viewModel.recategorize(RecategorizeScope.NeedsReview) }) { Text("Retry") }
-                        }
-                    },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
-
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                listOf(
-                    Triple("This month", monthScope, monthCount),
-                    Triple("Uncategorized", RecategorizeScope.Uncategorized, uncategorizedCount),
-                    Triple("All", RecategorizeScope.All, allCount),
-                ).forEach { (label, scope, count) ->
-                    OutlinedButton(
-                        onClick = { pendingConfirmScope = scope },
-                        enabled = !working && count > 0,
-                        modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                    ) { Text(label, maxLines = 1) }
-                }
-            }
-
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-
-            ListItem(
-                headlineContent = { Text("Auto-categorize") },
-                supportingContent = { Text("New payments this month") },
-                trailingContent = { Switch(checked = snapshot.autoCategorize, onCheckedChange = null) },
-                modifier = Modifier.toggleable(
-                    value = snapshot.autoCategorize,
-                    role = Role.Switch,
-                    onValueChange = { viewModel.setAutoCategorize(it) },
-                ),
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            )
-
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-
-            val contextSummary = snapshot.knowledge.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() } ?: "Not set"
-            HubLink(Icons.Outlined.Memory, "Provider", if (configured) config.model else "Not set up") { onOpenPage(AiCategoriesPage.PROVIDER) }
-            HubLink(Icons.Outlined.Category, "Categories", "${snapshot.customCategories.size} categories") { onOpenPage(AiCategoriesPage.CATEGORIES) }
-            HubLink(Icons.Outlined.Person, "Personal context", contextSummary) { onOpenPage(AiCategoriesPage.CONTEXT) }
+    fun save() {
+        if (contextDirty) viewModel.applyKnowledgeRewrite(context)
+        if (!providerDirty) { if (contextDirty) say("Saved"); return }
+        val config = draft()
+        val invalid = aiConfigValidation(config)
+        if (invalid != null) { say(invalid); return }
+        saving = true
+        viewModel.updateAiConfig(config) { error ->
+            saving = false
+            say(error ?: "Saved")
         }
     }
 
-    pendingConfirmScope?.let { scope ->
+    val uncategorizedCount = remember(allTransactions, snapshot) { viewModel.recategorizeCount(RecategorizeScope.Uncategorized) }
+    val allCount = remember(allTransactions, snapshot) { viewModel.recategorizeCount(RecategorizeScope.All) }
+
+    Scaffold(
+        topBar = {
+            Column(Modifier.fillMaxWidth()) {
+                TopAppBar(
+                    title = { Text("AI categorization") },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                    },
+                    actions = {
+                        if (working) {
+                            IconButton(onClick = { viewModel.stopCategorization() }) {
+                                Icon(Icons.Default.Stop, contentDescription = "Stop categorization")
+                            }
+                        }
+                        TextButton(enabled = !busy && (providerDirty || contextDirty), onClick = ::save) { Text("Save") }
+                        Box {
+                            IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More options") }
+                            DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Re-categorize uncategorized") },
+                                    enabled = !working && uncategorizedCount > 0,
+                                    onClick = { menu = false; pendingScope = RecategorizeScope.Uncategorized },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Re-categorize all") },
+                                    enabled = !working && allCount > 0,
+                                    onClick = { menu = false; pendingScope = RecategorizeScope.All },
+                                )
+                                DropdownMenuItem(text = { Text("Reset categories") }, onClick = { menu = false; resetting = true })
+                            }
+                        }
+                    },
+                )
+                if (working) {
+                    if (progress.runTotal > 0) {
+                        LinearProgressIndicator(
+                            progress = { AiCardLogic.categoryProgressFraction(progress.runDone, progress.runTotal) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else LinearProgressIndicator(Modifier.fillMaxWidth())
+                } else if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
+        },
+        snackbarHost = { SnackbarHost(snackbar) },
+    ) { padding ->
+        LazyColumn(Modifier.fillMaxSize().imePadding().padding(padding)) {
+            item {
+                ListItem(
+                    headlineContent = { Text("Auto-categorize") },
+                    supportingContent = { Text("New payments this month") },
+                    trailingContent = { Switch(checked = snapshot.autoCategorize, onCheckedChange = null) },
+                    modifier = Modifier.toggleable(
+                        value = snapshot.autoCategorize,
+                        role = Role.Switch,
+                        onValueChange = { viewModel.setAutoCategorize(it) },
+                    ),
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            }
+            item { SectionHeader("Provider") }
+            item {
+                ListItem(
+                    headlineContent = { Text("AI analysis") },
+                    trailingContent = { Switch(checked = snapshot.analysisEnabled, onCheckedChange = null, enabled = !busy) },
+                    modifier = Modifier.toggleable(
+                        value = snapshot.analysisEnabled,
+                        enabled = !busy,
+                        role = Role.Switch,
+                        onValueChange = { viewModel.setAnalysisEnabled(it) },
+                    ),
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            }
+            item {
+                Column(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    OutlinedTextField(
+                        value = baseUrl, onValueChange = { baseUrl = it },
+                        label = { Text("Endpoint URL") },
+                        placeholder = { Text("https://api.openai.com/v1") },
+                        supportingText = { Text("Payment details are sent here") },
+                        singleLine = true, enabled = providerEnabled,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = apiKey, onValueChange = { apiKey = it },
+                        label = { Text("API key") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true, enabled = providerEnabled,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = model, onValueChange = { model = it },
+                        label = { Text("Model") },
+                        placeholder = { Text("gpt-4o-mini") },
+                        singleLine = true, enabled = providerEnabled,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedButton(
+                        enabled = providerEnabled,
+                        onClick = {
+                            val config = draft()
+                            val invalid = aiConfigValidation(config)
+                            if (invalid != null) { say(invalid); return@OutlinedButton }
+                            testing = true
+                            coroutineScope.launch {
+                                val message = try {
+                                    AiClient.testConnection(config)
+                                    "Connected"
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (failure: Exception) {
+                                    aiConnectionFailure(failure)
+                                } finally {
+                                    testing = false
+                                }
+                                snackbar.showSnackbar(message)
+                            }
+                        },
+                    ) { Text("Test connection") }
+                }
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text("Categories", style = MaterialTheme.typography.titleSmall) },
+                    trailingContent = { IconButton(onClick = { adding = true }) { Icon(Icons.Default.Add, "Add category") } },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            }
+            items(snapshot.customCategories, key = { it }) { category ->
+                ListItem(
+                    leadingContent = { Icon(categoryIconFor(category, snapshot.categoryIcons), null) },
+                    headlineContent = { Text(category) },
+                    trailingContent = {
+                        Box {
+                            IconButton(onClick = { rowMenu = category }) { Icon(Icons.Default.MoreVert, "Options for $category") }
+                            DropdownMenu(rowMenu == category, onDismissRequest = { rowMenu = null }) {
+                                DropdownMenuItem(text = { Text("Change icon") }, onClick = { rowMenu = null; editingIcon = category })
+                                DropdownMenuItem(text = { Text("Remove") }, onClick = { rowMenu = null; removing = category })
+                            }
+                        }
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            }
+            item { SectionHeader("Personal context") }
+            item {
+                OutlinedTextField(
+                    value = context, onValueChange = { context = it },
+                    placeholder = { Text("Job, household, shops you use") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+            item { Box(Modifier.padding(16.dp)) }
+        }
+    }
+
+    editingIcon?.let { category ->
+        IconPickerDialog(snapshot.categoryIcons[category], onDismiss = { editingIcon = null }, onSelect = {
+            viewModel.setCategoryIcon(category, it)
+            editingIcon = null
+        })
+    }
+    removing?.let { category ->
+        AlertDialog(
+            onDismissRequest = { removing = null },
+            title = { Text("Remove category?") },
+            text = { Text("Saved payments keep their categories and notes.") },
+            confirmButton = { TextButton(onClick = { viewModel.removeCustomCategory(category); removing = null }) { Text("Remove") } },
+            dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } },
+        )
+    }
+    if (resetting) AlertDialog(
+        onDismissRequest = { resetting = false },
+        title = { Text("Reset categories?") },
+        text = { Text("Restores default categories and icons. Saved payments keep their categories and notes.") },
+        confirmButton = { TextButton(onClick = { viewModel.resetCategoriesToDefault(); resetting = false }) { Text("Reset") } },
+        dismissButton = { TextButton(onClick = { resetting = false }) { Text("Cancel") } },
+    )
+    if (adding) AddCategoryDialog(
+        existing = snapshot.customCategories,
+        onDismiss = { adding = false },
+        onAdd = { name, done -> viewModel.addCustomCategory(name) { result -> done(result.isSuccess) } },
+    )
+    pendingScope?.let { scope ->
         val count = viewModel.recategorizeCount(scope)
         val monthLabel = remember(selectedMonth) { DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US).format(selectedMonth) }
-        val confirmText = recategorizeConfirmation(scope, count, monthLabel)
-        if (confirmText != null) {
-            AlertDialog(
-                onDismissRequest = { pendingConfirmScope = null },
-                text = { Text(confirmText) },
-                confirmButton = {
-                    TextButton(onClick = {
-                        pendingConfirmScope = null
-                        viewModel.recategorize(scope)
-                        coroutineScope.launch { snackbarHostState.showSnackbar("Re-categorizing $count payments") }
-                    }) { Text("Re-categorize") }
-                },
-                dismissButton = { TextButton(onClick = { pendingConfirmScope = null }) { Text("Cancel") } },
-            )
-        }
+        val text = recategorizeConfirmation(scope, count, monthLabel)
+        if (text != null) AlertDialog(
+            onDismissRequest = { pendingScope = null },
+            text = { Text(text) },
+            confirmButton = {
+                TextButton(onClick = { pendingScope = null; viewModel.recategorize(scope) }) { Text("Re-categorize") }
+            },
+            dismissButton = { TextButton(onClick = { pendingScope = null }) { Text("Cancel") } },
+        )
     }
 }
 
+// List position of the Categories header: auto-categorize, provider header, AI switch, provider fields.
+private const val CATEGORIES_INDEX = 4
+
 @Composable
-private fun HubLink(icon: ImageVector, title: String, summary: String, onClick: () -> Unit) {
+private fun SectionHeader(title: String) {
     ListItem(
-        leadingContent = { Icon(icon, contentDescription = null) },
-        headlineContent = { Text(title) },
-        supportingContent = { Text(summary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) },
-        modifier = Modifier.clickable(onClick = onClick),
+        headlineContent = { Text(title, style = MaterialTheme.typography.titleSmall) },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+    )
+}
+
+@Composable
+private fun AddCategoryDialog(existing: List<String>, onDismiss: () -> Unit, onAdd: (String, (Boolean) -> Unit) -> Unit) {
+    var name by rememberSaveable { mutableStateOf("") }
+    var failed by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+    val duplicate = existing.any { it.equals(name.trim(), ignoreCase = true) }
+    fun submit() {
+        if (saving || name.isBlank() || duplicate) return
+        saving = true
+        onAdd(name.trim()) { ok ->
+            saving = false
+            if (ok) onDismiss() else failed = true
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add category") },
+        text = {
+            OutlinedTextField(
+                value = name, onValueChange = { name = it; failed = false },
+                label = { Text("Category name") },
+                isError = duplicate || failed,
+                supportingText = (if (duplicate) "Already exists" else if (failed) "Couldn't add category" else null)?.let { message -> { Text(message) } },
+                singleLine = true, enabled = !saving,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { submit() }),
+            )
+        },
+        confirmButton = { TextButton(enabled = !saving && name.isNotBlank() && !duplicate, onClick = ::submit) { Text("Add") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

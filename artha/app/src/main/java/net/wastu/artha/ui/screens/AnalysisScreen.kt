@@ -214,7 +214,7 @@ fun AnalysisScreen(
             MonthSummaryCard(
                 month = selectedMonth, analysis = analysis, editable = viewModel.analysisStore != null,
                 onOpenCategories = onOpenCategories, onOpenScope = { showScopeDialog = true },
-                onOpenChart = onOpenChart, onOpenAi = onOpenAiCategories,
+                onOpenChart = onOpenChart,
                 onOpenLargestPayment = largest?.let { { onOpenTransaction(it) } },
                 onPreviousMonth = { viewModel.setAnalysisMonth(selectedMonth.minusMonths(1)) },
                 onNextMonth = { viewModel.setAnalysisMonth(selectedMonth.plusMonths(1)) },
@@ -321,7 +321,7 @@ fun AnalysisScreen(
 private fun MonthSummaryCard(
     month: YearMonth, analysis: MonthSpendingAnalysis, editable: Boolean = true,
     onOpenCategories: () -> Unit, onOpenScope: () -> Unit,
-    onOpenChart: () -> Unit, onOpenAi: () -> Unit, onOpenLargestPayment: (() -> Unit)?,
+    onOpenChart: () -> Unit, onOpenLargestPayment: (() -> Unit)?,
     onPreviousMonth: () -> Unit, onNextMonth: () -> Unit,
 ) {
     val monthTitle = remember(month) { month.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)) }
@@ -346,7 +346,6 @@ private fun MonthSummaryCard(
                     onOpenLargestPayment?.let { open ->
                         DropdownMenuItem(text = { Text("Largest payment") }, onClick = { showMenu = false; open() })
                     }
-                    DropdownMenuItem(text = { Text("AI categorization") }, onClick = { showMenu = false; onOpenAi() })
                     DropdownMenuItem(enabled = editable, text = { Text("Manage categories") }, onClick = { showMenu = false; onOpenCategories() })
                     DropdownMenuItem(text = { Text("Spending scope") }, onClick = { showMenu = false; onOpenScope() })
                 }
