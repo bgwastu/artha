@@ -6,3 +6,4 @@
 *.iml
 *.apk
 *.aab
+app/src/main/jniLibs/

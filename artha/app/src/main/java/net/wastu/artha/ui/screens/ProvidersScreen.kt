@@ -30,7 +30,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.MoreVert
@@ -323,21 +323,19 @@ fun ProvidersScreen(
                         )
                     }
                 }
-                item { SettingsHeading("API & Agent Access") }
+                item { SettingsHeading("Sharing") }
                 item {
-                    val isRunning by net.wastu.artha.api.service.ApiServerController.isRunning.collectAsStateWithLifecycle()
                     val tunnelState by net.wastu.artha.api.service.ApiServerController.tunnelState.collectAsStateWithLifecycle()
-                    val apiSummary = when (val s = tunnelState) {
-                        is net.wastu.artha.api.tunnel.TunnelState.Active -> "Live: ${s.url}"
-                        is net.wastu.artha.api.tunnel.TunnelState.Starting -> "Connecting to Cloudflare..."
-                        is net.wastu.artha.api.tunnel.TunnelState.Downloading -> "Downloading connector..."
-                        is net.wastu.artha.api.tunnel.TunnelState.Failed -> "Tunnel error"
-                        is net.wastu.artha.api.tunnel.TunnelState.Inactive -> if (isRunning) "Running locally" else "Off"
+                    val apiSummary = when (tunnelState) {
+                        is net.wastu.artha.api.tunnel.TunnelState.Active -> "Link is live"
+                        is net.wastu.artha.api.tunnel.TunnelState.Starting -> "Creating link"
+                        is net.wastu.artha.api.tunnel.TunnelState.Failed -> "Could not connect"
+                        is net.wastu.artha.api.tunnel.TunnelState.Inactive -> "Off"
                     }
                     SettingsLink(
-                        title = "Cloudflare API Tunnel",
+                        title = "Share link",
                         summary = apiSummary,
-                        icon = Icons.Default.Cloud,
+                        icon = Icons.Default.Share,
                     ) {
                         showApiServerSettings = true
                     }
@@ -394,7 +392,7 @@ fun ProvidersScreen(
         }
 
         if (showApiServerSettings) {
-            ApiServerSheet(onDismiss = { showApiServerSettings = false })
+            ShareLinkDialog(onDismiss = { showApiServerSettings = false })
         }
     }
 }

@@ -9,7 +9,6 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
@@ -103,13 +102,13 @@ class ApiServerService : Service() {
                 currentUrl?.let { url ->
                     val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(ClipData.newPlainText("Artha URL", url))
-                    Toast.makeText(this, "API URL copied", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Link copied", Toast.LENGTH_SHORT).show()
                 }
                 return START_STICKY
             }
         }
 
-        startForeground(NOTIFICATION_ID, buildNotification("Starting Artha API & Tunnel..."))
+        startForeground(NOTIFICATION_ID, buildNotification("Creating share link..."))
         ApiServerController.updateServiceRunning(true)
 
         try {
@@ -139,10 +138,10 @@ class ApiServerService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Artha API & Cloudflare Tunnel",
+                "Share link",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "Background API service and Cloudflare quick tunnel"
+                description = "Keeps the Artha share link online"
             }
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.createNotificationChannel(channel)
@@ -152,10 +151,9 @@ class ApiServerService : Service() {
     private fun updateNotification(state: TunnelState) {
         val statusText = when (state) {
             is TunnelState.Inactive -> "Server idle"
-            is TunnelState.Downloading -> "Downloading Cloudflare tunnel (${(state.progress * 100).toInt()}%)..."
-            is TunnelState.Starting -> "Connecting Cloudflare tunnel..."
+            is TunnelState.Starting -> "Creating share link..."
             is TunnelState.Active -> state.url
-            is TunnelState.Failed -> "Tunnel error: ${state.error}"
+            is TunnelState.Failed -> "Could not share: ${state.error}"
         }
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(NOTIFICATION_ID, buildNotification(statusText, state is TunnelState.Active))
@@ -176,13 +174,12 @@ class ApiServerService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        val title = if (isActive) "Artha API Server is running" else "Starting Artha API..."
+        val title = if (isActive) "Sharing Artha data" else "Starting share link"
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(statusText)
             .setSmallIcon(R.drawable.ic_launcher_monochrome)
-            .setSubText("Cloudflare Tunnel")
             .setContentIntent(openAppIntent)
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -200,13 +197,19 @@ class ApiServerService : Service() {
             )
             builder.addAction(0, "Copy URL", copyIntent)
 
-            val openBrowserIntent = PendingIntent.getActivity(
+            val shareIntent = PendingIntent.getActivity(
                 this,
                 3,
-                Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl)),
+                Intent.createChooser(
+                    Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, currentUrl)
+                    },
+                    null,
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-            builder.addAction(0, "Open Docs", openBrowserIntent)
+            builder.addAction(0, "Share", shareIntent)
         }
 
         return builder.build()

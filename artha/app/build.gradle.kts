@@ -36,6 +36,7 @@ android {
         versionCode = providers.gradleProperty("arthaVersionCode").orElse("1").get().toInt()
         versionName = providers.gradleProperty("arthaVersionName").orElse("0.1.0").get()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     buildTypes {
@@ -57,6 +58,8 @@ android {
 
     buildFeatures { compose = true }
     packaging {
+        // cloudflared must be extracted to nativeLibraryDir so Android 10+ lets us exec it.
+        jniLibs.useLegacyPackaging = true
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
         resources.merges += "/META-INF/services/**"
     }
@@ -70,6 +73,19 @@ android {
         unitTests.isReturnDefaultValues = true
     }
 }
+
+val cloudflaredVersion = "2026.10.3"
+val cloudflaredLib = layout.projectDirectory.file("src/main/jniLibs/arm64-v8a/libcloudflared.so").asFile
+val fetchCloudflared by tasks.registering {
+    outputs.file(cloudflaredLib)
+    onlyIf { !cloudflaredLib.exists() }
+    doLast {
+        cloudflaredLib.parentFile.mkdirs()
+        uri("https://github.com/cloudflare/cloudflared/releases/download/$cloudflaredVersion/cloudflared-linux-arm64")
+            .toURL().openStream().use { input -> cloudflaredLib.outputStream().use { input.copyTo(it) } }
+    }
+}
+tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(fetchCloudflared) }
 
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
 room { schemaDirectory("$projectDir/schemas") }

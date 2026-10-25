@@ -1,7 +1,6 @@
 package net.wastu.artha.api.tunnel
 
 import android.content.Context
-import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -9,268 +8,188 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.BufferedReader
+import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONObject
 import java.io.File
-import java.io.FileOutputStream
-import java.io.InputStreamReader
 import java.net.HttpURLConnection
+import java.net.Inet4Address
+import java.net.InetAddress
 import java.net.URL
-import java.util.regex.Pattern
 
 sealed interface TunnelState {
     data object Inactive : TunnelState
-    data class Downloading(val progress: Float) : TunnelState
     data object Starting : TunnelState
     data class Active(val url: String) : TunnelState
     data class Failed(val error: String) : TunnelState
 }
 
+/**
+ * Runs the bundled cloudflared binary (packaged as libcloudflared.so so Android 10+ allows exec).
+ *
+ * Go's resolver cannot work on Android (no /etc/resolv.conf), so everything that needs DNS is done
+ * here: the quick tunnel is registered over HTTPS and the edge IPs are resolved and passed explicitly.
+ */
 class CloudflareQuickTunnel(
     private val context: Context,
     private val scope: CoroutineScope,
 ) {
-    companion object {
-        const val DOWNLOAD_URL = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64"
-        private val URL_PATTERN = Pattern.compile("https://[a-zA-Z0-9-]+\\.trycloudflare\\.com")
+    private companion object {
+        const val TAG = "ArthaTunnel"
+        const val REGISTER_URL = "https://api.trycloudflare.com/tunnel"
+        val EDGE_HOSTS = listOf("region1.v2.argotunnel.com", "region2.v2.argotunnel.com")
+        const val EDGE_PORT = 7844
+        const val CONNECT_TIMEOUT_MS = 45_000L
+        const val CERT_DIR = "/system/etc/security/cacerts"
     }
 
     private val _state = MutableStateFlow<TunnelState>(TunnelState.Inactive)
     val state: StateFlow<TunnelState> = _state.asStateFlow()
 
     private var tunnelJob: Job? = null
-    private var process: Process? = null
-
-    fun binaryFile(): File {
-        val binDir = File(context.filesDir, "bin")
-        if (!binDir.exists()) binDir.mkdirs()
-        return File(binDir, "cloudflared")
-    }
-
-    fun isBinaryInstalled(): Boolean {
-        return findExistingBinary() != null
-    }
-
-    private fun findExistingBinary(): File? {
-        val commonPaths = listOf(
-            "/data/local/tmp/cloudflared",
-            "/data/data/com.termux/files/usr/bin/cloudflared",
-            "/system/bin/cloudflared",
-        )
-        for (p in commonPaths) {
-            val f = File(p)
-            if (f.exists() && f.canExecute()) return f
-        }
-
-        val internal = binaryFile()
-        if (internal.exists() && internal.canExecute()) return internal
-        if (internal.exists()) return internal
-        return null
-    }
-
-    suspend fun downloadBinary(onProgress: (Float) -> Unit): File = withContext(Dispatchers.IO) {
-        val target = binaryFile()
-        val temp = File(target.parentFile, "cloudflared.download.tmp")
-        if (temp.exists()) temp.delete()
-
-        var conn: HttpURLConnection? = null
-        try {
-            var currentUrl = URL(DOWNLOAD_URL)
-            var redirects = 0
-            while (redirects < 5) {
-                conn = currentUrl.openConnection() as HttpURLConnection
-                conn.instanceFollowRedirects = true
-                conn.connectTimeout = 15000
-                conn.readTimeout = 30000
-                conn.setRequestProperty("User-Agent", "Artha-Tunnel-Downloader/1.0")
-
-                val status = conn.responseCode
-                if (status == HttpURLConnection.HTTP_MOVED_TEMP || status == HttpURLConnection.HTTP_MOVED_PERM || status == 307 || status == 308) {
-                    val location = conn.getHeaderField("Location") ?: break
-                    conn.disconnect()
-                    currentUrl = URL(location)
-                    redirects++
-                } else {
-                    break
-                }
-            }
-
-            val totalBytes = conn!!.contentLengthLong
-            var downloadedBytes = 0L
-
-            conn.inputStream.use { input ->
-                FileOutputStream(temp).use { output ->
-                    val buffer = ByteArray(32 * 1024)
-                    var read: Int
-                    while (input.read(buffer).also { read = it } != -1) {
-                        output.write(buffer, 0, read)
-                        downloadedBytes += read
-                        if (totalBytes > 0) {
-                            val progress = (downloadedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
-                            onProgress(progress)
-                        }
-                    }
-                    output.flush()
-                }
-            }
-
-            if (target.exists()) target.delete()
-            if (!temp.renameTo(target)) {
-                temp.copyTo(target, overwrite = true)
-                temp.delete()
-            }
-
-            target.setExecutable(true, false)
-            target.setReadable(true, false)
-
-            runCatching {
-                Shell.cmd("chmod 755 ${target.absolutePath}").exec()
-            }
-
-            target
-        } catch (e: Exception) {
-            temp.delete()
-            throw e
-        } finally {
-            conn?.disconnect()
-        }
-    }
-    private fun rootShell(): Shell {
-        return runCatching {
-            Shell.Builder.create().setContext(context).setTimeout(15).build("su")
-        }.getOrNull() ?: Shell.getShell()
-    }
-
-    private fun ensureDnsAndCerts() {
-        val check = File("/etc/resolv.conf")
-        if (check.exists() && check.length() > 0) return
-
-        val script = """
-            mkdir -p /data/local/tmp/artha_etc
-            mount -t tmpfs tmpfs /data/local/tmp/artha_etc 2>/dev/null || true
-            cp -a /system/etc/* /data/local/tmp/artha_etc/ 2>/dev/null || true
-            echo -e "nameserver 1.1.1.1\nnameserver 8.8.8.8" > /data/local/tmp/artha_etc/resolv.conf
-            echo -e "127.0.0.1 localhost\n::1 localhost" > /data/local/tmp/artha_etc/hosts
-            mkdir -p /data/local/tmp/artha_etc/ssl/certs
-            cat /apex/com.android.conscrypt*/cacerts/* /system/etc/security/cacerts/* > /data/local/tmp/artha_etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
-            cp /data/local/tmp/artha_etc/ssl/certs/ca-certificates.crt /data/local/tmp/artha_etc/ssl/cert.pem 2>/dev/null || true
-            mount -o bind /data/local/tmp/artha_etc /system/etc 2>/dev/null || true
-        """.trimIndent()
-
-        runCatching { rootShell().newJob().add(script).exec() }
-    }
+    @Volatile private var process: Process? = null
 
     fun start(localPort: Int) {
         if (_state.value is TunnelState.Active || _state.value is TunnelState.Starting) return
+        _state.value = TunnelState.Starting
 
         tunnelJob?.cancel()
         tunnelJob = scope.launch(Dispatchers.IO) {
             try {
-                var binary = findExistingBinary()
-                if (binary == null || !binary.exists()) {
-                    _state.value = TunnelState.Downloading(0f)
-                    binary = downloadBinary { progress ->
-                        _state.value = TunnelState.Downloading(progress)
-                    }
-                }
-
-                _state.value = TunnelState.Starting
-
-                binary.setExecutable(true, false)
-                runCatching { Shell.cmd("chmod 755 ${binary.absolutePath}").exec() }
-
-                val localTmp = File("/data/local/tmp/cloudflared")
-                if (!localTmp.exists() && binary.exists()) {
-                    runCatching {
-                        binary.copyTo(localTmp, overwrite = true)
-                        localTmp.setExecutable(true, false)
-                        Shell.cmd("chmod 777 ${localTmp.absolutePath}").exec()
-                    }
-                }
-                val execBinary = if (localTmp.exists() && localTmp.canExecute()) localTmp else binary
-
-                ensureDnsAndCerts()
-
-                val logFile = File(context.filesDir, "cloudflared.log")
-                if (logFile.exists()) logFile.delete()
-                logFile.createNewFile()
-
-                val launchCmd = "${execBinary.absolutePath} tunnel --no-autoupdate --metrics 127.0.0.1:0 --url http://127.0.0.1:$localPort > '${logFile.absolutePath}' 2>&1 & echo \$!"
-                val execResult = rootShell().newJob().add(launchCmd).exec()
-
-                if (!execResult.isSuccess || execResult.out.isEmpty()) {
-                    // Fallback to direct process if root shell is not available
-                    val pb = ProcessBuilder(
-                        binary.absolutePath,
-                        "tunnel",
-                        "--no-autoupdate",
-                        "--url",
-                        "http://127.0.0.1:$localPort",
-                    )
-                    pb.redirectErrorStream(true)
-                    process = pb.start()
-                }
-
-                var activeUrl: String? = null
-                val deadline = System.currentTimeMillis() + 60000L
-                var filePointer = 0L
-
-                while (System.currentTimeMillis() < deadline && activeUrl == null) {
-                    if (logFile.exists() && logFile.length() > filePointer) {
-                        val raf = java.io.RandomAccessFile(logFile, "r")
-                        try {
-                            raf.seek(filePointer)
-                            var line = raf.readLine()
-                            while (line != null) {
-                                android.util.Log.d("ArthaTunnel", line)
-                                val matcher = URL_PATTERN.matcher(line)
-                                if (matcher.find()) {
-                                    activeUrl = matcher.group()
-                                    _state.value = TunnelState.Active(activeUrl)
-                                    break
-                                }
-                                line = raf.readLine()
-                            }
-                            filePointer = raf.filePointer
-                        } finally {
-                            raf.close()
-                        }
-                    }
-
-                    if (activeUrl != null) break
-                    kotlinx.coroutines.delay(400)
-                }
-
-                if (activeUrl == null) {
-                    val logs = logFile.readText().takeLast(400)
-                    _state.value = TunnelState.Failed("Tunnel failed to start: $logs")
-                }
+                run(localPort)
             } catch (e: Exception) {
-                _state.value = TunnelState.Failed(e.message ?: "Failed to start Cloudflare tunnel")
-            } finally {
-                process = null
+                android.util.Log.e(TAG, "Tunnel failed", e)
+                destroyProcess()
+                _state.value = TunnelState.Failed(e.message ?: "Could not start the share link")
             }
         }
+    }
+
+    private suspend fun run(localPort: Int) {
+        val binary = File(context.applicationInfo.nativeLibraryDir, "libcloudflared.so")
+        if (!binary.exists()) error("Sharing is not supported on this device (arm64 only)")
+
+        val registration = register()
+        val edges = resolveEdges()
+
+        val dir = File(context.cacheDir, "tunnel").apply { mkdirs() }
+        val credentials = File(dir, "credentials.json").apply {
+            writeText(
+                JSONObject()
+                    .put("AccountTag", registration.accountTag)
+                    .put("TunnelSecret", registration.secret)
+                    .put("TunnelID", registration.id)
+                    .toString(),
+            )
+        }
+        val config = File(dir, "config.yml").apply {
+            writeText(
+                """
+                tunnel: ${registration.id}
+                credentials-file: ${credentials.absolutePath}
+                protocol: http2
+                ingress:
+                  - service: http://127.0.0.1:$localPort
+                """.trimIndent(),
+            )
+        }
+
+        val command = mutableListOf(
+            binary.absolutePath, "tunnel",
+            "--config", config.absolutePath,
+            "--edge-ip-version", "4",
+            "--no-autoupdate",
+            "--metrics", "127.0.0.1:0",
+        )
+        edges.forEach { command += listOf("--edge", it) }
+        command += listOf("run", registration.id)
+
+        val pb = ProcessBuilder(command).directory(dir).redirectErrorStream(true)
+        pb.environment()["HOME"] = dir.absolutePath
+        caBundle(dir)?.let { pb.environment()["SSL_CERT_FILE"] = it.absolutePath }
+        val proc = pb.start()
+        process = proc
+
+        val tail = ArrayDeque<String>()
+        val connected = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val reader = scope.launch(Dispatchers.IO) {
+            proc.inputStream.bufferedReader().forEachLine { line ->
+                android.util.Log.d(TAG, line)
+                synchronized(tail) {
+                    tail.addLast(line)
+                    if (tail.size > 6) tail.removeFirst()
+                }
+                if ("Registered tunnel connection" in line) connected.complete(Unit)
+            }
+            // Output ended: the process exited.
+            if (!connected.isCompleted) connected.completeExceptionally(IllegalStateException("cloudflared exited"))
+            else if (_state.value is TunnelState.Active) _state.value = TunnelState.Failed("Connection lost")
+        }
+
+        val ok = withTimeoutOrNull(CONNECT_TIMEOUT_MS) {
+            runCatching { connected.await() }.isSuccess
+        } ?: false
+        if (!ok) {
+            val logs = synchronized(tail) { tail.joinToString("\n") }
+            reader.cancel()
+            destroyProcess()
+            error("Could not reach Cloudflare. ${logs.takeLast(300)}".trim())
+        }
+        _state.value = TunnelState.Active("https://${registration.hostname}")
+    }
+
+    private class Registration(val id: String, val hostname: String, val accountTag: String, val secret: String)
+
+    private fun register(): Registration {
+        val conn = URL(REGISTER_URL).openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = "POST"
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 15_000
+            conn.setRequestProperty("User-Agent", "Artha")
+            conn.doOutput = true
+            conn.outputStream.use { }
+            if (conn.responseCode !in 200..299) error("Cloudflare refused the request (${conn.responseCode})")
+            val result = JSONObject(conn.inputStream.bufferedReader().readText()).getJSONObject("result")
+            return Registration(
+                id = result.getString("id"),
+                hostname = result.getString("hostname"),
+                accountTag = result.getString("account_tag"),
+                secret = result.getString("secret"),
+            )
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun resolveEdges(): List<String> {
+        val ips = EDGE_HOSTS.flatMap { host ->
+            runCatching { InetAddress.getAllByName(host).filterIsInstance<Inet4Address>() }.getOrDefault(emptyList())
+        }.mapNotNull { it.hostAddress }.distinct()
+        if (ips.isEmpty()) error("Could not resolve Cloudflare servers. Check your connection.")
+        return ips.map { "$it:$EDGE_PORT" }
+    }
+
+    /** Go finds no CA store on Android, so hand it the system roots as one PEM bundle. */
+    private fun caBundle(dir: File): File? {
+        val bundle = File(dir, "ca-bundle.pem")
+        if (bundle.exists() && bundle.length() > 0) return bundle
+        val certs = File(CERT_DIR).listFiles()?.takeIf { it.isNotEmpty() } ?: return null
+        bundle.outputStream().use { out -> certs.forEach { runCatching { out.write(it.readBytes()) } } }
+        return bundle.takeIf { it.length() > 0 }
+    }
+
+    private fun destroyProcess() {
+        process?.let {
+            it.destroy()
+            if (it.isAlive) it.destroyForcibly()
+        }
+        process = null
     }
 
     fun stop() {
         tunnelJob?.cancel()
         tunnelJob = null
-
-        val p = process
-        if (p != null) {
-            p.destroy()
-            runCatching {
-                if (p.isAlive) p.destroyForcibly()
-            }
-            process = null
-        }
-
-        // Also ensure any lingering cloudflared processes are terminated via root
-        runCatching {
-            rootShell().newJob().add("killall -9 cloudflared").exec()
-        }
-
+        destroyProcess()
         _state.value = TunnelState.Inactive
     }
 }
