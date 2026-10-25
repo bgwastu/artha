@@ -30,7 +30,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.MoreVert
@@ -335,7 +335,7 @@ fun ProvidersScreen(
                     SettingsLink(
                         title = "Remote access",
                         summary = apiSummary,
-                        icon = Icons.Default.Share,
+                        icon = Icons.Default.Link,
                     ) {
                         showApiServerSettings = true
                     }

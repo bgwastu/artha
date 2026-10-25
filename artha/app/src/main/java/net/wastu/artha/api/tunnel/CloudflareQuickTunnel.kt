@@ -112,17 +112,18 @@ class CloudflareQuickTunnel(
         val tail = ArrayDeque<String>()
         val connected = kotlinx.coroutines.CompletableDeferred<Unit>()
         val reader = scope.launch(Dispatchers.IO) {
-            proc.inputStream.bufferedReader().forEachLine { line ->
+            // Reading throws when stop() closes the stream; that is expected.
+            runCatching { proc.inputStream.bufferedReader().forEachLine { line ->
                 android.util.Log.d(TAG, line)
                 synchronized(tail) {
                     tail.addLast(line)
                     if (tail.size > 6) tail.removeFirst()
                 }
                 if ("Registered tunnel connection" in line) connected.complete(Unit)
-            }
+            } }
             // Output ended: the process exited.
             if (!connected.isCompleted) connected.completeExceptionally(IllegalStateException("cloudflared exited"))
-            else if (_state.value is TunnelState.Active) _state.value = TunnelState.Failed("Connection lost")
+            else if (process === proc && _state.value is TunnelState.Active) _state.value = TunnelState.Failed("Connection lost")
         }
 
         val ok = withTimeoutOrNull(CONNECT_TIMEOUT_MS) {

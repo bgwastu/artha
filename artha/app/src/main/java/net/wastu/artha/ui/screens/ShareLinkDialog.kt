@@ -12,18 +12,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -76,7 +75,7 @@ fun ShareLinkDialog(onDismiss: () -> Unit) {
                         shape = MaterialTheme.shapes.medium,
                     ) {
                         Row(
-                            Modifier.padding(start = 12.dp, end = 4.dp),
+                            Modifier.fillMaxWidth().padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(Icons.Default.Link, null, Modifier.size(20.dp))
@@ -85,14 +84,16 @@ fun ShareLinkDialog(onDismiss: () -> Unit) {
                                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                                modifier = Modifier.padding(start = 8.dp),
                             )
-                            IconButton(onClick = { copy(context, url) }) {
-                                Icon(Icons.Default.ContentCopy, "Copy link")
-                            }
-                            IconButton(onClick = { share(context, url) }) {
-                                Icon(Icons.Default.Share, "Share link")
-                            }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { copy(context, url) }, modifier = Modifier.weight(1f)) {
+                            Text("Copy")
+                        }
+                        Button(onClick = { share(context, url) }, modifier = Modifier.weight(1f)) {
+                            Text("Share")
                         }
                     }
                 }
