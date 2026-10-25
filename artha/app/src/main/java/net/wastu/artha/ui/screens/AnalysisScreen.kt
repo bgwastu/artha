@@ -126,12 +126,7 @@ import java.util.Locale
 fun AnalysisScreen(
     viewModel: ArthaViewModel,
     onOpenTransaction: (net.wastu.artha.core.model.UnifiedTransaction) -> Unit = {},
-    showCategoriesSheet: Boolean = false,
-    onOpenCategoriesSheet: () -> Unit = {},
-    onDismissCategoriesSheet: () -> Unit = {},
-    showKnowledgeEditor: Boolean = false,
-    onOpenKnowledgeEditor: () -> Unit = {},
-    onDismissKnowledgeEditor: () -> Unit = {},
+    onOpenCategories: () -> Unit = {},
     onOpenCategoryReview: () -> Unit = {},
     onOpenAiCategories: () -> Unit = {},
     onOpenChart: () -> Unit = {},
@@ -202,7 +197,7 @@ fun AnalysisScreen(
         item(key = "header_summary") {
             MonthSummaryCard(
                 month = selectedMonth, analysis = analysis, editable = viewModel.analysisStore != null,
-                onOpenCategories = onOpenCategoriesSheet, onOpenScope = { showScopeDialog = true },
+                onOpenCategories = onOpenCategories, onOpenScope = { showScopeDialog = true },
                 onOpenChart = onOpenChart,
                 onOpenLargestPayment = largest?.let { { onOpenTransaction(it) } },
                 onPreviousMonth = { viewModel.setAnalysisMonth(selectedMonth.minusMonths(1)) },
@@ -258,31 +253,6 @@ fun AnalysisScreen(
         confirmButton = { TextButton(onClick = { showScopeDialog = false }) { Text("Close") } },
         dismissButton = { TextButton(onClick = { showScopeDialog = false; viewModel.setTargetDestination("SETTINGS") }) { Text("Sources") } },
     )
-
-    if (showKnowledgeEditor) {
-        KnowledgeEditorDialog(
-            initialKnowledge = snapshot.knowledge,
-            onDismiss = onDismissKnowledgeEditor,
-            onSave = { updated ->
-                viewModel.applyKnowledgeRewrite(updated)
-                onDismissKnowledgeEditor()
-            },
-        )
-    }
-
-    if (showCategoriesSheet) {
-        ManageCategoriesSheet(
-            categories = snapshot.customCategories,
-            categoryIcons = snapshot.categoryIcons,
-            onDismiss = onDismissCategoriesSheet,
-            onAdd = { name, complete -> viewModel.addCustomCategory(name, complete) },
-            onRemove = { viewModel.removeCustomCategory(it) },
-            onSetIcon = { cat, iconKey -> viewModel.setCategoryIcon(cat, iconKey) },
-            onReset = { viewModel.resetCategoriesToDefault() },
-            automationState = categoryAutomation,
-            onRetryAi = viewModel::retryAutomaticCategories,
-        )
-    }
 }
 
 @Composable
@@ -428,238 +398,6 @@ private fun CategorySpendingRow(
             )
         }
     }
-}
-
-@Composable
-fun KnowledgeEditorDialog(
-    initialKnowledge: String,
-    onDismiss: () -> Unit,
-    onSave: (String) -> Unit,
-) {
-    var text by rememberSaveable(initialKnowledge) { mutableStateOf(initialKnowledge) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Personal context", fontWeight = FontWeight.Bold) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "Used by AI when categorizing payments.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    label = { Text("Personal context") },
-                    minLines = 4,
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                )
-            }
-        },
-        confirmButton = {
-            FilledTonalButton(onClick = { onSave(text) }) {
-                Text("Save context")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        },
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
-@Composable
-fun ManageCategoriesSheet(
-    categories: List<String>, categoryIcons: Map<String, String>, onDismiss: () -> Unit,
-    onAdd: (String, (Result<Unit>) -> Unit) -> Unit, onRemove: (String) -> Unit,
-    onSetIcon: (String, String?) -> Unit, onReset: () -> Unit,
-    automationState: CategoryAutomationState? = null, onRetryAi: () -> Unit = {},
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-    ) {
-        Column(Modifier.fillMaxHeight()) {
-            ManageCategoriesContent(
-                categories, categoryIcons, onDismiss, onAdd, onRemove, onSetIcon, onReset,
-                automationState, onRetryAi, expandToSheetHeight = true, showCloseButton = true,
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
-@Composable
-fun ManageCategoriesContent(
-    categories: List<String>, categoryIcons: Map<String, String>, onDismiss: () -> Unit,
-    onAdd: (String, (Result<Unit>) -> Unit) -> Unit, onRemove: (String) -> Unit,
-    onSetIcon: (String, String?) -> Unit, onReset: () -> Unit,
-    automationState: CategoryAutomationState? = null, onRetryAi: () -> Unit = {},
-    expandToSheetHeight: Boolean = false,
-    showCloseButton: Boolean = true,
-) {
-    var query by rememberSaveable { mutableStateOf("") }
-    var adding by rememberSaveable { mutableStateOf(false) }
-    var name by rememberSaveable { mutableStateOf("") }
-    var addError by rememberSaveable { mutableStateOf<String?>(null) }
-    var saving by remember { mutableStateOf(false) }
-    var headerMenu by remember { mutableStateOf(false) }
-    var rowMenu by rememberSaveable { mutableStateOf<String?>(null) }
-    var editingIcon by rememberSaveable { mutableStateOf<String?>(null) }
-    var removing by rememberSaveable { mutableStateOf<String?>(null) }
-    var reset by rememberSaveable { mutableStateOf(false) }
-    var revealCategory by rememberSaveable { mutableStateOf<String?>(null) }
-    val focus = LocalFocusManager.current
-    val listState = rememberLazyListState()
-    val visibleCategories = remember(categories, query) {
-        categories.filter { it.contains(query.trim(), ignoreCase = true) }
-    }
-    var previousQuery by rememberSaveable { mutableStateOf(query) }
-    LaunchedEffect(query) {
-        if (previousQuery != query) {
-            previousQuery = query
-            listState.scrollToItem(0)
-        }
-    }
-    val duplicate = categories.any { it.equals(name.trim(), ignoreCase = true) }
-    fun submit() {
-        if (saving) return
-        val value = name.trim()
-        if (value.isEmpty()) { addError = "Enter a category name"; return }
-        if (duplicate) { addError = "Already in picker"; return }
-        saving = true
-        addError = null
-        onAdd(value) { result ->
-            saving = false
-            if (result.isSuccess) {
-                focus.clearFocus()
-                query = ""
-                revealCategory = value
-                name = ""
-                adding = false
-            } else addError = "Couldn't add category. Try again."
-        }
-    }
-    LaunchedEffect(revealCategory, visibleCategories, adding) {
-        val index = revealCategory?.let(visibleCategories::indexOf) ?: -1
-        if (!adding && index >= 0) {
-            listState.scrollToItem(index)
-            revealCategory = null
-        }
-    }
-    BackHandler(enabled = adding) {
-        if (!saving) { focus.clearFocus(); adding = false }
-    }
-    Column(Modifier.fillMaxWidth().imePadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            if (adding) IconButton(onClick = { focus.clearFocus(); adding = false }, enabled = !saving) {
-                Icon(Icons.Default.ChevronLeft, "Back to categories")
-            }
-            val titleStyle = if (!showCloseButton && !adding) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleLarge
-            val titleModifier = if (!showCloseButton && !adding) {
-                Modifier.weight(1f).semantics { heading() }.padding(top = 4.dp, bottom = 8.dp)
-            } else {
-                Modifier.weight(1f).semantics { heading() }
-            }
-            Text(if (adding) "Add category" else "Categories", style = titleStyle, modifier = titleModifier)
-            if (!adding && showCloseButton) {
-                Box {
-                    IconButton(onClick = { headerMenu = true }) { Icon(Icons.Default.MoreVert, "Category options") }
-                    DropdownMenu(headerMenu, onDismissRequest = { headerMenu = false }) {
-                        DropdownMenuItem(text = { Text("Reset picker") }, onClick = { headerMenu = false; reset = true })
-                    }
-                }
-                IconButton(onClick = { focus.clearFocus(); onDismiss() }) { Icon(Icons.Default.Close, "Close categories") }
-            } else if (!adding) {
-                Box {
-                    IconButton(onClick = { headerMenu = true }) { Icon(Icons.Default.MoreVert, "Category options") }
-                    DropdownMenu(headerMenu, onDismissRequest = { headerMenu = false }) {
-                        DropdownMenuItem(text = { Text("Reset picker") }, onClick = { headerMenu = false; reset = true })
-                    }
-                }
-            }
-        }
-        if (adding) {
-            Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 12.dp)) {
-                OutlinedTextField(name, { name = it; addError = null }, label = { Text("Category name") },
-                    enabled = !saving, isError = duplicate || addError != null,
-                    supportingText = (if (duplicate) "Already in picker" else addError)?.let { message -> {
-                        Text(message, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-                    } },
-                    singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { submit() }))
-            }
-            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { focus.clearFocus(); adding = false }, enabled = !saving,
-                    modifier = Modifier.heightIn(min = 48.dp)) { Text("Cancel") }
-                FilledTonalButton(onClick = { submit() }, enabled = !saving && name.isNotBlank() && !duplicate,
-                    modifier = Modifier.heightIn(min = 48.dp)) { Text(if (saving) "Adding" else "Add") }
-            }
-        } else {
-            OutlinedTextField(query, { query = it }, label = { Text("Search categories") }, singleLine = true,
-                leadingIcon = { Icon(Icons.Default.Search, null) },
-                trailingIcon = if (query.isNotEmpty()) ({
-                    IconButton(onClick = { query = "" }) { Icon(Icons.Default.Clear, "Clear category search") }
-                }) else null,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-            TextButton(onClick = { focus.clearFocus(); adding = true }, modifier = Modifier.heightIn(min = 48.dp)) {
-                Icon(Icons.Default.Add, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Add category")
-            }
-            val listModifier = if (expandToSheetHeight) {
-                Modifier.fillMaxWidth().weight(1f, fill = false)
-            } else {
-                Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 320.dp)
-            }
-            LazyColumn(listModifier, state = listState, contentPadding = PaddingValues(bottom = 16.dp)) {
-                if (visibleCategories.isEmpty()) item {
-                    Text(if (query.isBlank()) "No categories" else "No matching categories",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 16.dp))
-                }
-                items(visibleCategories, key = { it }) { category ->
-                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Icon(categoryIconFor(category, categoryIcons), null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
-                        Text(category, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                        Box {
-                            IconButton(onClick = { focus.clearFocus(); rowMenu = category }, modifier = Modifier.size(48.dp)) {
-                                Icon(Icons.Default.MoreVert, "Options for $category")
-                            }
-                            DropdownMenu(rowMenu == category, onDismissRequest = { rowMenu = null }) {
-                                DropdownMenuItem(text = { Text("Change icon") }, onClick = { rowMenu = null; editingIcon = category })
-                                DropdownMenuItem(text = { Text("Remove from picker") }, onClick = { rowMenu = null; removing = category })
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    editingIcon?.let { category ->
-        IconPickerDialog(categoryIcons[category], onDismiss = { editingIcon = null }, onSelect = {
-            onSetIcon(category, it)
-            editingIcon = null
-        })
-    }
-    removing?.let { category ->
-        AlertDialog(onDismissRequest = { removing = null }, title = { Text("Remove from picker?") },
-            text = { Text("Saved payments keep their categories and notes.") },
-            confirmButton = { TextButton(onClick = { onRemove(category); removing = null }) { Text("Remove") } },
-            dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } })
-    }
-    if (reset) AlertDialog(onDismissRequest = { reset = false }, title = { Text("Reset picker?") },
-        text = { Text("Restore default categories and icons. Saved payment categories and notes stay.") },
-        confirmButton = { TextButton(onClick = { onReset(); reset = false }) { Text("Reset") } },
-        dismissButton = { TextButton(onClick = { reset = false }) { Text("Cancel") } })
 }
 
 @Composable

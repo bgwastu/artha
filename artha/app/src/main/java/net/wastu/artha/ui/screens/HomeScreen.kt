@@ -113,8 +113,7 @@ fun HomeScreen(
 
     var showSearch by rememberSaveable { mutableStateOf(false) }
     var showFilter by rememberSaveable { mutableStateOf(false) }
-    var showCategoriesSheet by rememberSaveable { mutableStateOf(false) }
-    var showKnowledgeEditor by rememberSaveable { mutableStateOf(false) }
+    var aiCategoriesPage by rememberSaveable { mutableStateOf("HUB") }
     var selectedKey by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedFallback by remember { mutableStateOf<UnifiedTransaction?>(null) }
 
@@ -343,15 +342,10 @@ fun HomeScreen(
                                     AnalysisScreen(
                                         viewModel = viewModel,
                                         onOpenTransaction = { selectedKey = it.key; selectedFallback = it },
-                                        showCategoriesSheet = showCategoriesSheet,
-                                        onOpenCategoriesSheet = { showCategoriesSheet = true },
-                                        onDismissCategoriesSheet = { showCategoriesSheet = false },
-                                        showKnowledgeEditor = showKnowledgeEditor,
+                                        onOpenCategories = { aiCategoriesPage = "CATEGORIES"; showAiCategories = true },
                                         onOpenChart = { showSpendingChart = true },
-                                        onDismissKnowledgeEditor = { showKnowledgeEditor = false },
-                                        onOpenKnowledgeEditor = { showKnowledgeEditor = true },
                                         onOpenCategoryReview = { showCategoryReview = true },
-                                        onOpenAiCategories = { showAiCategories = true },
+                                        onOpenAiCategories = { aiCategoriesPage = "HUB"; showAiCategories = true },
                                     )
                                 }
                             }
@@ -370,7 +364,7 @@ fun HomeScreen(
                                 onDetailOpenChanged = { settingsSourceOpen = it },
                                 onOpenDemo = { net.wastu.artha.DemoMode.open(context) },
                                 onOpenCategoryReview = { showCategoryReview = true },
-                                onOpenAiCategories = { showAiCategories = true },
+                                onOpenAiCategories = { aiCategoriesPage = "HUB"; showAiCategories = true },
                             )
                         }
                     }
@@ -395,7 +389,7 @@ fun HomeScreen(
                     viewModel = viewModel,
                     onBack = { showAiCategories = false },
                     onOpenReview = { showCategoryReview = true },
-                    onOpenTransaction = { selectedKey = it.key; selectedFallback = it },
+                    initialPage = aiCategoriesPage,
                 )
             }
         }
