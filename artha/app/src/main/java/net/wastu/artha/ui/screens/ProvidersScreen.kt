@@ -323,7 +323,7 @@ fun ProvidersScreen(
                         )
                     }
                 }
-                item { SettingsHeading("Sharing") }
+                item { SettingsHeading("Remote access") }
                 item {
                     val tunnelState by net.wastu.artha.api.service.ApiServerController.tunnelState.collectAsStateWithLifecycle()
                     val apiSummary = when (tunnelState) {
@@ -333,7 +333,7 @@ fun ProvidersScreen(
                         is net.wastu.artha.api.tunnel.TunnelState.Inactive -> "Off"
                     }
                     SettingsLink(
-                        title = "Share link",
+                        title = "Remote access",
                         summary = apiSummary,
                         icon = Icons.Default.Share,
                     ) {

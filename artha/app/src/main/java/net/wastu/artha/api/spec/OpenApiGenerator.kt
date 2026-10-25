@@ -11,7 +11,7 @@ object OpenApiGenerator {
 
         val info = JSONObject().apply {
             put("title", "Artha API")
-            put("description", "Direct HTTP API for Artha transactions and spending insights, running locally on Android and shared through a temporary public link. Designed for AI agents, automation, and personal tools.")
+            put("description", "Direct HTTP API for Artha transactions and spending insights, running locally on Android and shared through a temporary public link. Send the access key as `Authorization: Bearer <key>`, `X-Api-Key`, or `?key=`. Designed for AI agents, automation, and personal tools.")
             put("version", "1.0.0")
         }
         root.put("info", info)

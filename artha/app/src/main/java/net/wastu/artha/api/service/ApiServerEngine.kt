@@ -4,13 +4,16 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.call
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.cors.routing.CORS
+import io.ktor.server.request.httpMethod
 import io.ktor.server.request.receiveText
+import io.ktor.server.response.header
 import io.ktor.server.response.respondRedirect
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.delete
@@ -44,15 +47,24 @@ import net.wastu.artha.data.analysis.SpendingRepository
 import net.wastu.artha.data.analysis.SpendingState
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.MessageDigest
 import java.time.Instant
 import java.time.YearMonth
 
 class ApiServerEngine(
     private val spendingRepository: SpendingRepository,
     private val analysisStore: AnalysisStore,
+    private val accessToken: String,
     private val port: Int = 8080,
     private val onTriggerSync: (Provider?) -> Unit = {},
 ) {
+    private companion object {
+        const val KEY_COOKIE = "artha_key"
+    }
+
+    private fun cookieKey(header: String?): String? =
+        header?.split(';')?.map { it.trim() }?.firstOrNull { it.startsWith("$KEY_COOKIE=") }?.substringAfter('=')
+
     private var engine: EmbeddedServer<*, *>? = null
 
     val isRunning: Boolean get() = engine != null
@@ -79,6 +91,25 @@ class ApiServerEngine(
                 allowMethod(HttpMethod.Patch)
                 allowMethod(HttpMethod.Put)
                 allowMethod(HttpMethod.Delete)
+            }
+
+            // Every request needs the access token (Bearer, X-Api-Key, ?key= or the cookie set from ?key=).
+            intercept(ApplicationCallPipeline.Plugins) {
+                if (call.request.httpMethod == HttpMethod.Options) return@intercept
+                val request = call.request
+                val bearer = request.headers[HttpHeaders.Authorization]?.removePrefix("Bearer ")?.trim()
+                val queryKey = request.queryParameters["key"]
+                val provided = bearer ?: request.headers["X-Api-Key"] ?: queryKey ?: cookieKey(request.headers[HttpHeaders.Cookie])
+                if (provided == null || !MessageDigest.isEqual(provided.toByteArray(), accessToken.toByteArray())) {
+                    call.respondText(
+                        """{"error":"unauthorized","message":"Missing or invalid access key"}""",
+                        ContentType.Application.Json,
+                        HttpStatusCode.Unauthorized,
+                    )
+                    finish()
+                } else if (queryKey != null) {
+                    call.response.header(HttpHeaders.SetCookie, "$KEY_COOKIE=$accessToken; Path=/; HttpOnly; SameSite=Lax")
+                }
             }
 
             routing {

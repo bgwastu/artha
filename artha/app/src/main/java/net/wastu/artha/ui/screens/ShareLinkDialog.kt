@@ -15,15 +15,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -36,33 +37,41 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.wastu.artha.api.service.ApiServerController
 import net.wastu.artha.api.tunnel.TunnelState
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShareLinkDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
     val state by ApiServerController.tunnelState.collectAsStateWithLifecycle()
+    val shareUrl by ApiServerController.publicUrl.collectAsStateWithLifecycle()
 
-    AlertDialog(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = {
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Share link", Modifier.weight(1f))
+                Column(Modifier.weight(1f)) {
+                    Text("Remote access", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        "A public link for AI agents and scripts to use your data.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Switch(
                     checked = state is TunnelState.Starting || state is TunnelState.Active,
                     onCheckedChange = { on ->
                         if (on) ApiServerController.start(context) else ApiServerController.stop(context)
                     },
+                    modifier = Modifier.padding(start = 16.dp),
                 )
             }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(
-                    "A public link for AI agents and scripts to use your data.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                when (val s = state) {
-                    is TunnelState.Active -> Surface(
+            when (val s = state) {
+                is TunnelState.Active -> shareUrl?.let { url ->
+                    Surface(
                         color = MaterialTheme.colorScheme.surfaceVariant,
                         shape = MaterialTheme.shapes.medium,
                     ) {
@@ -72,35 +81,34 @@ fun ShareLinkDialog(onDismiss: () -> Unit) {
                         ) {
                             Icon(Icons.Default.Link, null, Modifier.size(20.dp))
                             Text(
-                                text = s.url.removePrefix("https://"),
+                                text = url.removePrefix("https://"),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                             )
-                            IconButton(onClick = { copy(context, s.url) }) {
+                            IconButton(onClick = { copy(context, url) }) {
                                 Icon(Icons.Default.ContentCopy, "Copy link")
                             }
-                            IconButton(onClick = { share(context, s.url) }) {
+                            IconButton(onClick = { share(context, url) }) {
                                 Icon(Icons.Default.Share, "Share link")
                             }
                         }
                     }
-                    is TunnelState.Starting -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Text("Creating link", Modifier.padding(start = 12.dp))
-                    }
-                    is TunnelState.Failed -> Text(
-                        s.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    TunnelState.Inactive -> Unit
                 }
+                is TunnelState.Starting -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text("Creating link", Modifier.padding(start = 12.dp))
+                }
+                is TunnelState.Failed -> Text(
+                    s.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                TunnelState.Inactive -> Unit
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
+        }
+    }
 }
 
 private fun copy(context: Context, url: String) {

@@ -15,6 +15,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import java.security.SecureRandom
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -44,6 +45,8 @@ class ApiServerService : Service() {
     private var engine: ApiServerEngine? = null
     private var tunnel: CloudflareQuickTunnel? = null
     private var currentUrl: String? = null
+    private val accessToken: String = ByteArray(24).also { SecureRandom().nextBytes(it) }
+        .joinToString("") { "%02x".format(it) }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -73,6 +76,7 @@ class ApiServerService : Service() {
         engine = ApiServerEngine(
             spendingRepository = app.spending,
             analysisStore = app.analysisStore,
+            accessToken = accessToken,
             port = 8080,
             onTriggerSync = { provider -> app.syncInBackground(provider) },
         )
@@ -81,12 +85,8 @@ class ApiServerService : Service() {
 
         serviceScope.launch {
             tunnel?.state?.collect { state ->
-                ApiServerController.updateTunnelState(state)
-                if (state is TunnelState.Active) {
-                    currentUrl = state.url
-                } else if (state is TunnelState.Inactive || state is TunnelState.Failed) {
-                    currentUrl = null
-                }
+                currentUrl = (state as? TunnelState.Active)?.let { "${it.url}/?key=$accessToken" }
+                ApiServerController.updateTunnelState(state, currentUrl)
                 updateNotification(state)
             }
         }
@@ -104,11 +104,11 @@ class ApiServerService : Service() {
                     clipboard.setPrimaryClip(ClipData.newPlainText("Artha URL", url))
                     Toast.makeText(this, "Link copied", Toast.LENGTH_SHORT).show()
                 }
-                return START_STICKY
+                return START_NOT_STICKY
             }
         }
 
-        startForeground(NOTIFICATION_ID, buildNotification("Creating share link..."))
+        startForeground(NOTIFICATION_ID, buildNotification("Creating link..."))
         ApiServerController.updateServiceRunning(true)
 
         try {
@@ -119,7 +119,7 @@ class ApiServerService : Service() {
             ApiServerController.updateTunnelState(TunnelState.Failed(e.message ?: "Server start failed"))
         }
 
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
@@ -138,10 +138,10 @@ class ApiServerService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Share link",
+                "Remote access",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "Keeps the Artha share link online"
+                description = "Shows while the Artha link is online"
             }
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.createNotificationChannel(channel)
@@ -151,8 +151,8 @@ class ApiServerService : Service() {
     private fun updateNotification(state: TunnelState) {
         val statusText = when (state) {
             is TunnelState.Inactive -> "Server idle"
-            is TunnelState.Starting -> "Creating share link..."
-            is TunnelState.Active -> state.url
+            is TunnelState.Starting -> "Creating link..."
+            is TunnelState.Active -> state.url.removePrefix("https://")
             is TunnelState.Failed -> "Could not share: ${state.error}"
         }
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -174,7 +174,7 @@ class ApiServerService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        val title = if (isActive) "Sharing Artha data" else "Starting share link"
+        val title = if (isActive) "Remote access is on" else "Turning on remote access"
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
@@ -184,7 +184,7 @@ class ApiServerService : Service() {
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Turn off", disconnectIntent)
 
         if (isActive && currentUrl != null) {
             builder.setStyle(NotificationCompat.BigTextStyle().bigText(statusText))
