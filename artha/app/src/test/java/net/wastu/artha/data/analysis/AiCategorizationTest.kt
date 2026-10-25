@@ -239,6 +239,18 @@ class AiCategorizationTest {
     }
 
     @Test
+    fun monthPendingDoesNotResendPaymentsTheModelAnsweredUncategorized() {
+        val answered = payment
+        val snap = snapshot.copy(
+            categories = mapOf(answered.key to CategoryConstants.UNCATEGORIZED),
+            reasons = mapOf(answered.key to AI_REASON_PREFIX + "No evidence"),
+            aiCategoryFingerprints = mapOf(answered.key to AiCategorization.fingerprint(answered, snapshot)),
+            aiConfidence = mapOf(answered.key to CategoryConfidence.HIGH),
+        )
+        assertEquals(emptySet<String>(), AiCategorization.scopeKeys(RecategorizeScope.MonthPending(YearMonth.of(1970, 1)), listOf(answered), snap))
+    }
+
+    @Test
     fun scopeKeysNeverIncludeManualPicksExceptPaymentReplaceManual() {
         val manualTx = payment.copy(providerTransactionId = "m1", classificationIsManual = true, description = "Manual tx")
         val snapshotManual = snapshot.copy(

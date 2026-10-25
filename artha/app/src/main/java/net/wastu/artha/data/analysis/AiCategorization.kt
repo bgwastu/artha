@@ -157,8 +157,8 @@ object AiCategorization {
             is RecategorizeScope.MonthPending -> rows.filter { tx ->
                 isEligible(tx, snapshot) &&
                     YearMonth.from(tx.occurredAt.atZone(net.wastu.artha.core.model.AccountingTime.zone)) == scope.month &&
+                    // An "Uncategorized" answer from the model is an answer: it is reviewed if unsure, not re-sent forever.
                     (tx.key in snapshot.categoryFailures ||
-                        (snapshot.categories[tx.key] ?: tx.category).let { it.isNullOrBlank() || it == CategoryConstants.UNCATEGORIZED } ||
                         needsLabel(CategoryCandidate(tx, fingerprint(tx, snapshot)), snapshot))
             }.map { it.key }.toSet()
             is RecategorizeScope.New -> rows.filter { tx -> isNew(tx, snapshot) &&

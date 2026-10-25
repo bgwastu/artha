@@ -18,7 +18,7 @@ sealed interface RecategorizeScope {
     data object All : RecategorizeScope
     /** Payments in [month] that have never been categorized (no category, AI, merchant or manual label). */
     data class New(val month: YearMonth) : RecategorizeScope
-    /** What a month still needs: unlabeled, stale, uncategorized or failed payments. Low-confidence picks stay in review. */
+    /** What a month still needs: unlabeled, stale or failed payments. Low-confidence picks stay in review. */
     data class MonthPending(val month: YearMonth) : RecategorizeScope
 }
 
