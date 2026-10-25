@@ -434,6 +434,14 @@ class ArthaViewModel(
                     }
                     withContext(ioDispatcher) {
                         analysisStore?.commitCategorySuggestions(unchanged, suggestions, snapshot)
+                        // An unanswered or unknown-category result is never committed; record it so it surfaces
+                        // for review instead of staying pending forever.
+                        val valid = AiCategorization.categories(analysisSnapshot.value)
+                        val unanswered = standardBatch.map { it.transaction.key }
+                            .filter { suggestions[it]?.category !in valid }.toSet()
+                        if (unanswered.isNotEmpty()) {
+                            analysisStore?.recordCategoryFailures(unanswered, "AI did not return a valid category")
+                        }
                     }
                 }
 

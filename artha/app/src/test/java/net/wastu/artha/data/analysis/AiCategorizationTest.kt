@@ -233,7 +233,7 @@ class AiCategorizationTest {
             manualCategories = setOf(manual.key),
         )
         assertEquals(
-            setOf(unlabeled.key, failed.key),
+            setOf(unlabeled.key),
             AiCategorization.scopeKeys(RecategorizeScope.MonthPending(month), rows, snap),
         )
     }

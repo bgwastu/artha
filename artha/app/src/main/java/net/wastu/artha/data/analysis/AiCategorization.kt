@@ -159,9 +159,10 @@ object AiCategorization {
                     YearMonth.from(tx.occurredAt.atZone(net.wastu.artha.core.model.AccountingTime.zone)) == scope.month &&
                     // An "Uncategorized" answer from the model is an answer: it is reviewed if unsure, not re-sent forever.
                     // Labels copied from the same merchant carry no fingerprint, so needsLabel would flag them every time.
-                    (tx.key in snapshot.categoryFailures ||
-                        (snapshot.reasons[tx.key]?.startsWith(MERCHANT_REASON_PREFIX) != true &&
-                            needsLabel(CategoryCandidate(tx, fingerprint(tx, snapshot)), snapshot)))
+                    // Failed payments are surfaced by the review strip, not retried by the chip.
+                    tx.key !in snapshot.categoryFailures &&
+                    snapshot.reasons[tx.key]?.startsWith(MERCHANT_REASON_PREFIX) != true &&
+                    needsLabel(CategoryCandidate(tx, fingerprint(tx, snapshot)), snapshot)
             }.map { it.key }.toSet()
             is RecategorizeScope.New -> rows.filter { tx -> isNew(tx, snapshot) &&
                 YearMonth.from(tx.occurredAt.atZone(net.wastu.artha.core.model.AccountingTime.zone)) == scope.month
