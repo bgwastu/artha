@@ -251,6 +251,17 @@ class AiCategorizationTest {
     }
 
     @Test
+    fun monthPendingIgnoresPaymentsLabeledFromTheSameMerchant() {
+        val copied = payment
+        val snap = snapshot.copy(
+            categories = mapOf(copied.key to "Groceries"),
+            reasons = mapOf(copied.key to MERCHANT_REASON_PREFIX + "Indomaret"),
+            aiConfidence = mapOf(copied.key to CategoryConfidence.HIGH),
+        )
+        assertEquals(emptySet<String>(), AiCategorization.scopeKeys(RecategorizeScope.MonthPending(YearMonth.of(1970, 1)), listOf(copied), snap))
+    }
+
+    @Test
     fun scopeKeysNeverIncludeManualPicksExceptPaymentReplaceManual() {
         val manualTx = payment.copy(providerTransactionId = "m1", classificationIsManual = true, description = "Manual tx")
         val snapshotManual = snapshot.copy(
