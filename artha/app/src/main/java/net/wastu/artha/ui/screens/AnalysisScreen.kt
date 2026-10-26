@@ -7,6 +7,7 @@ import androidx.compose.ui.graphics.Color
 import net.wastu.artha.data.analysis.RecategorizeScope
 import net.wastu.artha.data.analysis.recategorizeLabel
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -57,6 +58,10 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import net.wastu.artha.core.model.Money
+import net.wastu.artha.ui.formatMoney
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -203,26 +208,60 @@ fun AnalysisScreen(
         return
     }
     val working = categoryProgress.state == CategoryAutomationState.WORKING
-    // Rows would jump on every saved label; hold the order until the run ends.
-    var runOrder by remember { mutableStateOf<List<String>?>(null) }
-    LaunchedEffect(working) { runOrder = if (working) analysis.categories.map { it.category } else null }
-    val categories = remember(analysis.categories, runOrder) {
-        runOrder?.let { order -> analysis.categories.sortedBy { order.indexOf(it.category).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE } }
-            ?: analysis.categories
-    }
+    val slices = remember(analysis) { SpendingChartLogic.categorySlices(analysis) }
+    var selectedSliceIndex by rememberSaveable(analysis.month) { mutableStateOf<Int?>(null) }
+    val total = slices.sumOf { it.amountMinor }.coerceAtLeast(1)
+    val canGoNext = selectedMonth < YearMonth.now(net.wastu.artha.core.model.AccountingTime.clock)
+
     LazyColumn(
         modifier = Modifier.widthIn(max = 720.dp).fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        item(key = "header_summary") {
-            MonthSummaryCard(
-                month = selectedMonth, analysis = analysis, editable = viewModel.analysisStore != null,
-                onOpenCategories = onOpenCategories, onOpenScope = { showScopeDialog = true },
-                onOpenChart = onOpenChart,
+        item(key = "month_header") {
+            MonthHeader(
+                month = selectedMonth,
+                editable = viewModel.analysisStore != null,
+                onOpenCategories = onOpenCategories,
                 onPreviousMonth = { viewModel.setAnalysisMonth(selectedMonth.minusMonths(1)) },
                 onNextMonth = { viewModel.setAnalysisMonth(selectedMonth.plusMonths(1)) },
             )
+        }
+        if (slices.isNotEmpty()) {
+            item(key = "chart") {
+                DonutChart(
+                    slices = slices,
+                    icons = snapshot.categoryIcons,
+                    selected = selectedSliceIndex,
+                    onSelect = { index -> selectedSliceIndex = if (selectedSliceIndex == index) null else index },
+                    onOpenCategory = { slice ->
+                        viewModel.openCategoryTransactions(slice.name, slice.categories)
+                    },
+                    total = total,
+                    totalDeltaPercent = analysis.totalDeltaPercent,
+                    canGoNext = canGoNext,
+                    onOpenScope = { showScopeDialog = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .height(260.dp),
+                )
+            }
+        } else {
+            item(key = "empty_spending") {
+                Surface(
+                    onClick = { showScopeDialog = true },
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                ) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(if (canGoNext) "Spending" else "Spending to date", style = MaterialTheme.typography.labelMedium)
+                        Text("Rp0", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                        Text("No confirmed spending this month", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
         }
         item(key = "category_header") {
             Column(
@@ -241,9 +280,6 @@ fun AnalysisScreen(
                         modifier = Modifier.semantics { heading() },
                     )
                     Spacer(Modifier.weight(1f))
-                    IconButton(onClick = onOpenChart, modifier = Modifier.size(40.dp)) {
-                        Icon(Icons.Outlined.PieChart, contentDescription = "Spending chart")
-                    }
                     AssistChip(
                         onClick = {
                             when {
@@ -295,11 +331,40 @@ fun AnalysisScreen(
                 }
             }
         }
-        if (analysis.categories.isEmpty()) item(key = "empty_categories") {
-            Text("No confirmed spending this month", style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } else items(categories, key = { it.category }) { category ->
-            CategorySpendingRow(category, snapshot.categoryIcons, selectedMonth, viewModel::openCategoryTransactions, viewModel::recategorize, viewModel::recategorizeCount)
+        if (slices.isEmpty()) {
+            item(key = "empty_categories") {
+                Text(
+                    "No confirmed spending this month",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(vertical = 16.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            items(slices.size, key = { slices[it].name }) { index ->
+                val slice = slices[index]
+                val isSelected = selectedSliceIndex == index
+                val color = sliceColor(index, slice.isOther)
+                CategorySliceRow(
+                    slice = slice,
+                    color = color,
+                    categoryIcons = snapshot.categoryIcons,
+                    isSelected = isSelected,
+                    selectedMonth = selectedMonth,
+                    onSelect = {
+                        if (selectedSliceIndex == index) {
+                            viewModel.openCategoryTransactions(slice.name, slice.categories)
+                        } else {
+                            selectedSliceIndex = index
+                        }
+                    },
+                    onOpenCategory = {
+                        viewModel.openCategoryTransactions(slice.name, slice.categories)
+                    },
+                    onRecategorize = viewModel::recategorize,
+                    onRecategorizeCount = viewModel::recategorizeCount,
+                )
+            }
         }
     }
     if (showRecategorizeMonth) {
@@ -323,50 +388,39 @@ fun AnalysisScreen(
 }
 
 @Composable
-private fun MonthSummaryCard(
-    month: YearMonth, analysis: MonthSpendingAnalysis, editable: Boolean = true,
-    onOpenCategories: () -> Unit, onOpenScope: () -> Unit,
-    onOpenChart: () -> Unit,
-    onPreviousMonth: () -> Unit, onNextMonth: () -> Unit,
+private fun MonthHeader(
+    month: YearMonth,
+    editable: Boolean = true,
+    onOpenCategories: () -> Unit,
+    onPreviousMonth: () -> Unit,
+    onNextMonth: () -> Unit,
 ) {
     val monthTitle = remember(month) { month.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)) }
     val canGoNext = month < YearMonth.now(net.wastu.artha.core.model.AccountingTime.clock)
     var showMenu by remember { mutableStateOf(false) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
-    Column(Modifier.fillMaxWidth().pointerInput(month, canGoNext) {
-        detectHorizontalDragGestures(onHorizontalDrag = { _, amount -> dragOffset += amount },
-            onDragEnd = {
-                if (dragOffset < -60f && canGoNext) onNextMonth() else if (dragOffset > 60f) onPreviousMonth()
-                dragOffset = 0f
-            }, onDragCancel = { dragOffset = 0f })
-    }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onPreviousMonth) { Icon(Icons.Default.ChevronLeft, "Previous month") }
-            Text(monthTitle, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
-            IconButton(onClick = onNextMonth, enabled = canGoNext) { Icon(Icons.Default.ChevronRight, "Next month") }
-            Box {
-                IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Month options") }
-                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                    DropdownMenuItem(text = { Text("Chart") }, onClick = { showMenu = false; onOpenChart() })
-                    DropdownMenuItem(enabled = editable, text = { Text("Manage categories") }, onClick = { showMenu = false; onOpenCategories() })
-                }
-            }
-        }
-        Surface(onClick = onOpenScope, color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Spending total. What counts in spending" }) {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(if (canGoNext) "Spending" else "Spending to date", style = MaterialTheme.typography.labelMedium)
-                }
-                Text(formatAmountMinor(analysis.totalPersonalSpendingMinor), style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                if (!canGoNext && analysis.previousMonthTotalMinor > 0) {
-                    Text("Previous full month ${formatAmountMinor(analysis.previousMonthTotalMinor)}",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else if (canGoNext) analysis.totalDeltaPercent?.let { delta ->
-                    Text("${kotlin.math.abs(delta).toInt()}% ${if (delta < 0) "less" else "more"} than previous month",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(month, canGoNext) {
+                detectHorizontalDragGestures(
+                    onHorizontalDrag = { _, amount -> dragOffset += amount },
+                    onDragEnd = {
+                        if (dragOffset < -60f && canGoNext) onNextMonth() else if (dragOffset > 60f) onPreviousMonth()
+                        dragOffset = 0f
+                    },
+                    onDragCancel = { dragOffset = 0f },
+                )
+            },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onPreviousMonth) { Icon(Icons.Default.ChevronLeft, "Previous month") }
+        Text(monthTitle, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+        IconButton(onClick = onNextMonth, enabled = canGoNext) { Icon(Icons.Default.ChevronRight, "Next month") }
+        Box {
+            IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Month options") }
+            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                DropdownMenuItem(enabled = editable, text = { Text("Manage categories") }, onClick = { showMenu = false; onOpenCategories() })
             }
         }
     }
@@ -377,55 +431,79 @@ internal object AiCardLogic {
         if (total > 0) (labeled.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0f
 }
 
-@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CategorySpendingRow(
-    category: CategorySpending,
+private fun CategorySliceRow(
+    slice: SpendingChartLogic.Slice,
+    color: Color,
     categoryIcons: Map<String, String>,
+    isSelected: Boolean,
     selectedMonth: YearMonth,
-    onOpenCategory: (String) -> Unit,
+    onSelect: () -> Unit,
+    onOpenCategory: () -> Unit,
     onRecategorize: (RecategorizeScope) -> Unit,
     onRecategorizeCount: (RecategorizeScope) -> Int = { 0 },
 ) {
-    val fontScale = LocalDensity.current.fontScale
     var showMenu by remember { mutableStateOf(false) }
     var showConfirmDialog by remember { mutableStateOf(false) }
-    val scope = remember(category.category, selectedMonth) {
-        RecategorizeScope.CategoryInMonth(category.category, selectedMonth)
+    val scope = remember(slice.name, selectedMonth) {
+        RecategorizeScope.CategoryInMonth(slice.name, selectedMonth)
     }
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val stackAmount = fontScale > 1.3f || maxWidth < 280.dp
-        Box {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .combinedClickable(
-                        onClick = { onOpenCategory(category.category) },
-                        onLongClick = { showMenu = true },
-                        onClickLabel = "Open category payments",
-                    )
-                    .padding(vertical = 10.dp, horizontal = 4.dp),
-                verticalAlignment = if (stackAmount) Alignment.Top else Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Icon(categoryIconFor(category.category, categoryIcons), null,
-                    Modifier.padding(top = if (stackAmount) 2.dp else 0.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(category.category)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Text("${category.sharePercent.toInt()}%", style = MaterialTheme.typography.bodySmall)
-                        Text("${category.transactions.size} ${if (category.transactions.size == 1) "payment" else "payments"}", style = MaterialTheme.typography.bodySmall)
-                    }
-                    if (stackAmount) Text(formatAmountMinor(category.amountMinor), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                }
-                if (!stackAmount) {
-                    Text(formatAmountMinor(category.amountMinor), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                }
-            }
+    Box(Modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .combinedClickable(
+                    onClick = onSelect,
+                    onLongClick = {
+                        if (!slice.isOther) showMenu = true else onOpenCategory()
+                    },
+                    onClickLabel = "Select category",
+                    onLongClickLabel = "Options for ${slice.name}",
+                )
+                .background(
+                    if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh
+                    else Color.Transparent,
+                )
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        ) {
+            Box(
+                Modifier
+                    .size(10.dp)
+                    .background(color, CircleShape),
+            )
+            Icon(categoryIconFor(slice.name, categoryIcons), contentDescription = null)
+            Text(
+                slice.name,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "${slice.percent}%",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                formatMoney(Money(slice.amountMinor)),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        if (!slice.isOther) {
             DropdownMenu(
                 expanded = showMenu,
                 onDismissRequest = { showMenu = false },
             ) {
+                DropdownMenuItem(
+                    text = { Text("View expenses") },
+                    onClick = {
+                        showMenu = false
+                        onOpenCategory()
+                    },
+                )
                 DropdownMenuItem(
                     text = { Text(recategorizeLabel(scope)) },
                     onClick = {

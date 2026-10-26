@@ -129,13 +129,6 @@ fun HomeScreen(
         prefs.edit().putBoolean("show_ai_categories", showAiCategories).apply()
     }
 
-    val initialShowChart = remember { prefs.getBoolean("show_spending_chart", false) }
-    var showSpendingChart by rememberSaveable { mutableStateOf(initialShowChart) }
-    androidx.compose.runtime.LaunchedEffect(showSpendingChart) {
-        prefs.edit().putBoolean("show_spending_chart", showSpendingChart).apply()
-    }
-
-    var categoryDrillFromChart by rememberSaveable { mutableStateOf(false) }
     val snackbarHost = remember { androidx.compose.material3.SnackbarHostState() }
     val importFeedback by viewModel?.importFeedback?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val automaticImport by viewModel?.automaticImportActive?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
@@ -165,18 +158,11 @@ fun HomeScreen(
             viewModel?.setTargetDestination(null)
         }
     }
-    androidx.compose.runtime.LaunchedEffect(categoryFilter) {
-        if (categoryFilter == null) {
-            categoryDrillFromChart = false
-        }
-    }
-
     BackHandler(
         enabled = destination != Destination.TRANSACTIONS &&
             selectedKey == null &&
             !showAiCategories &&
             !showCategoryReview &&
-            !showSpendingChart &&
             !showSearch &&
             !showFilter
     ) {
@@ -184,15 +170,7 @@ fun HomeScreen(
     }
 
     BackHandler(enabled = destination == Destination.TRANSACTIONS && categoryFilter != null && selectedKey == null && !showSearch && !showFilter) {
-        if (categoryDrillFromChart) {
-            categoryDrillFromChart = false
-            showSpendingChart = true
-        }
         viewModel?.closeCategoryTransactions()
-    }
-
-    BackHandler(enabled = showSpendingChart) {
-        showSpendingChart = false
     }
 
     BackHandler(enabled = showCategoryReview) {
@@ -223,15 +201,11 @@ fun HomeScreen(
                     navigationIcon = {
                         if (destination == Destination.TRANSACTIONS && categoryFilter != null) {
                             IconButton(onClick = {
-                                if (categoryDrillFromChart) {
-                                    categoryDrillFromChart = false
-                                    showSpendingChart = true
-                                }
                                 viewModel?.closeCategoryTransactions()
                             }) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = if (categoryDrillFromChart) "Back to Chart" else "Back to Analysis",
+                                    contentDescription = "Back to Analysis",
                                 )
                             }
                         }
@@ -352,7 +326,6 @@ fun HomeScreen(
                                         viewModel = viewModel,
                                         onOpenTransaction = { selectedKey = it.key; selectedFallback = it },
                                         onOpenCategories = { aiScrollToCategories = true; showAiCategories = true },
-                                        onOpenChart = { showSpendingChart = true },
                                         onOpenCategoryReview = { showCategoryReview = true },
                                         onOpenAiCategories = { aiScrollToCategories = false; showAiCategories = true },
                                     )
@@ -399,19 +372,6 @@ fun HomeScreen(
                     onBack = { showAiCategories = false },
                     onOpenReview = { showCategoryReview = true },
                     scrollToCategories = aiScrollToCategories,
-                )
-            }
-        }
-        if (showSpendingChart && viewModel != null) {
-            Surface(Modifier.fillMaxSize()) {
-                SpendingChartScreen(
-                    viewModel = viewModel,
-                    onBack = { showSpendingChart = false },
-                    onOpenCategory = { slice ->
-                        categoryDrillFromChart = true
-                        viewModel.openCategoryTransactions(slice.name, slice.categories)
-                        showSpendingChart = false
-                    },
                 )
             }
         }

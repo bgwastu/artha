@@ -7,6 +7,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -143,7 +144,7 @@ object SpendingChartLogic {
  * Categorical palette: distinct hues for at-a-glance slice identification, mid-tones so it
  * reads on both surfaces. "Others" gets a muted neutral tone.
  */
-private fun sliceColor(index: Int, isOther: Boolean = false) = Color(
+internal fun sliceColor(index: Int, isOther: Boolean = false) = Color(
     if (isOther) {
         0xFF9CA3AF
     } else {
@@ -310,13 +311,16 @@ private data class DonutSlice(
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DonutChart(
+internal fun DonutChart(
     slices: List<SpendingChartLogic.Slice>,
     icons: Map<String, String>,
     selected: Int?,
     onSelect: (Int?) -> Unit,
     onOpenCategory: (SpendingChartLogic.Slice) -> Unit,
     total: Long,
+    totalDeltaPercent: Float? = null,
+    canGoNext: Boolean = true,
+    onOpenScope: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val items = remember(slices) {
@@ -462,7 +466,7 @@ private fun DonutChart(
                                 onClickLabel = "Filter transactions",
                             )
                         } else {
-                            Modifier
+                            Modifier.clickable(onClick = onOpenScope, onClickLabel = "What counts in spending")
                         }
                     )
                     .padding(horizontal = 8.dp, vertical = 4.dp),
@@ -497,7 +501,7 @@ private fun DonutChart(
                     )
                 } else {
                     Text(
-                        "Total",
+                        if (canGoNext) "Spending" else "Spending to date",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -506,6 +510,17 @@ private fun DonutChart(
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                     )
+                    if (totalDeltaPercent != null) {
+                        val delta = totalDeltaPercent.toInt()
+                        val deltaText = "${kotlin.math.abs(delta)}% ${if (delta < 0) "less" else "more"} than previous month"
+                        Text(
+                            deltaText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         }
