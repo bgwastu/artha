@@ -50,7 +50,7 @@ class ViewModelBehaviorTest {
         amount: Long = 50000,
         manual: Boolean = false,
         instant: Instant = baseInstant,
-        description: String = "Store",
+        description: String = "Store $id",
         category: String? = null,
     ) = UnifiedTransaction(
         Provider.JAGO,
@@ -185,10 +185,13 @@ class ViewModelBehaviorTest {
 
     @Test
     fun retryOfChangedButNotNewPaymentRunsOnceAndGoesIdle() = runTest(dispatcher) {
-        val prefs = FixturePreferences(configuredPrefs())
+        // The one-shot fingerprint repair already ran; otherwise it would accept the changed note as current.
+        val prefs = FixturePreferences(configuredPrefs() + ("ai_fingerprint_version" to "1"))
         val store = AnalysisStore(prefs.context)
         val p1 = testPayment("p1")
-        store.setClassification(p1.key, "Groceries", "AI suggestion: Food", manual = false)
+        val labeled = store.snapshot.value
+        store.commitCategorySuggestions(listOf(CategoryCandidate(p1, AiCategorization.fingerprint(p1, labeled))),
+            mapOf(p1.key to CategorySuggestion("Groceries", "AI suggestion: Food")), labeled)
         store.setUserNote(p1.key, "Changed evidence") // needs a label again, but is not new
         val calls = AtomicInteger(0)
         val model = ArthaViewModel(RootAccess { true }, { ledger }, clock = fixedClock, analysisStore = store,
@@ -279,7 +282,7 @@ class ViewModelBehaviorTest {
     fun queuedKeysAndActiveKeysPublishedAndCategoryActivityMirrorsThem() = runTest(dispatcher) {
         val prefs = FixturePreferences(configuredPrefs())
         val store = AnalysisStore(prefs.context)
-        val rows = (1..20).map { testPayment("tx-$it") }
+        val rows = (1..40).map { testPayment("tx-$it") }
         val state = MutableStateFlow(readySpending(rows))
 
         val gate = CompletableDeferred<Unit>()
@@ -300,9 +303,9 @@ class ViewModelBehaviorTest {
         model.enterForeground()
         val inFlightProgress = model.categoryProgress.first { it.activeKeys.isNotEmpty() }
 
-        // MAX_BATCH is 8, 2 concurrent batches in flight = 16 active, and 4 queued
-        assertEquals(16, inFlightProgress.activeKeys.size)
-        assertEquals(4, inFlightProgress.queuedKeys.size)
+        // MAX_BATCH is 8, 4 concurrent batches in flight = 32 active, and 8 queued
+        assertEquals(32, inFlightProgress.activeKeys.size)
+        assertEquals(8, inFlightProgress.queuedKeys.size)
         assertEquals(inFlightProgress.activeKeys + inFlightProgress.queuedKeys, CategoryActivity.keys.value)
 
         // Check paymentCategoryState helper
@@ -316,7 +319,7 @@ class ViewModelBehaviorTest {
         gate.complete(Unit)
         advanceUntilIdle()
 
-        val readyProgress = model.categoryProgress.first { it.state == CategoryAutomationState.READY && it.labeled == 20 }
+        val readyProgress = model.categoryProgress.first { it.state == CategoryAutomationState.READY && it.labeled == 40 }
         assertTrue(readyProgress.activeKeys.isEmpty())
         assertTrue(readyProgress.queuedKeys.isEmpty())
         assertTrue(CategoryActivity.keys.value.isEmpty())

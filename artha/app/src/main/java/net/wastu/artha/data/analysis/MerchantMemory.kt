@@ -103,7 +103,6 @@ object MerchantMemory {
                 return CategorySuggestion(
                     category = category,
                     reason = MERCHANT_REASON_PREFIX + "Same as earlier $display payments",
-                    confidence = CategoryConfidence.HIGH,
                     merchantConsistent = true,
                 )
             }
@@ -114,6 +113,7 @@ object MerchantMemory {
             !peer.classificationIsManual &&
                 peer.key !in snapshot.manualCategories &&
                 peer.key in snapshot.aiMerchantConsistent &&
+                !needsReview(peer, snapshot) &&
                 (snapshot.reasons[peer.key]?.startsWith(AI_REASON_PREFIX) == true || (snapshot.reasons[peer.key] == null && peer.aiReasoning?.startsWith(AI_REASON_PREFIX) == true))
         }
 
@@ -129,7 +129,6 @@ object MerchantMemory {
                 return CategorySuggestion(
                     category = distinctCategories.single(),
                     reason = MERCHANT_REASON_PREFIX + "Same as earlier $display payments",
-                    confidence = CategoryConfidence.HIGH,
                     merchantConsistent = true,
                 )
             }

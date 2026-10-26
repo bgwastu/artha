@@ -73,6 +73,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import net.wastu.artha.core.model.AccountingTime
 import net.wastu.artha.core.model.UnifiedTransaction
@@ -277,6 +278,8 @@ fun CategoryReviewScreen(
     val categoryProgress by viewModel.categoryProgress.collectAsStateWithLifecycle()
 
     val initialQueueState = produceState<List<ReviewItem>?>(initialValue = null) {
+        // A restored screen opens before the saved ledger loads; an empty first read would freeze an empty queue.
+        viewModel.ledgerState.first { it !is net.wastu.artha.ui.LedgerState.Loading }
         value = withContext(Dispatchers.Default) {
             val rows = viewModel.allTransactions.value
             val initialSnapshot = viewModel.analysisSnapshot.value
@@ -468,7 +471,7 @@ fun CategoryReviewScreen(
                                         }
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                                         ) {
                                             Text(
                                                 text = item.amountText,
@@ -477,38 +480,27 @@ fun CategoryReviewScreen(
                                                 color = MaterialTheme.colorScheme.onSurface,
                                             )
                                             Text(
-                                                text = "•",
-                                                color = MaterialTheme.colorScheme.outline,
-                                            )
-                                            Text(
                                                 text = item.dateText,
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
                                         }
                                         if (!item.reason.isNullOrBlank()) {
-                                            Surface(
-                                                shape = RoundedCornerShape(8.dp),
-                                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                                            Row(
                                                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                             ) {
-                                                Row(
-                                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                                ) {
-                                                    Icon(
-                                                        Icons.Outlined.AutoAwesome,
-                                                        contentDescription = null,
-                                                        tint = MaterialTheme.colorScheme.secondary,
-                                                        modifier = Modifier.size(16.dp),
-                                                    )
-                                                    Text(
-                                                        text = item.reason,
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                                    )
-                                                }
+                                                Icon(
+                                                    Icons.Outlined.AutoAwesome,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(18.dp).padding(top = 2.dp),
+                                                )
+                                                Text(
+                                                    text = item.reason,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                )
                                             }
                                         }
                                     }
@@ -560,7 +552,8 @@ fun CategoryReviewScreen(
                                                         fontWeight = if (isAiSelected) FontWeight.SemiBold else FontWeight.Normal,
                                                     )
                                                     Text(
-                                                        text = "AI suggestion",
+                                                        text = snapshot.aiRecords[item.tx.key]?.confidence
+                                                            ?.let { "AI suggestion, $it% sure" } ?: "AI suggestion",
                                                         style = MaterialTheme.typography.labelSmall,
                                                         color = MaterialTheme.colorScheme.primary,
                                                     )

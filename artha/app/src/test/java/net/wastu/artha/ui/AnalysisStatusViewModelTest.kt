@@ -95,7 +95,7 @@ class AnalysisStatusViewModelTest {
         // Label p1 with AI fingerprint and reason prefix
         val fp1 = AiCategorization.fingerprint(p1, snapshot)
         snapshot = snapshot.copy(
-            aiCategoryFingerprints = mapOf(p1.key to fp1),
+            aiRecords = aiRecords(fingerprints = mapOf(p1.key to fp1)),
             reasons = mapOf(p1.key to "AI suggestion: Groceries"),
         )
         val progressAfterOne = AiCategorization.progress(rows, snapshot)

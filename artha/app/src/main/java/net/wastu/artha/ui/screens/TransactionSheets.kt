@@ -69,7 +69,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.Info
 import net.wastu.artha.data.analysis.categoryReasonText
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.listSaver
@@ -323,7 +322,6 @@ private fun TransactionDetailsBody(
     val showCounterpart = counterpart != null && !humanTitle.contains(counterpart, ignoreCase = true)
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    var showWhyDialog by remember(record.key) { mutableStateOf(false) }
     var showReplaceManualDialog by remember(record.key) { mutableStateOf(false) }
 
     Box(Modifier.fillMaxWidth()) {
@@ -450,13 +448,13 @@ private fun TransactionDetailsBody(
                                         Text("Set by you", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     })
                                     CategorySource.AI -> ({
-                                        Text("Suggested by AI", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(sureText("Suggested by AI", snapshot?.aiRecords?.get(record.key)?.confidence), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     })
                                     CategorySource.MERCHANT -> ({
                                         Text("Same merchant", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     })
                                     CategorySource.REVIEW -> ({
-                                        Text("Needs review", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+                                        Text(sureText("Needs review", snapshot?.aiRecords?.get(record.key)?.confidence), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
                                     })
                                     CategorySource.FAILED -> ({
                                         Text("Couldn't categorize", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -475,21 +473,19 @@ private fun TransactionDetailsBody(
                             }
                             if (snapshot?.analysisEnabled == true) {
                                 val reason = categoryReasonText(snapshot, record.key)
+                                if (reason != null && !isBusy) Text(
+                                    reason,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 4,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(start = 36.dp),
+                                )
                                 FlowRow(
                                     modifier = Modifier.padding(start = 36.dp),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    if (reason != null) {
-                                        AssistChip(
-                                            onClick = { showWhyDialog = true },
-                                            enabled = !isBusy,
-                                            label = { Text("Why") },
-                                            leadingIcon = {
-                                                Icon(Icons.Outlined.Info, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize))
-                                            },
-                                        )
-                                    }
                                     AssistChip(
                                         onClick = {
                                             if (categorySource == CategorySource.MANUAL) {
@@ -529,18 +525,6 @@ private fun TransactionDetailsBody(
                                             },
                                         )
                                     }
-                                }
-                                if (showWhyDialog && reason != null) {
-                                    AlertDialog(
-                                        onDismissRequest = { showWhyDialog = false },
-                                        title = { Text("Why $currentCategory") },
-                                        text = { Text(reason) },
-                                        confirmButton = {
-                                            TextButton(onClick = { showWhyDialog = false }) {
-                                                Text("Close")
-                                            }
-                                        },
-                                    )
                                 }
                                 if (showReplaceManualDialog) {
                                     AlertDialog(
@@ -1117,3 +1101,5 @@ internal fun paymentNoteRowSupporting(state: PaymentCategoryState): String? =
 
 internal fun canEditTransaction(state: PaymentCategoryState, hasStore: Boolean): Boolean =
     hasStore && state == PaymentCategoryState.IDLE
+
+private fun sureText(label: String, percent: Int?): String = if (percent == null) label else "$label, $percent% sure"

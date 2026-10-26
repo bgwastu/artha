@@ -46,9 +46,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AssistChip
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.DonutLarge
-import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
+import androidx.compose.material.icons.outlined.PieChart
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Clear
@@ -204,7 +202,14 @@ fun AnalysisScreen(
         }
         return
     }
-    val largest = remember(analysis.categories) { analysis.categories.flatMap { it.transactions }.maxByOrNull { it.money.amountMinor } }
+    val working = categoryProgress.state == CategoryAutomationState.WORKING
+    // Rows would jump on every saved label; hold the order until the run ends.
+    var runOrder by remember { mutableStateOf<List<String>?>(null) }
+    LaunchedEffect(working) { runOrder = if (working) analysis.categories.map { it.category } else null }
+    val categories = remember(analysis.categories, runOrder) {
+        runOrder?.let { order -> analysis.categories.sortedBy { order.indexOf(it.category).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE } }
+            ?: analysis.categories
+    }
     LazyColumn(
         modifier = Modifier.widthIn(max = 720.dp).fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
@@ -215,7 +220,6 @@ fun AnalysisScreen(
                 month = selectedMonth, analysis = analysis, editable = viewModel.analysisStore != null,
                 onOpenCategories = onOpenCategories, onOpenScope = { showScopeDialog = true },
                 onOpenChart = onOpenChart,
-                onOpenLargestPayment = largest?.let { { onOpenTransaction(it) } },
                 onPreviousMonth = { viewModel.setAnalysisMonth(selectedMonth.minusMonths(1)) },
                 onNextMonth = { viewModel.setAnalysisMonth(selectedMonth.plusMonths(1)) },
             )
@@ -237,11 +241,9 @@ fun AnalysisScreen(
                         modifier = Modifier.semantics { heading() },
                     )
                     Spacer(Modifier.weight(1f))
-                    // Badge on the icon inside the button, so it sits within the button's bounds.
                     IconButton(onClick = onOpenChart, modifier = Modifier.size(40.dp)) {
-                        Icon(Icons.Outlined.DonutLarge, contentDescription = "Spending chart")
+                        Icon(Icons.Outlined.PieChart, contentDescription = "Spending chart")
                     }
-                    val working = categoryProgress.state == CategoryAutomationState.WORKING
                     AssistChip(
                         onClick = {
                             when {
@@ -251,12 +253,15 @@ fun AnalysisScreen(
                                 else -> showRecategorizeMonth = true
                             }
                         },
-                        label = { Text(if (working) "Stop" else if (pendingCount > 0) "Categorize $pendingCount" else "Categorize") },
+                        label = {
+                            Text(when {
+                                working -> "Stop"
+                                !aiConfigured || pendingCount > 0 -> if (pendingCount > 0) "Categorize $pendingCount" else "Categorize"
+                                else -> "Re-categorize"
+                            })
+                        },
                         leadingIcon = {
-                            if (working) Icon(Icons.Default.Stop, null, Modifier.size(18.dp))
-                            else BadgedBox(badge = { if (attention.total > 0) Badge() }) {
-                                Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp))
-                            }
+                            Icon(if (working) Icons.Default.Stop else Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp))
                         },
                     )
                 }
@@ -293,7 +298,7 @@ fun AnalysisScreen(
         if (analysis.categories.isEmpty()) item(key = "empty_categories") {
             Text("No confirmed spending this month", style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } else items(analysis.categories, key = { it.category }) { category ->
+        } else items(categories, key = { it.category }) { category ->
             CategorySpendingRow(category, snapshot.categoryIcons, selectedMonth, viewModel::openCategoryTransactions, viewModel::recategorize, viewModel::recategorizeCount)
         }
     }
@@ -321,7 +326,7 @@ fun AnalysisScreen(
 private fun MonthSummaryCard(
     month: YearMonth, analysis: MonthSpendingAnalysis, editable: Boolean = true,
     onOpenCategories: () -> Unit, onOpenScope: () -> Unit,
-    onOpenChart: () -> Unit, onOpenLargestPayment: (() -> Unit)?,
+    onOpenChart: () -> Unit,
     onPreviousMonth: () -> Unit, onNextMonth: () -> Unit,
 ) {
     val monthTitle = remember(month) { month.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)) }
@@ -343,11 +348,7 @@ private fun MonthSummaryCard(
                 IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Month options") }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(text = { Text("Chart") }, onClick = { showMenu = false; onOpenChart() })
-                    onOpenLargestPayment?.let { open ->
-                        DropdownMenuItem(text = { Text("Largest payment") }, onClick = { showMenu = false; open() })
-                    }
                     DropdownMenuItem(enabled = editable, text = { Text("Manage categories") }, onClick = { showMenu = false; onOpenCategories() })
-                    DropdownMenuItem(text = { Text("Spending scope") }, onClick = { showMenu = false; onOpenScope() })
                 }
             }
         }

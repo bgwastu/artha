@@ -2,7 +2,17 @@ package net.wastu.artha.data.analysis
 
 import java.time.YearMonth
 
-enum class CategoryConfidence { HIGH, MEDIUM, LOW }
+enum class CategoryConfidence {
+    HIGH, MEDIUM, LOW;
+
+    companion object {
+        fun of(percent: Int): CategoryConfidence = when {
+            percent <= TRUSTED_ABOVE_PERCENT -> LOW
+            percent < HIGH_CONFIDENCE_PERCENT -> MEDIUM
+            else -> HIGH
+        }
+    }
+}
 
 /** Reason prefixes stored in AnalysisSnapshot.reasons; they identify where a non-manual category came from. */
 const val AI_REASON_PREFIX = "AI suggestion: "
@@ -20,6 +30,8 @@ sealed interface RecategorizeScope {
     data class New(val month: YearMonth) : RecategorizeScope
     /** What a month still needs: unlabeled, stale or failed payments. Low-confidence picks stay in review. */
     data class MonthPending(val month: YearMonth) : RecategorizeScope
+    /** [MonthPending] across every month: categorizes saved history. */
+    data object AllPending : RecategorizeScope
 }
 
 fun recategorizeLabel(scope: RecategorizeScope): String = when (scope) {
@@ -31,6 +43,7 @@ fun recategorizeLabel(scope: RecategorizeScope): String = when (scope) {
     RecategorizeScope.All -> "Re-categorize all"
     is RecategorizeScope.New -> "Categorize new payments"
     is RecategorizeScope.MonthPending -> "Categorize this month"
+    RecategorizeScope.AllPending -> "Categorize all history"
 }
 
 /** Confirmation text for runs that relabel many payments; null when no confirmation is needed. */
@@ -39,6 +52,7 @@ fun recategorizeConfirmation(scope: RecategorizeScope, count: Int, monthLabel: S
     is RecategorizeScope.CategoryInMonth -> "Re-categorize $count ${scope.category} payments? Your own picks stay the same."
     RecategorizeScope.Uncategorized -> "Re-categorize $count Uncategorized payments? Your own picks stay the same."
     RecategorizeScope.All -> "Re-categorize all $count payments? Your own picks stay the same."
+    RecategorizeScope.AllPending -> "Categorize $count payments from all months? Your own picks stay the same."
     is RecategorizeScope.Payment, RecategorizeScope.NeedsReview, is RecategorizeScope.New, is RecategorizeScope.MonthPending -> null
 }
 

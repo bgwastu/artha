@@ -1,6 +1,7 @@
 package net.wastu.artha.ui
 
 import java.time.Instant
+import net.wastu.artha.data.analysis.aiRecords
 import java.time.LocalDate
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Money
@@ -60,11 +61,10 @@ class CategoryReviewLogicTest {
         val txCredit = sampleTx("tx_credit", description = "Salary", direction = Direction.CREDIT)
 
         val snapshot = baseSnapshot.copy(
-            aiConfidence = mapOf(
+            aiRecords = aiRecords(confidence = mapOf(
                 txReview.key to CategoryConfidence.LOW,
                 txAi.key to CategoryConfidence.HIGH,
-            ),
-            categoryFailures = mapOf(txFailed.key to "Could not determine category"),
+            ), failures = mapOf(txFailed.key to "Could not determine category")),
             categories = mapOf(
                 txReview.key to "Dining Out",
                 txAi.key to "Groceries",
@@ -94,12 +94,11 @@ class CategoryReviewLogicTest {
         val february = sampleTx("f", occurredAt = Instant.parse("2026-02-10T10:00:00Z"))
         val medium = sampleTx("md", occurredAt = Instant.parse("2026-03-12T10:00:00Z"))
         val snapshot = baseSnapshot.copy(
-            aiConfidence = mapOf(
+            aiRecords = aiRecords(confidence = mapOf(
                 march.key to CategoryConfidence.LOW,
                 february.key to CategoryConfidence.LOW,
                 medium.key to CategoryConfidence.MEDIUM,
-            ),
-            categoryFailures = mapOf(marchFailed.key to "No answer"),
+            ), failures = mapOf(marchFailed.key to "No answer")),
         )
         val rows = listOf(march, marchFailed, february, medium)
         val ym = java.time.YearMonth.of(2026, 3)
@@ -118,12 +117,12 @@ class CategoryReviewLogicTest {
         val txNormal = sampleTx("tx_normal", description = "Normal Merchant")
 
         val snapshot = baseSnapshot.copy(
-            aiConfidence = mapOf(
+            aiRecords = aiRecords(confidence = mapOf(
                 txBusy.key to CategoryConfidence.LOW,
                 txManualField.key to CategoryConfidence.LOW,
                 txManualSnapshot.key to CategoryConfidence.LOW,
                 txNormal.key to CategoryConfidence.LOW,
-            ),
+            )),
             manualCategories = setOf(txManualSnapshot.key),
         )
 
@@ -145,11 +144,11 @@ class CategoryReviewLogicTest {
         val txNew = sampleTx("tx_new", description = "M3", occurredAt = Instant.parse("2026-03-01T15:00:00Z"))
 
         val snapshot = baseSnapshot.copy(
-            aiConfidence = mapOf(
+            aiRecords = aiRecords(confidence = mapOf(
                 txOld.key to CategoryConfidence.LOW,
                 txMid.key to CategoryConfidence.LOW,
                 txNew.key to CategoryConfidence.LOW,
-            ),
+            )),
         )
 
         // Pass in random order
@@ -192,7 +191,7 @@ class CategoryReviewLogicTest {
         val other2 = sampleTx("o2", description = "Other 2")
 
         val snapshot = baseSnapshot.copy(
-            aiConfidence = mapOf(currentTx.key to CategoryConfidence.LOW),
+            aiRecords = aiRecords(confidence = mapOf(currentTx.key to CategoryConfidence.LOW)),
             categories = mapOf(
                 currentTx.key to "Dining Out", // Current aiCategory
                 peer1.key to "Coffee",
@@ -250,13 +249,13 @@ class CategoryReviewLogicTest {
         )
 
         val snapshot = baseSnapshot.copy(
-            aiConfidence = mapOf(
+            aiRecords = aiRecords(confidence = mapOf(
                 txA1.key to CategoryConfidence.LOW,
                 txA2.key to CategoryConfidence.LOW,
                 txA3.key to CategoryConfidence.LOW,
                 txB1.key to CategoryConfidence.LOW,
                 txA4Confident.key to CategoryConfidence.HIGH,
-            ),
+            )),
         )
 
         val queue = buildReviewQueue(
@@ -312,9 +311,8 @@ class CategoryReviewLogicTest {
         }
 
         val snapshot = baseSnapshot.copy(
-            aiConfidence = confidences,
+            aiRecords = aiRecords(confidence = confidences, failures = failures),
             categories = txCategories,
-            categoryFailures = failures,
         )
 
         val start = System.nanoTime()
@@ -341,7 +339,7 @@ class CategoryReviewLogicTest {
             aiReasoning = "${AI_REASON_PREFIX}Coffee shop detected",
         )
         val snapshot = baseSnapshot.copy(
-            aiConfidence = mapOf(tx.key to CategoryConfidence.LOW),
+            aiRecords = aiRecords(confidence = mapOf(tx.key to CategoryConfidence.LOW)),
             categories = mapOf(tx.key to "Coffee"),
             reasons = mapOf(tx.key to "${AI_REASON_PREFIX}Coffee shop detected"),
         )

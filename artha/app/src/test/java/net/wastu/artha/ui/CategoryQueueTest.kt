@@ -40,7 +40,7 @@ class CategoryQueueTest {
         amount: Long = 50000,
         manual: Boolean = false,
         instant: Instant = baseInstant,
-        description: String = "Starbucks",
+        description: String = "Starbucks $id",
         category: String? = null,
         direction: Direction = Direction.DEBIT,
     ) = UnifiedTransaction(
@@ -143,11 +143,79 @@ class CategoryQueueTest {
     }
 
     @Test
-    fun maxTwoBatchesConcurrent() = runTest(dispatcher) {
+    fun aMerchantIsAskedOnceAndItsConfidentAnswerCopiedToItsOtherPayments() = runTest(dispatcher) {
+        val store = AnalysisStore(FixturePreferences(configuredPrefs()).context)
+        val shop = (1..3).map { testPayment("shop-$it", description = "Indomaret", instant = baseInstant.minusSeconds(it * 60L)) }
+        val market = (1..2).map { testPayment("market-$it", description = "Tokopedia", instant = baseInstant.minusSeconds(it * 600L)) }
+        val unsure = (1..2).map { testPayment("unsure-$it", description = "Warung Bu Sri", instant = baseInstant.minusSeconds(it * 900L)) }
+        val sent = mutableListOf<String>()
+        val model = createModel(store, MutableStateFlow(readySpending(shop + market + unsure)), categorize = { _, _, batch ->
+            batch.associate { candidate ->
+                sent += candidate.transaction.providerTransactionId
+                candidate.transaction.key to when (candidate.transaction.description) {
+                    "Indomaret" -> CategorySuggestion("Groceries", "AI suggestion: Minimarket", 98, merchantConsistent = true)
+                    "Tokopedia" -> CategorySuggestion("Groceries", "AI suggestion: Marketplace order", 95, merchantConsistent = false)
+                    else -> CategorySuggestion("Dining Out", "AI suggestion: Small eatery", TRUSTED_ABOVE_PERCENT, merchantConsistent = true)
+                }
+            }
+        })
+
+        model.setAnalysisMonth(currentMonth)
+        model.enterForeground()
+        advanceUntilIdle()
+
+        // The newest Indomaret payment is asked; marketplaces and unsure answers go one by one.
+        assertEquals(listOf("shop-1"), sent.filter { it.startsWith("shop") })
+        assertEquals(setOf("market-1", "market-2"), sent.filter { it.startsWith("market") }.toSet())
+        assertEquals(setOf("unsure-1", "unsure-2"), sent.filter { it.startsWith("unsure") }.toSet())
+        val snapshot = store.snapshot.value
+        for (copy in shop.drop(1)) {
+            assertEquals("Groceries", snapshot.categories[copy.key])
+            assertEquals(MERCHANT_REASON_PREFIX + "Same as other Indomaret payments", snapshot.reasons[copy.key])
+        }
+        assertTrue(model.categoryProgress.value.queuedKeys.isEmpty())
+        model.lock()
+    }
+
+    @Test
+    fun aRateLimitHalvesTheBatchesInFlight() = runTest(dispatcher) {
+        val store = AnalysisStore(FixturePreferences(configuredPrefs()).context)
+        val rows = (1..64).map { testPayment("tx-$it", description = "Shop $it") }
+        var limited = false
+        var released = false
+        val active = AtomicInteger(0)
+        var maxAfterRelease = 0
+        val gates = mutableListOf<CompletableDeferred<Unit>>()
+        val model = createModel(store, MutableStateFlow(readySpending(rows)), categorize = { _, _, batch ->
+            if (!limited) { limited = true; throw AiHttpException(429) }
+            val count = active.incrementAndGet()
+            if (released) maxAfterRelease = maxOf(maxAfterRelease, count)
+            val gate = CompletableDeferred<Unit>()
+            synchronized(gates) { gates += gate }
+            gate.await()
+            active.decrementAndGet()
+            batch.associate { it.transaction.key to CategorySuggestion("Groceries", "AI suggestion: Food") }
+        })
+
+        model.setAnalysisMonth(currentMonth)
+        model.enterForeground()
+        advanceTimeBy(100)
+        // Three batches were already sent when the limit came back.
+        assertEquals(3, active.get())
+        released = true
+        synchronized(gates) { gates.toList().also { gates.clear() } }.forEach { it.complete(Unit) }
+        advanceTimeBy(100)
+        assertEquals(2, active.get())
+        assertEquals(2, maxAfterRelease)
+        model.lock()
+    }
+
+    @Test
+    fun maxFourBatchesConcurrent() = runTest(dispatcher) {
         val prefs = FixturePreferences(configuredPrefs())
         val store = AnalysisStore(prefs.context)
 
-        val rows = (1..16).map { testPayment("tx-$it", amount = 10000L * it) }
+        val rows = (1..40).map { testPayment("tx-$it", amount = 10000L * it, description = "Shop $it") }
         val state = MutableStateFlow(readySpending(rows))
 
         val activeConcurrent = AtomicInteger(0)
@@ -171,11 +239,11 @@ class CategoryQueueTest {
         )
 
         model.enterForeground()
-        // Wait until 2 batches launch concurrently
-        while (synchronized(batchGates) { batchGates.size } < 2) {
+        // Wait until 4 batches launch concurrently
+        while (synchronized(batchGates) { batchGates.size } < 4) {
             advanceTimeBy(10)
         }
-        assertEquals(2, maxObserved)
+        assertEquals(4, maxObserved)
 
         // Release first batch
         synchronized(batchGates) { batchGates.removeAt(0) }.complete(Unit)
@@ -186,7 +254,7 @@ class CategoryQueueTest {
             advanceUntilIdle()
         }
 
-        assertEquals(2, maxObserved)
+        assertEquals(4, maxObserved)
         model.lock()
     }
 
@@ -553,6 +621,312 @@ class CategoryQueueTest {
         // Only pAi was called via network!
         assertEquals(listOf(pAi.key), networkCalls)
 
+        model.lock()
+    }
+
+    @Test
+    fun manualRunRequeuesOnTransientFailureAndEmitsHonestResultWhenRetrySucceeds() = runTest(dispatcher) {
+        val store = AnalysisStore(FixturePreferences(configuredPrefs()).context)
+        val older = testPayment("sep-transient", instant = Instant.parse("2026-09-10T10:00:00Z"))
+        val state = MutableStateFlow(readySpending(listOf(older)))
+        var attempts = 0
+
+        val model = createModel(
+            store = store,
+            state = state,
+            categorize = { _, _, batch ->
+                attempts++
+                if (attempts == 1) {
+                    throw java.io.IOException("Transient network timeout")
+                } else {
+                    batch.associate { it.transaction.key to CategorySuggestion("Dining Out", "AI suggestion: Cafe") }
+                }
+            },
+            scopeKeysAction = { scope, _, _ -> if (scope is RecategorizeScope.Payment) setOf(scope.key) else emptySet() },
+        )
+        val results = mutableListOf<CategoryRunResult>()
+        val collector = launch { model.categoryRunResults.collect { results += it } }
+        model.enterForeground()
+        advanceUntilIdle()
+
+        model.recategorize(RecategorizeScope.Payment(older.key))
+        advanceTimeBy(100)
+        assertEquals(1, attempts)
+        assertTrue(results.isEmpty())
+        assertEquals(1, model.categoryProgress.value.runTotal)
+
+        // Advance 30s to trigger retry
+        advanceTimeBy(30_000L)
+        advanceUntilIdle()
+        assertEquals(2, attempts)
+        assertEquals("Dining Out", store.snapshot.value.categories[older.key])
+        assertEquals(listOf(CategoryRunResult(total = 1, review = 0, failed = 0)), results)
+        assertEquals(0, model.categoryProgress.value.runTotal)
+
+        collector.cancel()
+        model.lock()
+    }
+
+    @Test
+    fun manualRunExhaustedBackoffRecordsFailureAndEmitsFailedResult() = runTest(dispatcher) {
+        val store = AnalysisStore(FixturePreferences(configuredPrefs()).context)
+        val older = testPayment("sep-fail", instant = Instant.parse("2026-09-10T10:00:00Z"))
+        val state = MutableStateFlow(readySpending(listOf(older)))
+        var attempts = 0
+
+        val model = createModel(
+            store = store,
+            state = state,
+            categorize = { _, _, _ ->
+                attempts++
+                throw java.io.IOException("Persistent timeout")
+            },
+            scopeKeysAction = { scope, _, _ -> if (scope is RecategorizeScope.Payment) setOf(scope.key) else emptySet() },
+        )
+        val results = mutableListOf<CategoryRunResult>()
+        val collector = launch { model.categoryRunResults.collect { results += it } }
+        model.enterForeground()
+        advanceUntilIdle()
+
+        model.recategorize(RecategorizeScope.Payment(older.key))
+        advanceTimeBy(100)
+        assertEquals(1, attempts)
+        assertTrue(results.isEmpty())
+
+        advanceTimeBy(30_000L)
+        assertEquals(2, attempts)
+        assertTrue(results.isEmpty())
+
+        advanceTimeBy(120_000L)
+        assertEquals(3, attempts)
+        assertTrue(results.isEmpty())
+
+        advanceTimeBy(600_000L)
+        advanceUntilIdle()
+        assertEquals(4, attempts)
+        assertTrue(older.key in store.snapshot.value.categoryFailures)
+        assertEquals(listOf(CategoryRunResult(total = 0, review = 0, failed = 1)), results)
+        assertEquals(0, model.categoryProgress.value.runTotal)
+
+        collector.cancel()
+        model.lock()
+    }
+
+    @Test
+    fun perPaymentKeyBackoffAttemptsPreventsInfiniteRetryWhenCompanionsChange() = runTest(dispatcher) {
+        val store = AnalysisStore(FixturePreferences(configuredPrefs()).context)
+        val poison = testPayment("poison-tx")
+        val companion1 = testPayment("c1-tx")
+        val companion2 = testPayment("c2-tx")
+        val companion3 = testPayment("c3-tx")
+        val companion4 = testPayment("c4-tx")
+        val state = MutableStateFlow(readySpending(listOf(poison, companion1)))
+
+        var poisonAttempts = 0
+        val model = createModel(
+            store = store,
+            state = state,
+            categorize = { _, _, batch ->
+                if (batch.any { it.transaction.key == poison.key }) {
+                    poisonAttempts++
+                    throw java.io.IOException("Poison payment failed")
+                }
+                batch.associate { it.transaction.key to CategorySuggestion("Groceries", "Food") }
+            },
+        )
+        model.enterForeground()
+        advanceTimeBy(100)
+        assertEquals(1, poisonAttempts)
+
+        // Companion changes to companion2
+        state.value = readySpending(listOf(poison, companion2))
+        advanceTimeBy(30_000L)
+        assertEquals(2, poisonAttempts)
+
+        // Companion changes to companion3
+        state.value = readySpending(listOf(poison, companion3))
+        advanceTimeBy(120_000L)
+        assertEquals(3, poisonAttempts)
+
+        // Companion changes to companion4
+        state.value = readySpending(listOf(poison, companion4))
+        advanceTimeBy(600_000L)
+        advanceUntilIdle()
+        assertEquals(4, poisonAttempts)
+
+        assertTrue(poison.key in store.snapshot.value.categoryFailures)
+        advanceTimeBy(1_000_000L)
+        assertEquals(4, poisonAttempts)
+
+        model.lock()
+    }
+
+    @Test
+    fun http400SplitsMultiPaymentBatchAndFailsOffendingPaymentIndividually() = runTest(dispatcher) {
+        val store = AnalysisStore(FixturePreferences(configuredPrefs()).context)
+        val pGood = testPayment("p-good", instant = Instant.parse("2026-09-10T10:00:00Z"))
+        val pBad = testPayment("p-bad", instant = Instant.parse("2026-09-10T10:00:00Z"))
+        val state = MutableStateFlow(readySpending(listOf(pGood, pBad)))
+
+        val model = createModel(
+            store = store,
+            state = state,
+            categorize = { _, _, batch ->
+                if (batch.size > 1) {
+                    throw AiHttpException(400)
+                }
+                val candidate = batch.single()
+                if (candidate.transaction.key == pBad.key) {
+                    throw AiHttpException(400)
+                }
+                mapOf(candidate.transaction.key to CategorySuggestion("Groceries", "AI suggestion: Food"))
+            },
+            scopeKeysAction = { scope, _, _ -> if (scope is RecategorizeScope.Month) setOf(pGood.key, pBad.key) else emptySet() },
+        )
+        val results = mutableListOf<CategoryRunResult>()
+        val collector = launch { model.categoryRunResults.collect { results += it } }
+        model.enterForeground()
+        advanceUntilIdle()
+
+        model.recategorize(RecategorizeScope.Month(YearMonth.of(2026, 9)))
+        advanceUntilIdle()
+
+        assertEquals("Groceries", store.snapshot.value.categories[pGood.key])
+        assertTrue(pBad.key in store.snapshot.value.categoryFailures)
+        assertNull(model.categoryProgress.value.error)
+        assertNotEquals(CategoryAutomationState.ERROR, model.categoryProgress.value.state)
+
+        assertEquals(listOf(CategoryRunResult(total = 1, review = 0, failed = 1)), results)
+
+        collector.cancel()
+        model.lock()
+    }
+
+    @Test
+    fun singlePaymentHttp400FailsImmediatelyWithoutGlobalStop() = runTest(dispatcher) {
+        val store = AnalysisStore(FixturePreferences(configuredPrefs()).context)
+        val pBad = testPayment("single-400-tx")
+        val state = MutableStateFlow(readySpending(listOf(pBad)))
+
+        val model = createModel(
+            store = store,
+            state = state,
+            categorize = { _, _, _ -> throw AiHttpException(400) },
+        )
+        model.enterForeground()
+        advanceUntilIdle()
+
+        assertTrue(pBad.key in store.snapshot.value.categoryFailures)
+        assertNull(model.categoryProgress.value.error)
+        assertNotEquals(CategoryAutomationState.ERROR, model.categoryProgress.value.state)
+        assertEquals(1, model.categoryProgress.value.failed)
+
+        model.lock()
+    }
+
+    @Test
+    fun runResultHonestyCountsReviewAndRequeuesSkippedPayments() = runTest(dispatcher) {
+        val store = AnalysisStore(FixturePreferences(configuredPrefs()).context)
+        val pGood = testPayment("p-good", instant = Instant.parse("2026-09-10T10:00:00Z"))
+        val pReview = testPayment("p-review", instant = Instant.parse("2026-09-10T10:00:00Z"))
+        val pSkipped = testPayment("p-skipped", instant = Instant.parse("2026-09-10T10:00:00Z"))
+        val state = MutableStateFlow(readySpending(listOf(pGood, pReview, pSkipped)))
+
+        var pass = 0
+        val model = createModel(
+            store = store,
+            state = state,
+            categorize = { _, _, batch ->
+                pass++
+                if (pass == 1) {
+                    store.setUserNote(pSkipped.key, "new mid-flight note")
+                }
+                batch.associate { candidate ->
+                    val conf = if (candidate.transaction.key == pReview.key) CategoryConfidence.LOW else CategoryConfidence.HIGH
+                    candidate.transaction.key to CategorySuggestion("Groceries", "Food", net.wastu.artha.data.analysis.percentOf(conf))
+                }
+            },
+            scopeKeysAction = { scope, _, _ -> if (scope is RecategorizeScope.Month) setOf(pGood.key, pReview.key, pSkipped.key) else emptySet() },
+        )
+        val results = mutableListOf<CategoryRunResult>()
+        val collector = launch { model.categoryRunResults.collect { results += it } }
+        model.enterForeground()
+        advanceUntilIdle()
+
+        model.recategorize(RecategorizeScope.Month(YearMonth.of(2026, 9)))
+        advanceUntilIdle()
+
+        assertEquals("Groceries", store.snapshot.value.categories[pGood.key])
+        assertEquals("Groceries", store.snapshot.value.categories[pReview.key])
+        assertEquals("Groceries", store.snapshot.value.categories[pSkipped.key])
+        assertEquals(listOf(CategoryRunResult(total = 3, review = 1, failed = 0)), results)
+
+        collector.cancel()
+        model.lock()
+    }
+
+    @Test
+    fun runResultHonestyExplicitlySkipsRepeatedlySkippedPayment() = runTest(dispatcher) {
+        val store = AnalysisStore(FixturePreferences(configuredPrefs()).context)
+        val pGood = testPayment("p-good", instant = Instant.parse("2026-09-10T10:00:00Z"))
+        val pChanging = testPayment("p-changing", instant = Instant.parse("2026-09-10T10:00:00Z"))
+        val state = MutableStateFlow(readySpending(listOf(pGood, pChanging)))
+
+        var attempt = 0
+        val model = createModel(
+            store = store,
+            state = state,
+            categorize = { _, _, batch ->
+                attempt++
+                store.setUserNote(pChanging.key, "note update $attempt")
+                batch.associate { it.transaction.key to CategorySuggestion("Groceries", "Food") }
+            },
+            scopeKeysAction = { scope, _, _ -> if (scope is RecategorizeScope.Month) setOf(pGood.key, pChanging.key) else emptySet() },
+        )
+        val results = mutableListOf<CategoryRunResult>()
+        val collector = launch { model.categoryRunResults.collect { results += it } }
+        model.enterForeground()
+        advanceUntilIdle()
+
+        model.recategorize(RecategorizeScope.Month(YearMonth.of(2026, 9)))
+        advanceUntilIdle()
+
+        assertEquals("Groceries", store.snapshot.value.categories[pGood.key])
+        assertNull(store.snapshot.value.categories[pChanging.key])
+        assertEquals(listOf(CategoryRunResult(total = 1, review = 0, failed = 0)), results)
+
+        collector.cancel()
+        model.lock()
+    }
+
+    @Test
+    fun unansweredPaymentInBatchRecordedAsFailedAndReflectedInRunResult() = runTest(dispatcher) {
+        val store = AnalysisStore(FixturePreferences(configuredPrefs()).context)
+        val p1 = testPayment("p1", instant = Instant.parse("2026-09-10T10:00:00Z"))
+        val p2 = testPayment("p2", instant = Instant.parse("2026-09-10T10:00:00Z"))
+        val state = MutableStateFlow(readySpending(listOf(p1, p2)))
+
+        val model = createModel(
+            store = store,
+            state = state,
+            categorize = { _, _, _ ->
+                mapOf(p1.key to CategorySuggestion("Groceries", "Food"))
+            },
+            scopeKeysAction = { scope, _, _ -> if (scope is RecategorizeScope.Month) setOf(p1.key, p2.key) else emptySet() },
+        )
+        val results = mutableListOf<CategoryRunResult>()
+        val collector = launch { model.categoryRunResults.collect { results += it } }
+        model.enterForeground()
+        advanceUntilIdle()
+
+        model.recategorize(RecategorizeScope.Month(YearMonth.of(2026, 9)))
+        advanceUntilIdle()
+
+        assertEquals("Groceries", store.snapshot.value.categories[p1.key])
+        assertTrue(p2.key in store.snapshot.value.categoryFailures)
+        assertEquals(listOf(CategoryRunResult(total = 1, review = 0, failed = 1)), results)
+
+        collector.cancel()
         model.lock()
     }
 

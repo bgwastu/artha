@@ -85,6 +85,10 @@ class SpendingRepository(ledger: LedgerRepository, store: AnalysisStore, scope: 
     fun retry() { retryGeneration.update { it + 1L } }
     val state = retryGeneration.flatMapLatest {
         spendingFlow(ledger, store.snapshot, migrate = store::migrateMetadata).onStart { emit(SpendingState.Loading) }
-    }.onEach { if (it is SpendingState.Ready) _lastReady.value = it }
-        .stateIn(scope, SharingStarted.Eagerly, SpendingState.Loading)
+    }.onEach {
+        if (it is SpendingState.Ready) {
+            _lastReady.value = it
+            store.migrateAiCategoryFingerprints(it.transactions)
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, SpendingState.Loading)
 }

@@ -75,7 +75,7 @@ class MerchantMemoryTest {
                 p3.key to "AI suggestion: Food",
             ),
             manualCategories = setOf(p1.key),
-            aiMerchantConsistent = setOf(p2.key, p3.key),
+            aiRecords = aiRecords(consistent = setOf(p2.key, p3.key)),
         )
 
         val rows = listOf(p1, p2, p3, target)
@@ -115,7 +115,7 @@ class MerchantMemoryTest {
         val snapshotOne = AnalysisSnapshot(
             categories = mapOf(p1.key to "Utilities & Bills"),
             reasons = mapOf(p1.key to "AI suggestion: Electricity"),
-            aiMerchantConsistent = setOf(p1.key),
+            aiRecords = aiRecords(consistent = setOf(p1.key)),
         )
         assertNull(MerchantMemory.remembered(target, listOf(p1, target), snapshotOne))
 
@@ -123,7 +123,7 @@ class MerchantMemoryTest {
         val snapshotDisagree = AnalysisSnapshot(
             categories = mapOf(p1.key to "Utilities & Bills", p2.key to "Tech & Subscriptions"),
             reasons = mapOf(p1.key to "AI suggestion: Bill", p2.key to "AI suggestion: Tech"),
-            aiMerchantConsistent = setOf(p1.key, p2.key),
+            aiRecords = aiRecords(consistent = setOf(p1.key, p2.key)),
         )
         assertNull(MerchantMemory.remembered(target, listOf(p1, p2, target), snapshotDisagree))
 
@@ -131,7 +131,7 @@ class MerchantMemoryTest {
         val snapshotInconsistent = AnalysisSnapshot(
             categories = mapOf(p1.key to "Utilities & Bills", p2.key to "Utilities & Bills"),
             reasons = mapOf(p1.key to "AI suggestion: Bill", p2.key to "AI suggestion: Bill"),
-            aiMerchantConsistent = emptySet(),
+            aiRecords = aiRecords(consistent = emptySet()),
         )
         assertNull(MerchantMemory.remembered(target, listOf(p1, p2, target), snapshotInconsistent))
 
@@ -139,7 +139,7 @@ class MerchantMemoryTest {
         val snapshotConsistent = AnalysisSnapshot(
             categories = mapOf(p1.key to "Utilities & Bills", p2.key to "Utilities & Bills"),
             reasons = mapOf(p1.key to "AI suggestion: Bill", p2.key to "AI suggestion: Bill"),
-            aiMerchantConsistent = setOf(p1.key, p2.key),
+            aiRecords = aiRecords(consistent = setOf(p1.key, p2.key)),
         )
         val suggestion = MerchantMemory.remembered(target, listOf(p1, p2, target), snapshotConsistent)
         assertNotNull(suggestion)
@@ -157,7 +157,7 @@ class MerchantMemoryTest {
         val snapshot = AnalysisSnapshot(
             categories = mapOf(p1.key to "Shopping & Hardware", p2.key to "Shopping & Hardware"),
             reasons = mapOf(p1.key to "AI suggestion: Order", p2.key to "AI suggestion: Order"),
-            aiMerchantConsistent = emptySet(),
+            aiRecords = aiRecords(consistent = emptySet()),
         )
         val suggestion = MerchantMemory.remembered(target, listOf(p1, p2, target), snapshot)
         assertNull(suggestion)

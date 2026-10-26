@@ -29,15 +29,43 @@ data class AnalysisSnapshot(
     val deletedCategories: Map<String, Long> = emptyMap(),
     val analysisFingerprints: Map<String, String> = emptyMap(),
     val manualCategories: Set<String> = emptySet(),
-    val aiCategoryFingerprints: Map<String, String> = emptyMap(),
     val analysisEnabled: Boolean = false,
-    /** AI confidence per payment key; LOW (the model was under 70% sure) means "Needs review". */
-    val aiConfidence: Map<String, CategoryConfidence> = emptyMap(),
-    /** Payments the AI gave up on after retries, with the user-facing reason. Local cache, not backup content. */
-    val categoryFailures: Map<String, String> = emptyMap(),
     val autoCategorize: Boolean = true,
-    val aiMerchantConsistent: Set<String> = emptySet(),
-)
+    /** What the AI knows about each payment. Local cache, not backup content. */
+    val aiRecords: Map<String, AiRecord> = emptyMap(),
+) {
+    val aiCategoryFingerprints: Map<String, String> by lazy { aiRecords.mapNotNull { (k, r) -> r.fingerprint?.let { k to it } }.toMap() }
+    val aiConfidence: Map<String, CategoryConfidence> by lazy { aiRecords.mapNotNull { (k, r) -> r.confidence?.let { k to CategoryConfidence.of(it) } }.toMap() }
+    val categoryFailures: Map<String, String> by lazy { aiRecords.mapNotNull { (k, r) -> r.failure?.let { k to it } }.toMap() }
+    val aiMerchantConsistent: Set<String> by lazy { aiRecords.filterValues { it.merchantConsistent }.keys }
+}
+
+/** One payment's AI state: the evidence hash it was labeled from, how sure the model was, or why it gave up. */
+data class AiRecord(
+    val fingerprint: String? = null,
+    /** 0 to 100. */
+    val confidence: Int? = null,
+    val failure: String? = null,
+    /** The model said this merchant always means this category, so later payments can copy it. */
+    val merchantConsistent: Boolean = false,
+) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        fingerprint?.let { put("f", it) }
+        confidence?.let { put("c", it) }
+        failure?.let { put("e", it) }
+        if (merchantConsistent) put("m", true)
+    }
+    val isEmpty: Boolean get() = this == AiRecord()
+
+    companion object {
+        fun fromJson(json: JSONObject) = AiRecord(
+            fingerprint = json.optString("f").ifBlank { null },
+            confidence = if (json.has("c")) json.optInt("c").coerceIn(0, 100) else null,
+            failure = json.optString("e").ifBlank { null },
+            merchantConsistent = json.optBoolean("m", false),
+        )
+    }
+}
 
 val INITIAL_DEFAULT_CATEGORIES = listOf(
     "Dining Out",
@@ -62,7 +90,19 @@ class AnalysisStore(context: Context) {
         /** defaults shared with the pi.dev CLIProxyAPI gateway (see ~/.pi/agent/cliproxyapi.json). */
         const val DEFAULT_AI_BASE_URL = "https://ai.wastu.net"
         const val DEFAULT_AI_MODEL = "gemini-3.8-flash-high"
+        const val AI_FINGERPRINT_VERSION = 1
+        private const val PREF_AI_FINGERPRINT_VERSION = "ai_fingerprint_version"
+        private const val AI_RECORDS = "ai_records"
+        private val LEGACY_AI_KEYS = listOf("ai_category_fingerprints", "ai_confidence", "ai_category_failures", "ai_merchant_consistent")
+        /** Older builds saved only a level; map it to a percent inside that level's band. */
+        internal fun legacyConfidencePercent(level: String): Int = when (level.uppercase()) {
+            "HIGH" -> 95
+            "LOW" -> 50
+            else -> 77
+        }
     }
+    private fun getFingerprintVersion(): Int =
+        prefs.getString(PREF_AI_FINGERPRINT_VERSION, null)?.toIntOrNull() ?: 0
     private val appContext = context.applicationContext
     private val prefs: SharedPreferences = context.getSharedPreferences("artha_analysis_store", Context.MODE_PRIVATE)
 
@@ -96,10 +136,7 @@ class AnalysisStore(context: Context) {
         val updatedAtJson = prefs.getString("updated_at_map", "{}") ?: "{}"
         val deletedCatsJson = prefs.getString("deleted_categories_map", "{}") ?: "{}"
         val fingerprintsJson = prefs.getString("analysis_fingerprints", "{}") ?: "{}"
-        val aiConfidenceJson = prefs.getString("ai_confidence", "{}") ?: "{}"
-        val categoryFailuresJson = prefs.getString("ai_category_failures", "{}") ?: "{}"
         val autoCategorize = prefs.getBoolean("auto_categorize", true)
-        val aiMerchantConsistentJson = prefs.getString("ai_merchant_consistent", "[]") ?: "[]"
 
         return AnalysisSnapshot(
             userNotes = parseMap(notesJson),
@@ -115,13 +152,51 @@ class AnalysisStore(context: Context) {
             deletedCategories = parseLongMap(deletedCatsJson),
             analysisFingerprints = parseMap(fingerprintsJson),
             manualCategories = parseList(prefs.getString("manual_categories", "[]") ?: "[]").toSet(),
-            aiCategoryFingerprints = parseMap(prefs.getString("ai_category_fingerprints", "{}") ?: "{}"),
             analysisEnabled = prefs.getBoolean("analysis_enabled", true),
-            aiConfidence = parseConfidenceMap(aiConfidenceJson),
-            categoryFailures = parseMap(categoryFailuresJson),
             autoCategorize = autoCategorize,
-            aiMerchantConsistent = parseList(aiMerchantConsistentJson).toSet(),
+            aiRecords = loadAiRecords(),
         )
+    }
+
+    /** Reads ai_records, folding the four maps older builds kept into it once. */
+    private fun loadAiRecords(): Map<String, AiRecord> {
+        prefs.getString(AI_RECORDS, null)?.let { json ->
+            val obj = runCatching { JSONObject(json) }.getOrNull() ?: return emptyMap()
+            return obj.keys().asSequence().mapNotNull { key -> obj.optJSONObject(key)?.let { key to AiRecord.fromJson(it) } }.toMap()
+        }
+        if (LEGACY_AI_KEYS.none(prefs::contains)) return emptyMap()
+        val fingerprints = parseMap(prefs.getString("ai_category_fingerprints", "{}") ?: "{}")
+        val confidence = parseMap(prefs.getString("ai_confidence", "{}") ?: "{}")
+        val failures = parseMap(prefs.getString("ai_category_failures", "{}") ?: "{}")
+        val consistent = parseList(prefs.getString("ai_merchant_consistent", "[]") ?: "[]").toSet()
+        val records = (fingerprints.keys + confidence.keys + failures.keys + consistent).associateWith { key ->
+            AiRecord(
+                fingerprint = fingerprints[key],
+                confidence = confidence[key]?.let(::legacyConfidencePercent),
+                failure = failures[key],
+                merchantConsistent = key in consistent,
+            )
+        }
+        // A failed write leaves the old maps in place, so the fold simply runs again next launch.
+        runCatching {
+            checkedPreferenceEdit(prefs, LEGACY_AI_KEYS + AI_RECORDS, "Could not migrate AI records") {
+                putString(AI_RECORDS, aiRecordsJson(records))
+                for (old in LEGACY_AI_KEYS) remove(old)
+            }
+        }
+        return records
+    }
+
+    private fun aiRecordsJson(records: Map<String, AiRecord>): String =
+        JSONObject().apply { for ((key, record) in records) if (!record.isEmpty) put(key, record.toJson()) }.toString()
+
+    /** Persists [records] with any other prefs [extra] writes, all or nothing. */
+    private fun saveAiRecords(records: Map<String, AiRecord>, message: String, keys: List<String> = emptyList(), extra: SharedPreferences.Editor.() -> Unit = {}) {
+        val clean = records.filterValues { !it.isEmpty }
+        checkedPreferenceEdit(prefs, keys + AI_RECORDS, message) {
+            extra()
+            putString(AI_RECORDS, aiRecordsJson(clean))
+        }
     }
 
     @Synchronized
@@ -157,26 +232,26 @@ class AnalysisStore(context: Context) {
         val currentCategories = _snapshot.value.categories.toMutableMap()
         val currentReasons = _snapshot.value.reasons.toMutableMap()
         val currentUpdated = _snapshot.value.updatedAt.toMutableMap()
-        val currentFailures = _snapshot.value.categoryFailures.toMutableMap()
-        currentFailures.remove(key)
         if (!manual && key in _snapshot.value.manualCategories) return
+        val records = _snapshot.value.aiRecords.toMutableMap()
+        // A user pick replaces whatever the AI knew; an AI or merchant label keeps its record but clears the failure.
+        if (manual) records.remove(key) else records[key]?.let { records[key] = it.copy(failure = null) }
         val manualKeys = if (manual) _snapshot.value.manualCategories + key else _snapshot.value.manualCategories
         currentCategories[key] = category
         currentReasons[key] = reason
         currentUpdated["cat:$key"] = now
-        checkedPreferenceEdit(prefs, listOf("manual_categories", "categories", "reasons", "updated_at_map", "ai_category_failures"), "Category could not be saved") {
+        saveAiRecords(records, "Category could not be saved", listOf("manual_categories", "categories", "reasons", "updated_at_map")) {
             putString("manual_categories", JSONArray(manualKeys.toList()).toString())
             putString("categories", JSONObject(currentCategories as Map<*, *>).toString())
             putString("reasons", JSONObject(currentReasons as Map<*, *>).toString())
             putString("updated_at_map", JSONObject(currentUpdated as Map<*, *>).toString())
-            putString("ai_category_failures", JSONObject(currentFailures as Map<*, *>).toString())
         }
         _snapshot.value = _snapshot.value.copy(
             manualCategories = manualKeys,
             categories = currentCategories,
             reasons = currentReasons,
             updatedAt = currentUpdated,
-            categoryFailures = currentFailures,
+            aiRecords = records,
         )
         runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
     }
@@ -192,157 +267,116 @@ class AnalysisStore(context: Context) {
         _snapshot.value = _snapshot.value.copy(manualCategories = manual)
     }
 
+    fun commitCategorySuggestions(candidates: List<CategoryCandidate>, suggestions: Map<String, CategorySuggestion>, input: AnalysisSnapshot): Int =
+        commitCategorySuggestionKeys(candidates, suggestions, input).size
+
+    /** Saves the suggestions whose input is unchanged since [input]; returns the keys actually saved. */
     @Synchronized
-    fun commitCategorySuggestions(candidates: List<CategoryCandidate>, suggestions: Map<String, CategorySuggestion>, input: AnalysisSnapshot): Int {
+    fun commitCategorySuggestionKeys(candidates: List<CategoryCandidate>, suggestions: Map<String, CategorySuggestion>, input: AnalysisSnapshot): Set<String> {
         val current = _snapshot.value
-        if (current.aiConfig != input.aiConfig || current.knowledge != input.knowledge || current.customCategories != input.customCategories) return 0
+        if (!sameRequestSettings(current, input)) return emptySet()
         val valid = candidates.filter { candidate ->
             val key = candidate.transaction.key
             BudgetAnalyzer.isSpending(candidate.transaction) &&
                 AiCategorization.fingerprint(candidate.transaction, current) == candidate.fingerprint &&
-                !candidate.transaction.classificationIsManual && key !in current.manualCategories &&
-                current.userNotes[key] == input.userNotes[key] &&
-                current.updatedAt["cat:$key"] == input.updatedAt["cat:$key"] &&
+                !candidate.transaction.classificationIsManual && untouchedSince(current, input, key) &&
                 suggestions[key]?.category in AiCategorization.categories(current)
         }
-        if (valid.isEmpty()) return 0
-        val now = System.currentTimeMillis()
-        val categories = current.categories + valid.associate { it.transaction.key to suggestions.getValue(it.transaction.key).category }
-        val reasons = current.reasons + valid.associate { it.transaction.key to suggestions.getValue(it.transaction.key).reason }
-        val times = current.updatedAt + valid.associate { "cat:${it.transaction.key}" to now }
-        val fingerprints = current.aiCategoryFingerprints + valid.associate { it.transaction.key to it.fingerprint }
-        val confidences = current.aiConfidence + valid.associate { it.transaction.key to suggestions.getValue(it.transaction.key).confidence }
-        val validKeys = valid.map { it.transaction.key }.toSet()
-        val failures = current.categoryFailures - validKeys
-        val merchantConsistent = current.aiMerchantConsistent.toMutableSet().apply {
-            for (c in valid) {
-                val sug = suggestions.getValue(c.transaction.key)
-                if (sug.merchantConsistent) add(c.transaction.key) else remove(c.transaction.key)
-            }
-        }.toSet()
-        checkedPreferenceEdit(prefs, listOf("categories", "reasons", "updated_at_map", "ai_category_fingerprints", "ai_confidence", "ai_category_failures", "ai_merchant_consistent"), "AI categories could not be saved") {
-            putString("categories", JSONObject(categories as Map<*, *>).toString())
-            putString("reasons", JSONObject(reasons as Map<*, *>).toString())
-            putString("updated_at_map", JSONObject(times as Map<*, *>).toString())
-            putString("ai_category_fingerprints", JSONObject(fingerprints as Map<*, *>).toString())
-            putString("ai_confidence", JSONObject(confidences.mapValues { it.value.name } as Map<*, *>).toString())
-            putString("ai_category_failures", JSONObject(failures as Map<*, *>).toString())
-            putString("ai_merchant_consistent", JSONArray(merchantConsistent.toList()).toString())
-        }
-        _snapshot.value = current.copy(
-            categories = categories,
-            reasons = reasons,
-            updatedAt = times,
-            aiCategoryFingerprints = fingerprints,
-            aiConfidence = confidences,
-            categoryFailures = failures,
-            aiMerchantConsistent = merchantConsistent,
-        )
-        runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
-        return valid.size
+        if (valid.isEmpty()) return emptySet()
+        saveLabels(current, valid.associate { it.transaction.key to it.fingerprint }, suggestions, fromModel = true, "AI categories could not be saved")
+        return valid.mapTo(mutableSetOf()) { it.transaction.key }
     }
 
     @Synchronized
     fun commitMerchantSuggestions(candidates: List<CategoryCandidate>, suggestions: Map<String, CategorySuggestion>, input: AnalysisSnapshot): Int {
         val current = _snapshot.value
-        if (current.aiConfig != input.aiConfig || current.knowledge != input.knowledge || current.customCategories != input.customCategories) return 0
+        if (!sameRequestSettings(current, input)) return 0
         val valid = candidates.filter { candidate ->
             val key = candidate.transaction.key
             BudgetAnalyzer.isSpending(candidate.transaction) &&
-                !candidate.transaction.classificationIsManual && key !in current.manualCategories &&
-                current.userNotes[key] == input.userNotes[key] &&
-                current.updatedAt["cat:$key"] == input.updatedAt["cat:$key"] &&
+                !candidate.transaction.classificationIsManual && untouchedSince(current, input, key) &&
                 suggestions[key]?.category in AiCategorization.categories(current)
         }
         if (valid.isEmpty()) return 0
-        val now = System.currentTimeMillis()
-        val categories = current.categories + valid.associate { it.transaction.key to suggestions.getValue(it.transaction.key).category }
-        val reasons = current.reasons + valid.associate { it.transaction.key to suggestions.getValue(it.transaction.key).reason }
-        val times = current.updatedAt + valid.associate { "cat:${it.transaction.key}" to now }
-        val fingerprints = current.aiCategoryFingerprints + valid.associate { it.transaction.key to it.fingerprint }
-        val confidences = current.aiConfidence + valid.associate { it.transaction.key to suggestions.getValue(it.transaction.key).confidence }
-        val validKeys = valid.map { it.transaction.key }.toSet()
-        val failures = current.categoryFailures - validKeys
-        checkedPreferenceEdit(prefs, listOf("categories", "reasons", "updated_at_map", "ai_category_fingerprints", "ai_confidence", "ai_category_failures"), "Merchant categories could not be saved") {
-            putString("categories", JSONObject(categories as Map<*, *>).toString())
-            putString("reasons", JSONObject(reasons as Map<*, *>).toString())
-            putString("updated_at_map", JSONObject(times as Map<*, *>).toString())
-            putString("ai_category_fingerprints", JSONObject(fingerprints as Map<*, *>).toString())
-            putString("ai_confidence", JSONObject(confidences.mapValues { it.value.name } as Map<*, *>).toString())
-            putString("ai_category_failures", JSONObject(failures as Map<*, *>).toString())
-        }
-        _snapshot.value = current.copy(
-            categories = categories,
-            reasons = reasons,
-            updatedAt = times,
-            aiCategoryFingerprints = fingerprints,
-            aiConfidence = confidences,
-            categoryFailures = failures,
-        )
-        runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
+        saveLabels(current, valid.associate { it.transaction.key to it.fingerprint }, suggestions, fromModel = false, "Merchant categories could not be saved")
         return valid.size
     }
 
     @Synchronized
-    fun commitMerchantSuggestions(suggestions: Map<String, CategorySuggestion>, input: AnalysisSnapshot): Int {
+    fun commitMerchantSuggestions(
+        suggestions: Map<String, CategorySuggestion>,
+        input: AnalysisSnapshot,
+        rows: List<net.wastu.artha.core.model.UnifiedTransaction> = emptyList(),
+    ): Int {
         val current = _snapshot.value
-        if (current.aiConfig != input.aiConfig || current.knowledge != input.knowledge || current.customCategories != input.customCategories) return 0
+        if (!sameRequestSettings(current, input)) return 0
         val validKeys = suggestions.keys.filter { key ->
-            key !in current.manualCategories &&
-                current.userNotes[key] == input.userNotes[key] &&
-                current.updatedAt["cat:$key"] == input.updatedAt["cat:$key"] &&
-                suggestions[key]?.category in AiCategorization.categories(current)
+            untouchedSince(current, input, key) && suggestions[key]?.category in AiCategorization.categories(current)
         }
         if (validKeys.isEmpty()) return 0
+        val rowsByKey = rows.associateBy { it.key }
+        val fingerprints = validKeys.associateWith { key -> rowsByKey[key]?.let { AiCategorization.fingerprint(it, current) } }
+        saveLabels(current, fingerprints, suggestions, fromModel = false, "Merchant categories could not be saved")
+        return validKeys.size
+    }
+
+    private fun sameRequestSettings(current: AnalysisSnapshot, input: AnalysisSnapshot): Boolean =
+        current.aiConfig == input.aiConfig && current.knowledge == input.knowledge && current.customCategories == input.customCategories
+
+    /** The user did not pick a category or edit the note while the request ran. */
+    private fun untouchedSince(current: AnalysisSnapshot, input: AnalysisSnapshot, key: String): Boolean =
+        key !in current.manualCategories && current.userNotes[key] == input.userNotes[key] &&
+            current.updatedAt["cat:$key"] == input.updatedAt["cat:$key"]
+
+    /** Writes AI or merchant labels for [fingerprints]' keys; a null fingerprint keeps the saved one. */
+    private fun saveLabels(
+        current: AnalysisSnapshot,
+        fingerprints: Map<String, String?>,
+        suggestions: Map<String, CategorySuggestion>,
+        fromModel: Boolean,
+        message: String,
+    ) {
         val now = System.currentTimeMillis()
-        val categories = current.categories + validKeys.associateWith { suggestions.getValue(it).category }
-        val reasons = current.reasons + validKeys.associateWith { suggestions.getValue(it).reason }
-        val times = current.updatedAt + validKeys.associate { "cat:$it" to now }
-        val confidences = current.aiConfidence + validKeys.associateWith { suggestions.getValue(it).confidence }
-        val failures = current.categoryFailures - validKeys.toSet()
-        checkedPreferenceEdit(prefs, listOf("categories", "reasons", "updated_at_map", "ai_confidence", "ai_category_failures"), "Merchant categories could not be saved") {
+        val keys = fingerprints.keys
+        val categories = current.categories + keys.associateWith { suggestions.getValue(it).category }
+        val reasons = current.reasons + keys.associateWith { suggestions.getValue(it).reason }
+        val times = current.updatedAt + keys.associate { "cat:$it" to now }
+        val records = current.aiRecords + keys.associateWith { key ->
+            val old = current.aiRecords[key] ?: AiRecord()
+            val suggestion = suggestions.getValue(key)
+            AiRecord(
+                fingerprint = fingerprints[key] ?: old.fingerprint,
+                confidence = suggestion.percent,
+                merchantConsistent = if (fromModel) suggestion.merchantConsistent else old.merchantConsistent,
+            )
+        }
+        saveAiRecords(records, message, listOf("categories", "reasons", "updated_at_map")) {
             putString("categories", JSONObject(categories as Map<*, *>).toString())
             putString("reasons", JSONObject(reasons as Map<*, *>).toString())
             putString("updated_at_map", JSONObject(times as Map<*, *>).toString())
-            putString("ai_confidence", JSONObject(confidences.mapValues { it.value.name } as Map<*, *>).toString())
-            putString("ai_category_failures", JSONObject(failures as Map<*, *>).toString())
         }
-        _snapshot.value = current.copy(
-            categories = categories,
-            reasons = reasons,
-            updatedAt = times,
-            aiConfidence = confidences,
-            categoryFailures = failures,
-        )
+        _snapshot.value = current.copy(categories = categories, reasons = reasons, updatedAt = times, aiRecords = records)
         runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
-        return validKeys.size
     }
 
     @Synchronized
     fun recordCategoryFailures(keys: Collection<String>, message: String) {
         if (keys.isEmpty()) return
-        val current = _snapshot.value.categoryFailures.toMutableMap()
-        for (k in keys) current[k] = message
-        checkedPreferenceEdit(prefs, listOf("ai_category_failures"), "Failures could not be saved") {
-            putString("ai_category_failures", JSONObject(current as Map<*, *>).toString())
-        }
-        _snapshot.value = _snapshot.value.copy(categoryFailures = current)
+        val records = _snapshot.value.aiRecords.toMutableMap()
+        for (k in keys) records[k] = (records[k] ?: AiRecord()).copy(failure = message)
+        saveAiRecords(records, "Failures could not be saved")
+        _snapshot.value = _snapshot.value.copy(aiRecords = records)
     }
 
     @Synchronized
     fun clearCategoryFailures(keys: Collection<String>) {
-        if (keys.isEmpty()) return
-        val current = _snapshot.value.categoryFailures.toMutableMap()
-        var changed = false
-        for (k in keys) {
-            if (current.remove(k) != null) changed = true
-        }
-        if (changed) {
-            checkedPreferenceEdit(prefs, listOf("ai_category_failures"), "Failures could not be cleared") {
-                putString("ai_category_failures", JSONObject(current as Map<*, *>).toString())
-            }
-            _snapshot.value = _snapshot.value.copy(categoryFailures = current)
-        }
+        val current = _snapshot.value.aiRecords
+        val cleared = keys.filter { current[it]?.failure != null }
+        if (cleared.isEmpty()) return
+        val records = current.toMutableMap()
+        for (k in cleared) records[k] = records.getValue(k).copy(failure = null)
+        saveAiRecords(records, "Failures could not be cleared")
+        _snapshot.value = _snapshot.value.copy(aiRecords = records)
     }
 
     @Synchronized
@@ -462,10 +496,7 @@ class AnalysisStore(context: Context) {
         // Classification request fingerprints are a local cache, not backup content.
         val merged = merged.copy(
             aiConfig = _snapshot.value.aiConfig,
-            aiCategoryFingerprints = _snapshot.value.aiCategoryFingerprints,
-            aiConfidence = _snapshot.value.aiConfidence,
-            aiMerchantConsistent = _snapshot.value.aiMerchantConsistent,
-            categoryFailures = _snapshot.value.categoryFailures,
+            aiRecords = _snapshot.value.aiRecords,
             autoCategorize = _snapshot.value.autoCategorize,
         )
         prefs.edit {
@@ -552,11 +583,13 @@ class AnalysisStore(context: Context) {
     fun migrateMetadata(transactions: List<net.wastu.artha.core.model.UnifiedTransaction>) {
         val migrated = TransactionMetadata.migrate(_snapshot.value, transactions)
         if (migrated != _snapshot.value) applyMergedSnapshot(migrated)
-        migrateAiCategoryFingerprints(transactions)
     }
 
+    /** One-shot repair against reconciled rows: earlier builds re-hashed raw rows, leaving labels looking stale. */
     @Synchronized
     fun migrateAiCategoryFingerprints(rows: List<net.wastu.artha.core.model.UnifiedTransaction>): Int {
+        if (getFingerprintVersion() >= AI_FINGERPRINT_VERSION) return 0
+        if (rows.isEmpty()) return 0
         val current = _snapshot.value
         val updates = mutableMapOf<String, String>()
         for (tx in rows) {
@@ -570,12 +603,13 @@ class AnalysisStore(context: Context) {
                 }
             }
         }
-        if (updates.isEmpty()) return 0
-        val newFingerprints = current.aiCategoryFingerprints + updates
-        checkedPreferenceEdit(prefs, listOf("ai_category_fingerprints"), "Fingerprints could not be migrated") {
-            putString("ai_category_fingerprints", JSONObject(newFingerprints as Map<*, *>).toString())
+        val records = current.aiRecords + updates.mapValues { (key, fp) -> (current.aiRecords[key] ?: AiRecord()).copy(fingerprint = fp) }
+        saveAiRecords(records, "Fingerprints could not be migrated", listOf(PREF_AI_FINGERPRINT_VERSION)) {
+            putString(PREF_AI_FINGERPRINT_VERSION, AI_FINGERPRINT_VERSION.toString())
         }
-        _snapshot.value = current.copy(aiCategoryFingerprints = newFingerprints)
+        if (updates.isNotEmpty()) {
+            _snapshot.value = current.copy(aiRecords = records)
+        }
         return updates.size
     }
 
@@ -621,21 +655,5 @@ class AnalysisStore(context: Context) {
     private fun parseList(json: String): List<String> {
         val arr = runCatching { JSONArray(json) }.getOrNull() ?: return emptyList()
         return (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotBlank() } }
-    }
-
-    private fun parseConfidenceMap(json: String): Map<String, CategoryConfidence> {
-        val map = mutableMapOf<String, CategoryConfidence>()
-        val obj = runCatching { JSONObject(json) }.getOrNull() ?: return emptyMap()
-        val keys = obj.keys()
-        while (keys.hasNext()) {
-            val k = keys.next()
-            val confStr = obj.optString(k)
-            map[k] = when (confStr.uppercase()) {
-                "HIGH" -> CategoryConfidence.HIGH
-                "LOW" -> CategoryConfidence.LOW
-                else -> CategoryConfidence.MEDIUM
-            }
-        }
-        return map
     }
 }

@@ -58,8 +58,14 @@ object AiClient {
     internal suspend fun call(config: AiConfig, prompt: String): String =
         chat(config, JSONArray().put(JSONObject().put("role", "user").put("content", prompt))).getString("content")
 
-    internal suspend fun chat(config: AiConfig, messages: JSONArray, tools: JSONArray? = null, toolChoice: String? = null,
-        readTimeoutMs: Int = 30_000): JSONObject = suspendCancellableCoroutine { continuation ->
+    internal suspend fun chat(
+        config: AiConfig,
+        messages: JSONArray,
+        tools: JSONArray? = null,
+        toolChoice: String? = null,
+        responseFormat: JSONObject? = null,
+        readTimeoutMs: Int = 30_000,
+    ): JSONObject = suspendCancellableCoroutine { continuation ->
         val connection = URL(endpoint(config.baseUrl)).openConnection() as HttpURLConnection
         continuation.invokeOnCancellation { disconnectScope.launch { connection.disconnect() } }
         // HttpURLConnection may block inside disconnect on some runtimes. Keep transport
@@ -74,6 +80,7 @@ object AiClient {
                 connection.setRequestProperty("Content-Type", "application/json")
                 val body = JSONObject().put("model", config.model).put("messages", messages)
                 if (tools != null) body.put("tools", tools).put("tool_choice", toolChoice ?: "auto")
+                if (responseFormat != null) body.put("response_format", responseFormat)
                 connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
                 if (connection.responseCode !in 200..299) throw AiHttpException(connection.responseCode)
                 val json = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->

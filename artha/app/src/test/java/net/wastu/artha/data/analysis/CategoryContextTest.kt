@@ -15,7 +15,7 @@ class CategoryContextTest {
         "Merchant " + "description ".repeat(40), raw, Pocket("pocket-fixture", "Daily spending"),
         isQris = true, cardLast4 = "1234", userNote = "note ".repeat(200), category = "Uncategorized")
 
-    @Test fun completeProductsUnknownFieldsAndLinkedSourceJsonReachTheRequestUnchanged() {
+    @Test fun completeProductsUnknownFieldsAndLinkedSourceJsonReachTheRequestWithoutEmptyFields() {
         val detail = JSONObject().put("productDescription", "detail ".repeat(200)).put("quantity", 3)
             .put("unitAmountMinor", 123400).put("unknownProviderField", JSONObject().put("flag", false).put("missing", JSONObject.NULL))
         val bank = JSONObject().put("fields", JSONObject().put("f3", "Card merchant").put("f41", "IDR"))
@@ -32,13 +32,28 @@ class CategoryContextTest {
         assertEquals(tx.pocket!!.name, context.getJSONObject("pocket").getString("name"))
         assertEquals("1234", context.getString("cardLast4"))
         assertEquals(tx.money.amountMinor, context.getLong("amountMinor"))
+        listOf("key", "providerTransactionId", "canonicalKey", "isConfirmed", "classificationIsManual").forEach { assertFalse(context.has(it)) }
         val source = context.getJSONObject("sourceData")
-        assertEquals(CategoryContext.canonical(detail), CategoryContext.canonical(source.getJSONArray("items").getJSONObject(0)))
+        val sentDetail = JSONObject(detail.toString()).apply { getJSONObject("unknownProviderField").remove("missing") }
+        assertEquals(CategoryContext.canonical(sentDetail), CategoryContext.canonical(source.getJSONArray("items").getJSONObject(0)))
         assertEquals(2, source.getJSONArray("items").length())
         assertEquals(1500, source.getInt("feeMinor"))
         assertEquals(CategoryContext.canonical(bank), CategoryContext.canonical(source.getJSONArray("groupedTransactions")
             .getJSONObject(0).getJSONObject("rawPayload")))
         assertEquals(raw, tx.rawPayload)
+    }
+
+    @Test fun requestDropsOpaqueIdsAndEmptyValuesButFingerprintStillHashesThem() {
+        val raw = JSONObject().put("orderId", "3f2a9c4e-81b0-4d6f-9e2a-7c1b5d8e0f42").put("reference", "202610150123456789")
+            .put("notes", "").put("shopName", "Toko Obat Sehat").put("tags", JSONArray()).put("qty", 2).toString()
+        val tx = payment(raw = raw)
+        val sent = CategoryContext.request(tx, AnalysisSnapshot()) as JSONObject
+        val source = sent.getJSONObject("sourceData")
+        assertEquals("Toko Obat Sehat", source.getString("shopName"))
+        assertEquals(2, source.getInt("qty"))
+        listOf("orderId", "reference", "notes", "tags").forEach { assertFalse(source.has(it)) }
+        val fp = AiCategorization.fingerprint(tx, AnalysisSnapshot())
+        assertNotEquals(fp, AiCategorization.fingerprint(tx.copy(rawPayload = raw.replace("3f2a9c4e", "00000000")), AnalysisSnapshot()))
     }
 
     @Test fun allSourceEvidenceInvalidatesCacheButPriorAiOutputAndJsonFormattingDoNot() {
@@ -49,7 +64,7 @@ class CategoryContextTest {
         assertNotEquals(fp, AiCategorization.fingerprint(tx.copy(rawPayload = """{"items":[{"name":"Printer","qty":2}],"fee":100}"""), snapshot))
         assertEquals(fp, AiCategorization.fingerprint(tx.copy(rawPayload = """{ "fee":100, "items": [ {"qty":1,"name":"Printer"} ] }"""), snapshot))
         assertEquals(fp, AiCategorization.fingerprint(tx.copy(category = "Shopping & Hardware", aiReasoning = "AI suggestion: New result"), snapshot))
-        val saved = snapshot.copy(reasons = mapOf(tx.key to "AI suggestion: Saved"), aiCategoryFingerprints = mapOf(tx.key to fp))
+        val saved = snapshot.copy(reasons = mapOf(tx.key to "AI suggestion: Saved"), aiRecords = aiRecords(fingerprints = mapOf(tx.key to fp)))
         assertTrue(AiCategorization.nextBatch(listOf(tx), saved).isEmpty())
         assertEquals(1, AiCategorization.nextBatch(listOf(tx.copy(rawPayload = """{"newSourceField":"receipt context"}""")), saved).size)
     }
@@ -124,7 +139,10 @@ class CategoryContextTest {
                 AiCategorization.nextBatch(listOf(tx), snapshot)) }
             val messages = received!!.getJSONArray("messages")
             assertEquals("system", messages.getJSONObject(0).getString("role"))
-            val context = JSONObject(messages.getJSONObject(1).getString("content")).getJSONArray("transactions")
+            val prefix = JSONObject(messages.getJSONObject(1).getString("content"))
+            assertTrue(prefix.has("allowedCategories"))
+            assertFalse(prefix.has("transactions"))
+            val context = JSONObject(messages.getJSONObject(2).getString("content")).getJSONArray("transactions")
                 .getJSONObject(0).getJSONObject("transaction")
             assertEquals("Complete product specification", context.getJSONObject("sourceData").getJSONArray("items").getJSONObject(0).getString("specification"))
             assertEquals("Shopping & Hardware", result.getValue(tx.key).category)

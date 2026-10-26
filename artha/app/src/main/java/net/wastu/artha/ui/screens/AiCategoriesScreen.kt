@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -87,6 +88,20 @@ internal object AiCategoriesLogic {
 
     fun showCategorizeNewAction(progress: CategoryProgress, newCount: Int): Boolean =
         progress.state != CategoryAutomationState.WORKING && newCount > 0
+
+    fun historyHeadline(pending: Int, progress: CategoryProgress): String = when {
+        progress.state == CategoryAutomationState.WORKING -> categoryProgressLabel(progress) ?: "Categorizing"
+        pending == 0 -> "All payments categorized"
+        pending == 1 -> "1 payment not categorized"
+        else -> "$pending payments not categorized"
+    }
+
+    fun historySupporting(progress: CategoryProgress, configured: Boolean, enabled: Boolean): String? = when {
+        !enabled -> "AI analysis is off"
+        !configured -> "Add a provider below"
+        progress.stopped || progress.state == CategoryAutomationState.ERROR -> headerStatusText(progress)
+        else -> null
+    }
 
     fun iconContentDescription(state: PaymentCategoryState, source: CategorySource): String = when (state) {
         PaymentCategoryState.CATEGORIZING -> "Categorizing"
@@ -175,6 +190,8 @@ fun AiCategoriesScreen(
 
     val uncategorizedCount = remember(allTransactions, snapshot) { viewModel.recategorizeCount(RecategorizeScope.Uncategorized) }
     val allCount = remember(allTransactions, snapshot) { viewModel.recategorizeCount(RecategorizeScope.All) }
+    val historyCount = remember(allTransactions, snapshot) { viewModel.recategorizeCount(RecategorizeScope.AllPending) }
+    val configured = saved.baseUrl.isNotBlank() && saved.apiKey.isNotBlank() && saved.model.isNotBlank()
 
     Scaffold(
         topBar = {
@@ -224,14 +241,17 @@ fun AiCategoriesScreen(
         LazyColumn(Modifier.fillMaxSize().imePadding().padding(padding)) {
             item {
                 ListItem(
-                    headlineContent = { Text("Auto-categorize") },
-                    supportingContent = { Text("New payments this month") },
-                    trailingContent = { Switch(checked = snapshot.autoCategorize, onCheckedChange = null) },
-                    modifier = Modifier.toggleable(
-                        value = snapshot.autoCategorize,
-                        role = Role.Switch,
-                        onValueChange = { viewModel.setAutoCategorize(it) },
-                    ),
+                    headlineContent = { Text(AiCategoriesLogic.historyHeadline(historyCount, progress)) },
+                    supportingContent = AiCategoriesLogic.historySupporting(progress, configured, snapshot.analysisEnabled)
+                        ?.let { text -> { Text(text) } },
+                    trailingContent = if (!working && historyCount > 0) {
+                        {
+                            FilledTonalButton(
+                                enabled = configured && snapshot.analysisEnabled,
+                                onClick = { pendingScope = RecategorizeScope.AllPending },
+                            ) { Text("Categorize") }
+                        }
+                    } else null,
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 )
             }
@@ -299,6 +319,20 @@ fun AiCategoriesScreen(
                         },
                     ) { Text("Test connection") }
                 }
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text("Auto-categorize") },
+                    supportingContent = { Text("New payments in the current month") },
+                    trailingContent = { Switch(checked = snapshot.autoCategorize, onCheckedChange = null, enabled = snapshot.analysisEnabled) },
+                    modifier = Modifier.toggleable(
+                        value = snapshot.autoCategorize,
+                        enabled = snapshot.analysisEnabled,
+                        role = Role.Switch,
+                        onValueChange = { viewModel.setAutoCategorize(it) },
+                    ),
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
             }
             item {
                 ListItem(
@@ -371,15 +405,17 @@ fun AiCategoriesScreen(
             onDismissRequest = { pendingScope = null },
             text = { Text(text) },
             confirmButton = {
-                TextButton(onClick = { pendingScope = null; viewModel.recategorize(scope) }) { Text("Re-categorize") }
+                TextButton(onClick = { pendingScope = null; viewModel.recategorize(scope) }) {
+                    Text(if (scope == RecategorizeScope.AllPending) "Categorize" else "Re-categorize")
+                }
             },
             dismissButton = { TextButton(onClick = { pendingScope = null }) { Text("Cancel") } },
         )
     }
 }
 
-// List position of the Categories header: auto-categorize, provider header, AI switch, provider fields.
-private const val CATEGORIES_INDEX = 4
+// List position of the Categories header: history, provider header, AI switch, provider fields, auto-categorize.
+private const val CATEGORIES_INDEX = 5
 
 @Composable
 private fun SectionHeader(title: String) {

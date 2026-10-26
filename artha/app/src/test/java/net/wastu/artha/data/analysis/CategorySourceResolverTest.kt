@@ -132,24 +132,24 @@ class CategorySourceResolverTest {
         val manualTx = spending("tx_manual", manual = true)
 
         // Manual never needs review
-        assertFalse(needsReview(manualTx, AnalysisSnapshot(aiConfidence = mapOf(manualTx.key to CategoryConfidence.LOW))))
-        val manualSnapshot = AnalysisSnapshot(manualCategories = setOf(tx.key), aiConfidence = mapOf(tx.key to CategoryConfidence.LOW))
+        assertFalse(needsReview(manualTx, AnalysisSnapshot(aiRecords = aiRecords(confidence = mapOf(manualTx.key to CategoryConfidence.LOW)))))
+        val manualSnapshot = AnalysisSnapshot(manualCategories = setOf(tx.key), aiRecords = aiRecords(confidence = mapOf(tx.key to CategoryConfidence.LOW)))
         assertFalse(needsReview(tx, manualSnapshot))
 
         // No confidence recorded -> false
         assertFalse(needsReview(tx, AnalysisSnapshot()))
 
         // LOW confidence -> always true
-        assertTrue(needsReview(tx, AnalysisSnapshot(aiConfidence = mapOf(tx.key to CategoryConfidence.LOW))))
-        assertTrue(needsReview(txWithItems, AnalysisSnapshot(aiConfidence = mapOf(txWithItems.key to CategoryConfidence.LOW))))
+        assertTrue(needsReview(tx, AnalysisSnapshot(aiRecords = aiRecords(confidence = mapOf(tx.key to CategoryConfidence.LOW)))))
+        assertTrue(needsReview(txWithItems, AnalysisSnapshot(aiRecords = aiRecords(confidence = mapOf(txWithItems.key to CategoryConfidence.LOW)))))
 
         // HIGH confidence -> always false
-        assertFalse(needsReview(tx, AnalysisSnapshot(aiConfidence = mapOf(tx.key to CategoryConfidence.HIGH))))
-        assertFalse(needsReview(txWithItems, AnalysisSnapshot(aiConfidence = mapOf(txWithItems.key to CategoryConfidence.HIGH))))
+        assertFalse(needsReview(tx, AnalysisSnapshot(aiRecords = aiRecords(confidence = mapOf(tx.key to CategoryConfidence.HIGH)))))
+        assertFalse(needsReview(txWithItems, AnalysisSnapshot(aiRecords = aiRecords(confidence = mapOf(txWithItems.key to CategoryConfidence.HIGH)))))
 
-        // MEDIUM (70% and up) is trusted whether or not the payment has item details
-        assertFalse(needsReview(tx, AnalysisSnapshot(aiConfidence = mapOf(tx.key to CategoryConfidence.MEDIUM))))
-        assertFalse(needsReview(txWithItems, AnalysisSnapshot(aiConfidence = mapOf(txWithItems.key to CategoryConfidence.MEDIUM))))
+        // MEDIUM (above 90%) is trusted whether or not the payment has item details
+        assertFalse(needsReview(tx, AnalysisSnapshot(aiRecords = aiRecords(confidence = mapOf(tx.key to CategoryConfidence.MEDIUM)))))
+        assertFalse(needsReview(txWithItems, AnalysisSnapshot(aiRecords = aiRecords(confidence = mapOf(txWithItems.key to CategoryConfidence.MEDIUM)))))
     }
 
     @Test
@@ -159,7 +159,7 @@ class CategorySourceResolverTest {
             analysisEnabled = true,
             aiConfig = configuredAi,
             reasons = mapOf(tx.key to "AI suggestion: Groceries"),
-            aiConfidence = mapOf(tx.key to CategoryConfidence.HIGH),
+            aiRecords = aiRecords(confidence = mapOf(tx.key to CategoryConfidence.HIGH)),
         )
 
         // AI source
@@ -170,11 +170,11 @@ class CategorySourceResolverTest {
         assertEquals(CategorySource.MERCHANT, categorySource(tx, merchantSnapshot))
 
         // Review overrides AI and Merchant
-        val reviewSnapshot = merchantSnapshot.copy(aiConfidence = mapOf(tx.key to CategoryConfidence.LOW))
+        val reviewSnapshot = merchantSnapshot.copy(aiRecords = aiRecords(confidence = mapOf(tx.key to CategoryConfidence.LOW)))
         assertEquals(CategorySource.REVIEW, categorySource(tx, reviewSnapshot))
 
         // Failed overrides Review
-        val failedSnapshot = reviewSnapshot.copy(categoryFailures = mapOf(tx.key to "Timeout error"))
+        val failedSnapshot = reviewSnapshot.copy(aiRecords = aiRecords(failures = mapOf(tx.key to "Timeout error")))
         assertEquals(CategorySource.FAILED, categorySource(tx, failedSnapshot))
 
         // Manual overrides Failed
@@ -202,5 +202,42 @@ class CategorySourceResolverTest {
         // Manual category -> null
         val manualSnapshot = snapshot.copy(manualCategories = setOf(txAi.key))
         assertNull(categoryReasonText(manualSnapshot, txAi.key))
+    }
+
+    @Test
+    fun categoryStatusOrdersFailureReviewStaleAndUncategorizedAnswers() {
+        val tx = spending("tx_status")
+        fun status(snapshot: AnalysisSnapshot, fp: String = "fp") = categoryStatus(tx, snapshot) { fp }
+        val labeled = AnalysisSnapshot(
+            categories = mapOf(tx.key to "Food & Drinks"),
+            reasons = mapOf(tx.key to "AI suggestion: Coffee"),
+            aiRecords = mapOf(tx.key to AiRecord("fp", 95, null, false)),
+        )
+        assertEquals(CategoryStatus.NEW, status(AnalysisSnapshot()))
+        assertEquals(CategoryStatus.AI, status(labeled))
+        assertEquals(CategoryStatus.STALE, status(labeled, fp = "changed"))
+        assertEquals(CategoryStatus.REVIEW, status(labeled.copy(aiRecords = mapOf(tx.key to AiRecord("fp", 90, null, false)))))
+        assertEquals(CategoryStatus.AI, status(labeled.copy(aiRecords = mapOf(tx.key to AiRecord("fp", 91, null, false)))))
+        assertEquals(CategoryStatus.FAILED, status(labeled.copy(aiRecords = mapOf(tx.key to AiRecord("fp", 90, "Timed out", false)))))
+        // The model answering Uncategorized is a question for the user, not a label.
+        assertEquals(CategoryStatus.REVIEW, status(labeled.copy(categories = mapOf(tx.key to CategoryConstants.UNCATEGORIZED))))
+        assertEquals(CategoryStatus.MANUAL, status(labeled.copy(manualCategories = setOf(tx.key))))
+        assertEquals(CategoryStatus.NOT_SPENDING, categoryStatus(income(), labeled) { "fp" })
+    }
+
+    @Test
+    fun allPendingScopeCoversEveryMonthButSkipsLabeledAndManualPayments() {
+        val old = spending("old").copy(occurredAt = Instant.parse("2024-01-10T03:00:00Z"))
+        val recent = spending("recent").copy(occurredAt = Instant.parse("2026-10-10T03:00:00Z"))
+        val labeled = spending("labeled")
+        val manual = spending("manual")
+        val snapshot = AnalysisSnapshot(
+            categories = mapOf(labeled.key to "Food & Drinks", manual.key to "Shopping"),
+            reasons = mapOf(labeled.key to "AI suggestion: Coffee"),
+            manualCategories = setOf(manual.key),
+            aiRecords = mapOf(labeled.key to AiRecord(AiCategorization.fingerprint(labeled, AnalysisSnapshot()), 90, null, false)),
+        )
+        val keys = AiCategorization.scopeKeys(RecategorizeScope.AllPending, listOf(old, recent, labeled, manual), snapshot)
+        assertEquals(setOf(old.key, recent.key), keys)
     }
 }

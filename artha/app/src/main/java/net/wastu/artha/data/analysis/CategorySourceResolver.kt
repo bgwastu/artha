@@ -43,12 +43,50 @@ private fun inspectForItems(value: Any?, depth: Int): Boolean {
     return false
 }
 
-fun needsReview(tx: UnifiedTransaction, snapshot: AnalysisSnapshot): Boolean {
-    val isManual = tx.classificationIsManual || tx.key in snapshot.manualCategories
-    if (isManual) return false
-    val confidence = snapshot.aiConfidence[tx.key] ?: return false
-    return confidence == CategoryConfidence.LOW
+/** Where one payment stands in AI categorization. Queues, counts and labels all derive from [categoryStatus]. */
+enum class CategoryStatus {
+    /** Income, transfers and other rows that are not spending. */
+    NOT_SPENDING,
+    MANUAL,
+    /** No category, reason or pick yet. The only status automatic runs pick up. */
+    NEW,
+    /** Needs an AI label: the payment changed since the AI saw it, or its label came from elsewhere. Manual runs only. */
+    STALE,
+    AI,
+    MERCHANT,
+    /** The AI was 90% sure or less, or answered Uncategorized. */
+    REVIEW,
+    FAILED,
 }
+
+/** [fingerprint] is only called for settled AI labels, so callers can pass a cached hash. */
+fun categoryStatus(
+    tx: UnifiedTransaction,
+    snapshot: AnalysisSnapshot,
+    fingerprint: () -> String? = { AiCategorization.fingerprint(tx, snapshot) },
+): CategoryStatus {
+    if (!BudgetAnalyzer.isSpending(tx)) return CategoryStatus.NOT_SPENDING
+    if (tx.classificationIsManual || tx.key in snapshot.manualCategories) return CategoryStatus.MANUAL
+    val record = snapshot.aiRecords[tx.key]
+    if (record?.failure != null) return CategoryStatus.FAILED
+    if (record?.confidence?.let { it <= TRUSTED_ABOVE_PERCENT } == true) return CategoryStatus.REVIEW
+    val ownReason = snapshot.reasons[tx.key]
+    // Grouped rows can inherit a label saved under one of their linked records.
+    val reason = ownReason ?: tx.aiReasoning?.takeIf { tx.key !in snapshot.categories }
+    val fromAi = reason?.startsWith(AI_REASON_PREFIX) == true
+    val fromMerchant = reason?.startsWith(MERCHANT_REASON_PREFIX) == true
+    if (!fromAi && !fromMerchant) {
+        return if (tx.key !in snapshot.categories && ownReason == null) CategoryStatus.NEW else CategoryStatus.STALE
+    }
+    if (fromMerchant) return CategoryStatus.MERCHANT
+    // Changed evidence goes back to the model before an old answer is judged.
+    if (ownReason != null && record?.fingerprint != fingerprint()) return CategoryStatus.STALE
+    val category = if (ownReason != null) snapshot.categories[tx.key] else tx.category
+    return if (category == CategoryConstants.UNCATEGORIZED) CategoryStatus.REVIEW else CategoryStatus.AI
+}
+
+fun needsReview(tx: UnifiedTransaction, snapshot: AnalysisSnapshot): Boolean =
+    categoryStatus(tx, snapshot) { "" } == CategoryStatus.REVIEW
 
 fun aiCategoryReason(snapshot: AnalysisSnapshot, key: String): String? {
     if (key in snapshot.manualCategories) return null
@@ -66,30 +104,35 @@ fun categoryReasonText(snapshot: AnalysisSnapshot, key: String): String? {
     }
 }
 
+/** Display form of [categoryStatus] for the transaction detail and lists. */
 fun categorySource(tx: UnifiedTransaction, snapshot: AnalysisSnapshot): CategorySource {
-    if (tx.classificationIsManual || tx.key in snapshot.manualCategories) return CategorySource.MANUAL
-    if (tx.key in snapshot.categoryFailures) return CategorySource.FAILED
-    if (needsReview(tx, snapshot)) return CategorySource.REVIEW
-    val reason = snapshot.reasons[tx.key] ?: tx.aiReasoning
-    if (reason?.startsWith(MERCHANT_REASON_PREFIX) == true) return CategorySource.MERCHANT
-    if (reason?.startsWith(AI_REASON_PREFIX) == true) return CategorySource.AI
-    val aiConfigured = snapshot.aiConfig.baseUrl.isNotBlank() &&
-        snapshot.aiConfig.model.isNotBlank() &&
-        snapshot.aiConfig.apiKey.isNotBlank()
-    if (BudgetAnalyzer.isSpending(tx) && snapshot.analysisEnabled && aiConfigured) return CategorySource.PENDING
-    return CategorySource.NONE
+    // Display never needs the evidence hash: a stale AI label still reads as the AI's.
+    return when (categoryStatus(tx, snapshot) { snapshot.aiRecords[tx.key]?.fingerprint }) {
+        CategoryStatus.MANUAL -> CategorySource.MANUAL
+        CategoryStatus.FAILED -> CategorySource.FAILED
+        CategoryStatus.REVIEW -> CategorySource.REVIEW
+        CategoryStatus.MERCHANT -> CategorySource.MERCHANT
+        CategoryStatus.AI -> CategorySource.AI
+        CategoryStatus.NEW, CategoryStatus.STALE -> {
+            val config = snapshot.aiConfig
+            val configured = config.baseUrl.isNotBlank() && config.model.isNotBlank() && config.apiKey.isNotBlank()
+            if (snapshot.analysisEnabled && configured) CategorySource.PENDING else CategorySource.NONE
+        }
+        CategoryStatus.NOT_SPENDING -> CategorySource.NONE
+    }
 }
 
-/** Payments the user has to look at: the AI was under 70% sure (REVIEW) or could not decide (FAILED). */
+/** Payments the user has to look at: the AI was 90% sure or less (REVIEW) or could not decide (FAILED). */
 data class CategoryAttention(val review: Int = 0, val failed: Int = 0) {
     val total: Int get() = review + failed
 }
 
-fun attentionSource(tx: UnifiedTransaction, snapshot: AnalysisSnapshot): CategorySource? {
-    if (tx.classificationIsManual || tx.key in snapshot.manualCategories) return null
-    if (!BudgetAnalyzer.isSpending(tx)) return null
-    return categorySource(tx, snapshot).takeIf { it == CategorySource.REVIEW || it == CategorySource.FAILED }
-}
+fun attentionSource(tx: UnifiedTransaction, snapshot: AnalysisSnapshot): CategorySource? =
+    when (categoryStatus(tx, snapshot) { "" }) {
+        CategoryStatus.REVIEW -> CategorySource.REVIEW
+        CategoryStatus.FAILED -> CategorySource.FAILED
+        else -> null
+    }
 
 fun inMonth(tx: UnifiedTransaction, month: YearMonth?): Boolean =
     month == null || YearMonth.from(tx.occurredAt.atZone(net.wastu.artha.core.model.AccountingTime.zone)) == month

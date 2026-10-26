@@ -52,6 +52,29 @@ internal object CategoryContext {
         .put("currentCategory", tx.category ?: JSONObject.NULL).put("previousAiReason", tx.aiReasoning ?: JSONObject.NULL)
         .put("sourceData", parsedSource(tx.rawPayload))
 
+    private val opaqueId = Regex("^(?=.*\\d)[0-9A-Fa-f-]{16,}$|^\\d{12,}$")
+    /** Bookkeeping fields that say nothing about what was bought. */
+    private val requestOnlyDrops = listOf("key", "provider", "providerTransactionId", "canonicalKey", "isConfirmed", "classificationIsManual")
+
+    /**
+     * What the model reads: [transaction] without nulls, empty values, opaque ids and bookkeeping fields.
+     * Fingerprints keep hashing the full [transaction], so saved labels stay valid.
+     */
+    fun request(tx: UnifiedTransaction, snapshot: AnalysisSnapshot): Any =
+        compact(transaction(tx, snapshot).apply { requestOnlyDrops.forEach(::remove) }) ?: JSONObject()
+
+    private fun compact(value: Any?): Any? = when (value) {
+        null, JSONObject.NULL -> null
+        is JSONObject -> JSONObject().apply {
+            for (key in value.keys()) compact(value.get(key))?.let { put(key, it) }
+        }.takeIf { it.length() > 0 }
+        is JSONArray -> JSONArray().apply {
+            for (i in 0 until value.length()) put(compact(value.get(i)) ?: JSONObject.NULL)
+        }.takeIf { it.length() > 0 }
+        is String -> value.takeIf { it.isNotBlank() && !opaqueId.matches(it) }
+        else -> value
+    }
+
     /** JSON key order/whitespace do not change the evidence; arrays keep their original order. */
     fun canonical(value: Any?): String = when (value) {
         null, JSONObject.NULL -> "null"
