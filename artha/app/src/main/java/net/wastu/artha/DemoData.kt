@@ -36,12 +36,12 @@ internal fun samplePayments(): List<UnifiedTransaction> {
         payment("grocer", Provider.JAGO, 685000, "2026-10-13T11:30:00Z", "Superindo", "Groceries"),
         payment("food", Provider.GOJEK, 76000, "2026-10-13T05:15:00Z", "GoFood: Dapur Mentari", "Dining Out"),
         payment("ride", Provider.GRAB, 32000, "2026-10-12T01:45:00Z", "GrabCar to Sudirman", "Transport"),
-        payment("hardware", Provider.SHOPEE, 1850000, "2026-10-11T09:00:00Z", "Shopee: Wireless headphones", "Shopping & Hardware"),
+        payment("hardware", Provider.SHOPEE, 1850000, "2026-10-11T09:00:00Z", "Shopee: Wireless headphones", "Shopping & Gear"),
         payment("salary", Provider.JAGO, 12000000, "2026-10-10T02:00:00Z", "Payroll PT Contoh Digital", "", Direction.CREDIT),
         payment("bill", Provider.JAGO, 550000, "2026-10-09T07:00:00Z", "Internet monthly bill", "Utilities & Bills"),
         payment("reversal", Provider.JAGO, 125000, "2026-10-08T04:00:00Z", "Cloud storage (Reversed)", "Tech & Subscriptions", reversed = true),
         payment("market", Provider.JAGO, 610000, "2026-10-07T08:00:00Z", "Pasar Minggu", "Groceries"),
-        payment("gym", Provider.JAGO, 400000, "2026-10-06T03:00:00Z", "Monthly gym membership", "Health & Fitness"),
+        payment("gym", Provider.JAGO, 400000, "2026-10-06T03:00:00Z", "Monthly gym membership", "Medical & Health"),
         payment("meal", Provider.SHOPEE, 94000, "2026-10-05T05:00:00Z", "ShopeeFood: Lunch Box", "Dining Out"),
     )
     val history = buildList {
@@ -57,11 +57,11 @@ internal fun samplePayments(): List<UnifiedTransaction> {
                 add(payment("$month-${sequence++}", provider, rupiah, time.toString(), name, category, direction, reversed, flags))
             }
             addPayment(25, Provider.JAGO, 12000000, "Payroll PT Contoh Digital", "", Direction.CREDIT)
-            addPayment(1, Provider.JAGO, 1500000, "Monthly rent", "Housing")
+            addPayment(1, Provider.JAGO, 1500000, "Monthly rent", "Utilities & Bills")
             addPayment(3, Provider.JAGO, 350000, "Internet monthly bill", "Utilities & Bills")
             addPayment(4, Provider.JAGO, 195000 + random.nextInt(45) * 1000L, "PLN electricity", "Utilities & Bills")
             addPayment(5, Provider.JAGO, 80000, "Telkomsel data package", "Utilities & Bills")
-            addPayment(6, Provider.JAGO, 200000, "Monthly gym membership", "Health & Fitness")
+            addPayment(6, Provider.JAGO, 200000, "Monthly gym membership", "Medical & Health")
             addPayment(9, Provider.JAGO, 54900, "Music subscription", "Tech & Subscriptions")
             addPayment(11, Provider.JAGO, 29000, "Cloud storage", "Tech & Subscriptions")
             addPayment(15, Provider.JAGO, 65000, "Video subscription", "Tech & Subscriptions")
@@ -75,15 +75,15 @@ internal fun samplePayments(): List<UnifiedTransaction> {
                 .forEachIndexed { index, day -> addPayment(day, if (index % 2 == 0) Provider.GOJEK else Provider.GRAB,
                     12000 + random.nextInt(11) * 1000L, if (index % 2 == 0) "GoRide to office" else "GrabBike to station", "Transport") }
             addPayment(18, Provider.SHOPEE, 100000 + random.nextInt(21) * 10000L,
-                listOf("Shopee: Desk accessories", "Shopee: Running socks", "Shopee: Books")[month.monthValue % 3], "Shopping & Hardware")
+                listOf("Shopee: Desk accessories", "Shopee: Running socks", "Shopee: Books")[month.monthValue % 3], "Shopping & Gear")
             addPayment(20, Provider.JAGO, 150000, "Expense reimbursement", "", Direction.CREDIT)
             addPayment(26, Provider.JAGO, 1000000, "Pocket Transfer: Savings", "", flags = ",\"isPocketTransfer\":true")
             addPayment(26, Provider.JAGO, 1000000, "Pocket Transfer: Main Pocket", "", Direction.CREDIT, flags = ",\"isPocketTransfer\":true")
             addPayment(8, Provider.JAGO, 300000, "GoPay top-up", "", flags = ",\"isWalletFunding\":true")
-            addPayment(18, Provider.JAGO, 2500, "Bank transfer fee", "Utilities & Bills")
+            addPayment(18, Provider.JAGO, 2500, "Bank transfer fee", "Taxes & Admin")
             if (month.monthValue % 3 == 0) {
                 addPayment(21, Provider.SHOPEE, 89000, "Shopee refund: Returned item", "", Direction.CREDIT)
-                addPayment(16, Provider.JAGO, 99000, "Card payment (Reversed)", "Shopping & Hardware", reversed = true)
+                addPayment(16, Provider.JAGO, 99000, "Card payment (Reversed)", "Shopping & Gear", reversed = true)
             }
             month = month.plusMonths(1)
         }

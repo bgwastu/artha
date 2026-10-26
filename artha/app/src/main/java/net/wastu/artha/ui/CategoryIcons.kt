@@ -57,27 +57,31 @@ val AVAILABLE_CATEGORY_ICONS: List<Pair<String, ImageVector>> = listOf(
 )
 
 val DEFAULT_CATEGORY_ICONS: Map<String, String> = mapOf(
-    "Dining Out" to "restaurant",
-    "Food & Drink" to "restaurant",
     "Groceries" to "shopping_cart",
-    "Transport" to "car",
+    "Dining Out" to "restaurant",
     "Tech & Subscriptions" to "devices",
+    "Utilities & Bills" to "receipt",
+    "Transport" to "car",
+    "Medical & Health" to "health",
+    "Shopping & Gear" to "shopping_bag",
+    "Personal Care" to "spa",
+    "Travel & Lodging" to "flight",
+    "Taxes & Admin" to "receipt",
+    "Investments & Transfers" to "trending_up",
+    "Uncategorized" to "default",
+    // Aliases & legacy defaults
+    "Food & Drink" to "restaurant",
     "Shopping & Hardware" to "shopping_bag",
     "Clothing & Apparel" to "clothing",
-    "Travel & Lodging" to "flight",
-    "Utilities & Bills" to "receipt",
-    "Bills & Telco" to "receipt",
     "Health & Fitness" to "fitness",
-    "Personal Care" to "spa",
     "Family & Social" to "gift",
     "Family & Gifts" to "gift",
+    "Bills & Telco" to "receipt",
     "Cash" to "wallet",
     "Cash & ATM" to "wallet",
     "Taxes & Fees" to "receipt",
     "Business" to "work",
-    "Investments & Transfers" to "trending_up",
     "Entertainment & Games" to "games",
-    "Uncategorized" to "default",
 )
 
 private val ICON_MAP: Map<String, ImageVector> = AVAILABLE_CATEGORY_ICONS.toMap()

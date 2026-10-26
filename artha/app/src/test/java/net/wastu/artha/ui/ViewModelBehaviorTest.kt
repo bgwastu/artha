@@ -362,7 +362,7 @@ class ViewModelBehaviorTest {
         val fp3 = AiCategorization.fingerprint(tx3, input2)
         val candidates2 = listOf(CategoryCandidate(tx2, fp2), CategoryCandidate(tx3, fp3))
         val suggestions2 = mapOf(
-            tx2.key to CategorySuggestion("Shopping & Hardware", "AI suggestion: Shop"),
+            tx2.key to CategorySuggestion("Shopping & Gear", "AI suggestion: Shop"),
             tx3.key to CategorySuggestion("Transport", "AI suggestion: Train"),
         )
 

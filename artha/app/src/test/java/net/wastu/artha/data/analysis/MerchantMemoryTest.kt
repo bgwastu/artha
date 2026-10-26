@@ -155,7 +155,7 @@ class MerchantMemoryTest {
 
         // Marketplace payments have merchantConsistent = false, so they are not in aiMerchantConsistent
         val snapshot = AnalysisSnapshot(
-            categories = mapOf(p1.key to "Shopping & Hardware", p2.key to "Shopping & Hardware"),
+            categories = mapOf(p1.key to "Shopping & Gear", p2.key to "Shopping & Gear"),
             reasons = mapOf(p1.key to "AI suggestion: Order", p2.key to "AI suggestion: Order"),
             aiRecords = aiRecords(consistent = emptySet()),
         )

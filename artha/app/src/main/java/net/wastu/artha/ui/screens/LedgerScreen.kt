@@ -123,14 +123,52 @@ import androidx.compose.ui.platform.LocalDensity
 import net.wastu.artha.core.model.AccountingTime
 import java.time.Instant
 
+enum class TransactionType(val label: String) {
+    QRIS("QRIS"),
+    TRANSFER("Transfer"),
+    CARD("Card");
+
+    fun matches(transaction: UnifiedTransaction): Boolean {
+        val payload = runCatching { JSONObject(transaction.rawPayload) }.getOrNull()
+        return when (this) {
+            QRIS -> transaction.isQris ||
+                payload?.optBoolean("isQris") == true ||
+                payload?.optString("f1").equals("QRD01", ignoreCase = true) ||
+                payload?.optString("code").equals("QRD01", ignoreCase = true) ||
+                payload?.optString("paymentMethod").equals("QRIS", ignoreCase = true) ||
+                transaction.description.startsWith("QRIS", ignoreCase = true)
+
+            TRANSFER -> payload?.optBoolean("isPocketTransfer") == true ||
+                payload?.optBoolean("isWalletFunding") == true ||
+                payload?.optBoolean("isOwnTransfer") == true ||
+                payload?.optString("paymentMethod") in setOf("Transfer", "Top Up", "Pocket", "Savings") ||
+                payload?.optString("code") in BudgetAnalyzer.INTERNAL_TRANSFER_CODES ||
+                payload?.optString("code") in BudgetAnalyzer.WALLET_FUNDING_CODES ||
+                payload?.optString("code") in setOf("OTD10", "TFD70", "TFC51", "WTD01", "WTC01") ||
+                transaction.description.startsWith("Pocket Transfer:", ignoreCase = true) ||
+                transaction.description.startsWith("Transfer ", ignoreCase = true) ||
+                transaction.description.startsWith("Top up", ignoreCase = true) ||
+                transaction.description.startsWith("Topup", ignoreCase = true)
+
+            CARD -> transaction.cardLast4 != null ||
+                payload?.optString("cardLast4")?.isNotBlank() == true ||
+                payload?.optString("cardMask")?.isNotBlank() == true ||
+                payload?.optString("paymentMethod") in setOf("Visa Debit", "Credit Card", "Card") ||
+                payload?.optString("code") in setOf("PSD02", "PSD02-R")
+        }
+    }
+}
+
 data class TransactionFilters(
     val provider: Provider? = null,
     val direction: Direction? = null,
+    val type: TransactionType? = null,
 ) {
     fun matches(transaction: UnifiedTransaction): Boolean =
         transaction.isConfirmed &&
         (provider == null || transaction.provider == provider) &&
-        (direction == null || transaction.direction == direction)
+        (direction == null || transaction.direction == direction) &&
+        (type == null || type.matches(transaction))
 }
 
 internal fun transactionSearchScope(
@@ -147,10 +185,20 @@ internal fun transactionSearchScope(
 }
 
 val TransactionFiltersSaver = listSaver<TransactionFilters, String>(
-    save = { listOf(it.provider?.name.orEmpty(), it.direction?.name.orEmpty()) },
-    // Earlier bundles have a third activity item. Ignore it while restoring source/direction.
-    restore = { TransactionFilters(it.getOrNull(0)?.takeIf(String::isNotBlank)?.let(Provider::valueOf),
-        it.getOrNull(1)?.takeIf(String::isNotBlank)?.let(Direction::valueOf)) },
+    save = { listOf(it.provider?.name.orEmpty(), it.direction?.name.orEmpty(), it.type?.name.orEmpty()) },
+    restore = { list ->
+        TransactionFilters(
+            provider = list.getOrNull(0)?.takeIf(String::isNotBlank)?.let { name ->
+                runCatching { Provider.valueOf(name) }.getOrNull()
+            },
+            direction = list.getOrNull(1)?.takeIf(String::isNotBlank)?.let { name ->
+                runCatching { Direction.valueOf(name) }.getOrNull()
+            },
+            type = list.getOrNull(2)?.takeIf(String::isNotBlank)?.let { name ->
+                TransactionType.entries.firstOrNull { it.name == name }
+            },
+        )
+    },
 )
 
 enum class TransactionPeriod(val label: String) {
@@ -238,6 +286,7 @@ fun LedgerScreen(
     }
     val active = buildList {
         category?.let { add(ActiveTransactionFilter(it) { viewModel?.clearCategoryFilter() }) }
+        effectiveFilters.type?.let { add(ActiveTransactionFilter(it.label) { onFiltersChanged(filters.copy(type = null)) }) }
         effectiveFilters.provider?.let { add(ActiveTransactionFilter(it.displayName) { onFiltersChanged(filters.copy(provider = null)) }) }
         dateRange?.let { add(ActiveTransactionFilter(periodLabel(it, LocalDate.now(AccountingTime.clock))) { viewModel?.clearDateRangeFilter() }) }
     }
@@ -332,6 +381,7 @@ private fun TransactionFilterSheet(
                             label = { Text(category) }, trailingIcon = { Icon(Icons.Default.Clear, "Remove category filter") })
                     }
                     if (category == null || clearCategory) {
+                        FilterOptions("Type", listOf(null) + TransactionType.entries, draft.type, { it?.label ?: "All" }) { draft = draft.copy(type = it) }
                         FilterOptions("Source", listOf(null) + providers, draft.provider, { it?.displayName ?: "All" }) { draft = draft.copy(provider = it) }
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -429,6 +479,7 @@ fun SearchTransactionsScreen(
     val transactions = remember(debitTransactions, effectiveFilters, dateRange) { transactionSearchScope(debitTransactions, effectiveFilters, dateRange) }
     fun clearFilters() { filters = TransactionFilters(); firstDay = null; lastDay = null }
     val activeFilters = buildList {
+        effectiveFilters.type?.let { add(ActiveTransactionFilter(it.label) { filters = filters.copy(type = null) }) }
         effectiveFilters.provider?.let { add(ActiveTransactionFilter(it.displayName) { filters = filters.copy(provider = null) }) }
         dateRange?.let { add(ActiveTransactionFilter(periodLabel(it, LocalDate.now(AccountingTime.clock))) { firstDay = null; lastDay = null }) }
     }

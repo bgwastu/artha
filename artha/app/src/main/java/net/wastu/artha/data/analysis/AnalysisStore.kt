@@ -68,6 +68,20 @@ data class AiRecord(
 }
 
 val INITIAL_DEFAULT_CATEGORIES = listOf(
+    "Groceries",
+    "Dining Out",
+    "Tech & Subscriptions",
+    "Utilities & Bills",
+    "Transport",
+    "Medical & Health",
+    "Shopping & Gear",
+    "Personal Care",
+    "Travel & Lodging",
+    "Taxes & Admin",
+    "Investments & Transfers",
+)
+
+val LEGACY_DEFAULT_CATEGORIES = setOf(
     "Dining Out",
     "Groceries",
     "Transport",
@@ -129,7 +143,13 @@ class AnalysisStore(context: Context) {
             prefs.edit { putString("custom_categories", seeded) }
             INITIAL_DEFAULT_CATEGORIES
         } else {
-            parseList(customCategoriesJson).ifEmpty { INITIAL_DEFAULT_CATEGORIES }
+            val loaded = parseList(customCategoriesJson)
+            if (loaded.toSet() == LEGACY_DEFAULT_CATEGORIES) {
+                prefs.edit { putString("custom_categories", JSONArray(INITIAL_DEFAULT_CATEGORIES).toString()) }
+                INITIAL_DEFAULT_CATEGORIES
+            } else {
+                loaded.ifEmpty { INITIAL_DEFAULT_CATEGORIES }
+            }
         }
         val categoryIconsJson = prefs.getString("custom_category_icons", "{}") ?: "{}"
         val monthlyNotesJson = prefs.getString("monthly_notes", "{}") ?: "{}"

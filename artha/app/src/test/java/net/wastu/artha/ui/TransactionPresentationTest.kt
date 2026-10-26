@@ -8,6 +8,9 @@ import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.ui.screens.TransactionFilters
+import androidx.compose.runtime.saveable.SaverScope
+import net.wastu.artha.ui.screens.TransactionFiltersSaver
+import net.wastu.artha.ui.screens.TransactionType
 import net.wastu.artha.ui.screens.TransactionPeriod
 import net.wastu.artha.ui.screens.transactionSearchScope
 import org.junit.Assert.*
@@ -159,6 +162,45 @@ class TransactionPresentationTest {
             rawPayload = """{"isQris":true,"paymentMethod":"QRIS","counterpart":"GoPay","localized":"Dunia Kedol"}""",
         )
         assertEquals("Dunia Kedol", transactionHumanLine(jagoQris))
+    }
+    @Test fun typeFilterMatchesQrisTransferAndCard() {
+        val qris = transaction("qris").copy(isQris = true)
+        val transfer = transaction("transfer").copy(
+            description = "Pocket Transfer: Main Pocket",
+            rawPayload = """{"isPocketTransfer":true}""",
+        )
+        val card = transaction("card").copy(cardLast4 = "1234")
+        val general = transaction("general")
+
+        val qrisFilter = TransactionFilters(type = TransactionType.QRIS)
+        assertTrue(qrisFilter.matches(qris))
+        assertFalse(qrisFilter.matches(transfer))
+        assertFalse(qrisFilter.matches(card))
+        assertFalse(qrisFilter.matches(general))
+
+        val transferFilter = TransactionFilters(type = TransactionType.TRANSFER)
+        assertFalse(transferFilter.matches(qris))
+        assertTrue(transferFilter.matches(transfer))
+        assertFalse(transferFilter.matches(card))
+        assertFalse(transferFilter.matches(general))
+
+        val cardFilter = TransactionFilters(type = TransactionType.CARD)
+        assertFalse(cardFilter.matches(qris))
+        assertFalse(cardFilter.matches(transfer))
+        assertTrue(cardFilter.matches(card))
+        assertFalse(cardFilter.matches(general))
+    }
+
+    @Test fun transactionFiltersSaverPreservesTypeAndHandlesLegacyBundles() {
+        val filters = TransactionFilters(provider = Provider.JAGO, direction = Direction.DEBIT, type = TransactionType.QRIS)
+        val scope = object : SaverScope { override fun canBeSaved(value: Any) = true }
+        val saved = with(TransactionFiltersSaver) { scope.save(filters) }!!
+        val restored = TransactionFiltersSaver.restore(saved)
+        assertEquals(filters, restored)
+
+        // Legacy bundle with only 2 items
+        val legacy = TransactionFiltersSaver.restore(listOf("JAGO", "DEBIT"))
+        assertEquals(TransactionFilters(provider = Provider.JAGO, direction = Direction.DEBIT, type = null), legacy)
     }
 
     private fun transaction(id: String, provider: Provider = Provider.JAGO, direction: Direction = Direction.DEBIT, confirmed: Boolean = true) =

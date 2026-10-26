@@ -44,7 +44,7 @@ class AnalysisStoreEngineTest {
 
         val suggestions = mapOf(
             tx1.key to CategorySuggestion("Groceries", "AI suggestion: Food", percentOf(CategoryConfidence.HIGH), merchantConsistent = true),
-            tx2.key to CategorySuggestion("Shopping & Hardware", "AI suggestion: Shop", percentOf(CategoryConfidence.LOW), merchantConsistent = false),
+            tx2.key to CategorySuggestion("Shopping & Gear", "AI suggestion: Shop", percentOf(CategoryConfidence.LOW), merchantConsistent = false),
         )
 
         val committed = store.commitCategorySuggestions(candidates, suggestions, input)
@@ -52,7 +52,7 @@ class AnalysisStoreEngineTest {
 
         val snap = store.snapshot.value
         assertEquals("Groceries", snap.categories[tx1.key])
-        assertEquals("Shopping & Hardware", snap.categories[tx2.key])
+        assertEquals("Shopping & Gear", snap.categories[tx2.key])
         assertEquals(CategoryConfidence.HIGH, snap.aiConfidence[tx1.key])
         assertEquals(CategoryConfidence.LOW, snap.aiConfidence[tx2.key])
         assertTrue(tx1.key in snap.aiMerchantConsistent)

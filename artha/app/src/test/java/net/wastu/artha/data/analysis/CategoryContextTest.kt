@@ -63,7 +63,7 @@ class CategoryContextTest {
         assertNotEquals(fp, AiCategorization.fingerprint(tx.copy(rawPayload = """{"items":[{"name":"Groceries","qty":1}],"fee":100}"""), snapshot))
         assertNotEquals(fp, AiCategorization.fingerprint(tx.copy(rawPayload = """{"items":[{"name":"Printer","qty":2}],"fee":100}"""), snapshot))
         assertEquals(fp, AiCategorization.fingerprint(tx.copy(rawPayload = """{ "fee":100, "items": [ {"qty":1,"name":"Printer"} ] }"""), snapshot))
-        assertEquals(fp, AiCategorization.fingerprint(tx.copy(category = "Shopping & Hardware", aiReasoning = "AI suggestion: New result"), snapshot))
+        assertEquals(fp, AiCategorization.fingerprint(tx.copy(category = "Shopping & Gear", aiReasoning = "AI suggestion: New result"), snapshot))
         val saved = snapshot.copy(reasons = mapOf(tx.key to "AI suggestion: Saved"), aiRecords = aiRecords(fingerprints = mapOf(tx.key to fp)))
         assertTrue(AiCategorization.nextBatch(listOf(tx), saved).isEmpty())
         assertEquals(1, AiCategorization.nextBatch(listOf(tx.copy(rawPayload = """{"newSourceField":"receipt context"}""")), saved).size)
@@ -124,7 +124,7 @@ class CategoryContextTest {
                 val bytes = ByteArray(length)
                 java.io.DataInputStream(input).readFully(bytes)
                 received = JSONObject(bytes.toString(Charsets.UTF_8))
-                val content = """{"classifications":[{"id":"p0","category":"Shopping & Hardware","reason":"Receipt lists a printer"}]}"""
+                val content = """{"classifications":[{"id":"p0","category":"Shopping & Gear","reason":"Receipt lists a printer"}]}"""
                 val body = JSONObject().put("choices", JSONArray().put(JSONObject().put("message", JSONObject().put("content", content)))).toString().toByteArray()
                 socket.getOutputStream().apply {
                     write("HTTP/1.1 200 OK\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n".toByteArray())
@@ -145,7 +145,7 @@ class CategoryContextTest {
             val context = JSONObject(messages.getJSONObject(2).getString("content")).getJSONArray("transactions")
                 .getJSONObject(0).getJSONObject("transaction")
             assertEquals("Complete product specification", context.getJSONObject("sourceData").getJSONArray("items").getJSONObject(0).getString("specification"))
-            assertEquals("Shopping & Hardware", result.getValue(tx.key).category)
+            assertEquals("Shopping & Gear", result.getValue(tx.key).category)
             assertEquals("Uncategorized", tx.category)
             assertEquals(123400L, tx.money.amountMinor)
         } finally { server.close(); worker.join(1000) }
