@@ -328,17 +328,18 @@ internal fun DonutChart(
     Box(modifier, contentAlignment = Alignment.Center) {
         PieChart(
             values = values,
-            modifier = Modifier.fillMaxSize().padding(12.dp),
-            holeSize = 0.60f,
-            minPieDiameter = 150.dp,
+            modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 6.dp),
+            holeSize = 0.58f,
+            minPieDiameter = 200.dp,
+            maxPieDiameter = 240.dp,
             forceCenteredPie = true,
-            labelPositionProvider = CircularLabelPositionProvider(1.28f),
+            labelPositionProvider = CircularLabelPositionProvider(1.10f),
             labelConnector = { index ->
                 val slice = slices.getOrNull(index)
                 if (slice != null && (slice.percent >= 4 || selected == index)) {
                     StraightLineConnector(
                         connectorColor = sliceColor(index, slice.isOther),
-                        connectorStroke = Stroke(width = if (selected == index) 2f else 1.2f),
+                        connectorStroke = Stroke(width = if (selected == index) 1.5f else 1f),
                     )
                 }
             },
