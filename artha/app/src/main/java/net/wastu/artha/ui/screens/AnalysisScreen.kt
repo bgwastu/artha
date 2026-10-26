@@ -150,7 +150,6 @@ fun AnalysisScreen(
     val selectedMonth by viewModel.selectedMonth.collectAsStateWithLifecycle()
     val analysisEnabled = snapshot.analysisEnabled
 
-    var showScopeDialog by remember { mutableStateOf(false) }
     var showRecategorizeMonth by remember { mutableStateOf(false) }
     val monthPendingScope = remember(selectedMonth) { RecategorizeScope.MonthPending(selectedMonth) }
     val pendingCount by produceState(0, savedTransactions, snapshot, selectedMonth) {
@@ -194,7 +193,7 @@ fun AnalysisScreen(
         }
         return
     }
-    if (ledgerState is net.wastu.artha.ui.LedgerState.Loading || analysis.month != selectedMonth) {
+    if (ledgerState is net.wastu.artha.ui.LedgerState.Loading && savedTransactions.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(Modifier.semantics { contentDescription = "Loading saved spending" })
         }
@@ -240,17 +239,15 @@ fun AnalysisScreen(
                     total = total,
                     totalDeltaPercent = analysis.totalDeltaPercent,
                     canGoNext = canGoNext,
-                    onOpenScope = { showScopeDialog = true },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .height(260.dp),
+                        .padding(horizontal = 8.dp)
+                        .height(300.dp),
                 )
             }
         } else {
             item(key = "empty_spending") {
                 Surface(
-                    onClick = { showScopeDialog = true },
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                     shape = MaterialTheme.shapes.medium,
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -350,7 +347,6 @@ fun AnalysisScreen(
                     color = color,
                     categoryIcons = snapshot.categoryIcons,
                     isSelected = isSelected,
-                    selectedMonth = selectedMonth,
                     onSelect = {
                         if (selectedSliceIndex == index) {
                             viewModel.openCategoryTransactions(slice.name, slice.categories)
@@ -361,8 +357,6 @@ fun AnalysisScreen(
                     onOpenCategory = {
                         viewModel.openCategoryTransactions(slice.name, slice.categories)
                     },
-                    onRecategorize = viewModel::recategorize,
-                    onRecategorizeCount = viewModel::recategorizeCount,
                 )
             }
         }
@@ -379,12 +373,6 @@ fun AnalysisScreen(
             )
         }
     }
-    if (showScopeDialog) AlertDialog(
-        onDismissRequest = { showScopeDialog = false }, title = { Text("Spending total") },
-        text = { Text("Paid expenses in rupiah, counted once across saved sources. Transfers, wallet top-ups and refunded charges are excluded. History may be incomplete.") },
-        confirmButton = { TextButton(onClick = { showScopeDialog = false }) { Text("Close") } },
-        dismissButton = { TextButton(onClick = { showScopeDialog = false; viewModel.setTargetDestination("SETTINGS") }) { Text("Sources") } },
-    )
 }
 
 @Composable
@@ -438,106 +426,43 @@ private fun CategorySliceRow(
     color: Color,
     categoryIcons: Map<String, String>,
     isSelected: Boolean,
-    selectedMonth: YearMonth,
     onSelect: () -> Unit,
     onOpenCategory: () -> Unit,
-    onRecategorize: (RecategorizeScope) -> Unit,
-    onRecategorizeCount: (RecategorizeScope) -> Int = { 0 },
 ) {
-    var showMenu by remember { mutableStateOf(false) }
-    var showConfirmDialog by remember { mutableStateOf(false) }
-    val scope = remember(slice.name, selectedMonth) {
-        RecategorizeScope.CategoryInMonth(slice.name, selectedMonth)
-    }
-    Box(Modifier.fillMaxWidth()) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .combinedClickable(
-                    onClick = onSelect,
-                    onLongClick = {
-                        if (!slice.isOther) showMenu = true else onOpenCategory()
-                    },
-                    onClickLabel = "Select category",
-                    onLongClickLabel = "Options for ${slice.name}",
-                )
-                .background(
-                    if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh
-                    else Color.Transparent,
-                )
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-        ) {
-            Box(
-                Modifier
-                    .size(10.dp)
-                    .background(color, CircleShape),
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .combinedClickable(
+                onClick = onSelect,
+                onLongClick = onOpenCategory,
+                onClickLabel = "Select category",
+                onLongClickLabel = "View expenses",
             )
-            Icon(categoryIconFor(slice.name, categoryIcons), contentDescription = null)
-            Text(
-                slice.name,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
+            .background(
+                if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh
+                else Color.Transparent,
             )
-            Text(
-                "${slice.percent}%",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                formatMoney(Money(slice.amountMinor)),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-        if (!slice.isOther) {
-            DropdownMenu(
-                expanded = showMenu,
-                onDismissRequest = { showMenu = false },
-            ) {
-                DropdownMenuItem(
-                    text = { Text("View expenses") },
-                    onClick = {
-                        showMenu = false
-                        onOpenCategory()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(recategorizeLabel(scope)) },
-                    onClick = {
-                        showMenu = false
-                        showConfirmDialog = true
-                    },
-                )
-            }
-        }
-    }
-    if (showConfirmDialog) {
-        val count = onRecategorizeCount(scope)
-        val confirmText = recategorizeConfirmation(scope, count)
-        if (confirmText != null) {
-            AlertDialog(
-                onDismissRequest = { showConfirmDialog = false },
-                text = { Text(confirmText) },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            showConfirmDialog = false
-                            onRecategorize(scope)
-                        },
-                    ) {
-                        Text("Re-categorize")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showConfirmDialog = false }) {
-                        Text("Cancel")
-                    }
-                },
-            )
-        }
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        Icon(categoryIconFor(slice.name, categoryIcons), contentDescription = null, tint = color)
+        Text(
+            slice.name,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            "${slice.percent}%",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            formatMoney(Money(slice.amountMinor)),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 

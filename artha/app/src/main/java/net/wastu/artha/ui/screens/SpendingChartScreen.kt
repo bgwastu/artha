@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -52,6 +53,15 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.text.style.TextOverflow
+import io.github.koalaplot.core.pie.CircularLabelPositionProvider
+import io.github.koalaplot.core.pie.DefaultSlice
+import io.github.koalaplot.core.pie.PieChart
+import io.github.koalaplot.core.pie.StraightLineConnector
+import io.github.koalaplot.core.util.ExperimentalKoalaPlotApi
+import net.wastu.artha.core.model.Money
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -146,17 +156,17 @@ object SpendingChartLogic {
  */
 internal fun sliceColor(index: Int, isOther: Boolean = false) = Color(
     if (isOther) {
-        0xFF9CA3AF
+        0xFF6B7280
     } else {
         when (index % 8) {
-            0 -> 0xFF34D399
-            1 -> 0xFF60A5FA
-            2 -> 0xFFFBBF24
-            3 -> 0xFFF87171
-            4 -> 0xFFA78BFA
-            5 -> 0xFFF472B6
-            6 -> 0xFF22D3EE
-            else -> 0xFF9CA3AF
+            0 -> 0xFF2B8A64
+            1 -> 0xFF3B72B9
+            2 -> 0xFFD97706
+            3 -> 0xFFDC3545
+            4 -> 0xFF7C5CB7
+            5 -> 0xFFC05282
+            6 -> 0xFF0D9488
+            else -> 0xFF4F46E5
         }
     }
 )
@@ -297,19 +307,7 @@ fun SpendingChartScreen(
 }
 
 /** One slice the donut draws; pixel math lives with the canvas. */
-private data class DonutSlice(
-    val name: String,
-    val amountMinor: Long,
-    val percent: Int,
-    val color: Color,
-)
-
-/**
- * Hand-drawn donut with exact geometry: the ring stroke is centered between inner and outer radii,
- * so slices and gaps are pixel-perfect. Selected slice explodes outward smoothly while other slices dim,
- * and the center hole displays category breakdown on selection or total when idle.
- */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalKoalaPlotApi::class)
 @Composable
 internal fun DonutChart(
     slices: List<SpendingChartLogic.Slice>,
@@ -320,209 +318,154 @@ internal fun DonutChart(
     total: Long,
     totalDeltaPercent: Float? = null,
     canGoNext: Boolean = true,
-    onOpenScope: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val items = remember(slices) {
-        slices.mapIndexed { index, slice ->
-            DonutSlice(slice.name, slice.amountMinor, slice.percent, sliceColor(index, slice.isOther))
-        }
-    }
-    val explode = items.mapIndexed { index, _ ->
-        animateFloatAsState(
-            targetValue = if (selected == index) 1f else 0f,
-            animationSpec = tween(250),
-            label = "explode$index",
-        ).value
-    }
-    val alpha = items.mapIndexed { index, _ ->
-        animateFloatAsState(
-            targetValue = when (selected) {
-                null -> 1f
-                index -> 1f
-                else -> 0.35f
-            },
-            animationSpec = tween(150),
-            label = "alpha$index",
-        ).value
-    }
-    val currentSelection by rememberUpdatedState(selected)
+    if (slices.isEmpty()) return
+
+    val values = remember(slices) { slices.map { it.amountMinor.toFloat() } }
+    val picked = selected?.let { slices.getOrNull(it) }
 
     Box(modifier, contentAlignment = Alignment.Center) {
-        Canvas(
-            Modifier
-                .fillMaxSize()
-                .pointerInput(items, total) {
-                    detectTapGestures(
-                        onTap = { tap ->
-                            val center = Offset(size.width / 2f, size.height / 2f)
-                            val maxRadius = min(size.width, size.height) / 2f
-                            val outerRadius = maxRadius * 0.82f
-                            val ringThickness = 28.dp.toPx()
-                            val innerRadius = outerRadius - ringThickness
-
-                            val dx = tap.x - center.x
-                            val dy = tap.y - center.y
-                            val radius = hypot(dx.toDouble(), dy.toDouble()).toFloat()
-                            val selection = currentSelection
-
-                            if (radius < innerRadius) {
-                                // Tapping the hole clears the selection.
-                                if (selection != null) onSelect(null)
-                            } else if (radius <= outerRadius + 16.dp.toPx()) {
-                                var degrees = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble()))
-                                degrees = ((degrees + 90) + 360) % 360
-                                var running = 0.0
-                                var picked = -1
-                                items.forEachIndexed { index, item ->
-                                    val sweep = item.amountMinor.toDouble() / total * 360.0
-                                    if (picked < 0 && degrees < running + sweep) picked = index
-                                    running += sweep
-                                }
-                                if (picked < 0) picked = items.lastIndex
-                                if (picked == selection) onSelect(null) else onSelect(picked)
-                            }
-                        },
-                        onLongPress = { tap ->
-                            val center = Offset(size.width / 2f, size.height / 2f)
-                            val maxRadius = min(size.width, size.height) / 2f
-                            val outerRadius = maxRadius * 0.82f
-                            val ringThickness = 28.dp.toPx()
-                            val innerRadius = outerRadius - ringThickness
-
-                            val dx = tap.x - center.x
-                            val dy = tap.y - center.y
-                            val radius = hypot(dx.toDouble(), dy.toDouble()).toFloat()
-
-                            if (radius in (innerRadius - 8.dp.toPx())..(outerRadius + 16.dp.toPx())) {
-                                var degrees = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble()))
-                                degrees = ((degrees + 90) + 360) % 360
-                                var running = 0.0
-                                var picked = -1
-                                items.forEachIndexed { index, item ->
-                                    val sweep = item.amountMinor.toDouble() / total * 360.0
-                                    if (picked < 0 && degrees < running + sweep) picked = index
-                                    running += sweep
-                                }
-                                if (picked < 0) picked = items.lastIndex
-                                slices.getOrNull(picked)?.let(onOpenCategory)
-                            }
-                        },
+        PieChart(
+            values = values,
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            holeSize = 0.60f,
+            minPieDiameter = 150.dp,
+            forceCenteredPie = true,
+            labelPositionProvider = CircularLabelPositionProvider(1.28f),
+            labelConnector = { index ->
+                val slice = slices.getOrNull(index)
+                if (slice != null && (slice.percent >= 4 || selected == index)) {
+                    StraightLineConnector(
+                        connectorColor = sliceColor(index, slice.isOther),
+                        connectorStroke = Stroke(width = if (selected == index) 2f else 1.2f),
                     )
-                },
-        ) {
-            val center = Offset(size.width / 2f, size.height / 2f)
-            val maxRadius = min(size.width, size.height) / 2f
-            val outerRadius = maxRadius * 0.82f
-            val ringThickness = 28.dp.toPx()
-            val innerRadius = outerRadius - ringThickness
-            val strokeCenterRadius = (outerRadius + innerRadius) / 2f
-
-            val gapDegrees = if (items.size > 1) 2.5f else 0f
-            var startDegrees = -90f
-
-            items.forEachIndexed { index, slice ->
-                val rawSweep = slice.amountMinor * 360f / total
-                val sweep = (rawSweep - gapDegrees).coerceAtLeast(0.5f)
-                val push = explode[index] * 8.dp.toPx()
-                val mid = startDegrees + rawSweep / 2f
-                val dir = Offset(
-                    cos(Math.toRadians(mid.toDouble())).toFloat(),
-                    sin(Math.toRadians(mid.toDouble())).toFloat(),
-                )
-                val offsetCenter = center + dir * push
-                val arcRect = Rect(center = offsetCenter, radius = strokeCenterRadius)
-
-                drawArc(
-                    color = slice.color.copy(alpha = alpha[index]),
-                    startAngle = startDegrees + gapDegrees / 2f,
-                    sweepAngle = sweep,
-                    useCenter = false,
-                    topLeft = arcRect.topLeft,
-                    size = arcRect.size,
-                    style = Stroke(width = ringThickness, cap = StrokeCap.Butt),
-                )
-                startDegrees += rawSweep
-            }
-        }
-
-        val picked = selected?.let { items.getOrNull(it) }
-        Crossfade(targetState = picked, label = "hole") { state ->
-            Column(
-                Modifier
-                    .widthIn(max = 160.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .then(
-                        if (state != null) {
-                            Modifier.combinedClickable(
-                                onClick = {
-                                    val sel = selected
-                                    if (sel != null) slices.getOrNull(sel)?.let(onOpenCategory)
-                                },
-                                onLongClick = {
-                                    val sel = selected
-                                    if (sel != null) slices.getOrNull(sel)?.let(onOpenCategory)
-                                },
-                                onClickLabel = "Filter transactions",
-                            )
-                        } else {
-                            Modifier.clickable(onClick = onOpenScope, onClickLabel = "What counts in spending")
-                        }
-                    )
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                if (state != null) {
-                    Icon(
-                        categoryIconFor(state.name, icons),
-                        contentDescription = null,
-                        tint = state.color,
-                        modifier = Modifier.size(24.dp),
-                    )
-                    Text(
-                        state.name,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                    )
-                    Text(
-                        "${state.percent}%",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Text(
-                        formatMoney(net.wastu.artha.core.model.Money(state.amountMinor)),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                } else {
-                    Text(
-                        if (canGoNext) "Spending" else "Spending to date",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        formatMoney(net.wastu.artha.core.model.Money(total)),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    if (totalDeltaPercent != null) {
-                        val delta = totalDeltaPercent.toInt()
-                        val deltaText = "${kotlin.math.abs(delta)}% ${if (delta < 0) "less" else "more"} than previous month"
+                }
+            },
+            label = { index ->
+                val slice = slices.getOrNull(index)
+                if (slice != null && (slice.percent >= 4 || selected == index)) {
+                    val color = sliceColor(index, slice.isOther)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(0.dp),
+                    ) {
                         Text(
-                            deltaText,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
+                            text = slice.name,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            fontWeight = if (selected == index) FontWeight.Bold else FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = "${slice.percent}%",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                            fontWeight = FontWeight.Bold,
+                            color = color,
                             maxLines = 1,
                         )
                     }
                 }
-            }
-        }
+            },
+            slice = { index ->
+                val slice = slices.getOrNull(index)
+                val isSelected = selected == index
+                if (slice != null) {
+                    DefaultSlice(
+                        color = sliceColor(index, slice.isOther),
+                        hoverExpandFactor = 1.06f,
+                        antiAlias = true,
+                        gap = if (slices.size > 1) 2.5f else 0f,
+                        border = if (isSelected) BorderStroke(2.dp, MaterialTheme.colorScheme.onSurface) else null,
+                        clickable = true,
+                        onClick = { onSelect(if (isSelected) null else index) },
+                    )
+                }
+            },
+            holeContent = {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .widthIn(max = 140.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .then(
+                                if (picked != null) {
+                                    Modifier.clickable { onOpenCategory(picked) }
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Crossfade(targetState = picked, label = "hole_content") { state ->
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                            ) {
+                                if (state != null) {
+                                    Icon(
+                                        categoryIconFor(state.name, icons),
+                                        contentDescription = null,
+                                        tint = sliceColor(slices.indexOf(state), state.isOther),
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                    Text(
+                                        state.name,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        "${state.percent}%",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                    )
+                                    Text(
+                                        formatMoney(Money(state.amountMinor)),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                    )
+                                } else {
+                                    Text(
+                                        if (canGoNext) "Spending" else "Spending to date",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                    )
+                                    Text(
+                                        formatMoney(Money(total)),
+                                        style = MaterialTheme.typography.titleSmall.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold),
+                                        maxLines = 1,
+                                    )
+                                    if (totalDeltaPercent != null) {
+                                        val delta = totalDeltaPercent.toInt()
+                                        val deltaText = "${kotlin.math.abs(delta)}% ${if (delta < 0) "less" else "more"}"
+                                        Text(
+                                            deltaText,
+                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        )
     }
 }

@@ -32,6 +32,8 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AssistChip
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -329,6 +331,7 @@ fun LedgerScreen(
                 if (dates == null) viewModel?.clearDateRangeFilter() else viewModel?.setDateRangeFilter(dates.first, dates.second)
                 onDismissFilter()
             },
+            viewModel = viewModel,
         )
     }
 }
@@ -340,6 +343,7 @@ private fun TransactionFilterSheet(
     filters: TransactionFilters, range: Pair<Long?, Long?>?, category: String?, providers: List<Provider>,
     onDismiss: () -> Unit,
     onApply: (TransactionFilters, Pair<Long?, Long?>?, Boolean) -> Unit,
+    viewModel: ArthaViewModel? = null,
 ) {
     var draft by remember { mutableStateOf(filters) }
     var dates by remember { mutableStateOf(range) }
@@ -377,8 +381,28 @@ private fun TransactionFilterSheet(
                 Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     if (category != null && !clearCategory) {
-                        FilterChip(selected = true, onClick = { clearCategory = true; draft = filters.copy(direction = null) },
-                            label = { Text(category) }, trailingIcon = { Icon(Icons.Default.Clear, "Remove category filter") })
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            FilterChip(
+                                selected = true,
+                                onClick = { clearCategory = true; draft = filters.copy(direction = null) },
+                                label = { Text(category) },
+                                trailingIcon = { Icon(Icons.Default.Clear, "Remove category filter") },
+                            )
+                            if (viewModel != null) {
+                                AssistChip(
+                                    onClick = {
+                                        val month = viewModel.selectedMonth.value
+                                        viewModel.recategorize(net.wastu.artha.data.analysis.RecategorizeScope.CategoryInMonth(category, month))
+                                        onDismiss()
+                                    },
+                                    label = { Text("Re-categorize") },
+                                    leadingIcon = { Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(16.dp)) },
+                                )
+                            }
+                        }
                     }
                     if (category == null || clearCategory) {
                         FilterOptions("Type", listOf(null) + TransactionType.entries, draft.type, { it?.label ?: "All" }) { draft = draft.copy(type = it) }
@@ -586,6 +610,7 @@ fun SearchTransactionsScreen(
             lastDay = dates?.second
             showFilter = false
         },
+        viewModel = viewModel,
     )
 }
 

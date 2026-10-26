@@ -370,7 +370,10 @@ class ArthaViewModel(
         _rootGate.value = RootGateState.LOCKED; _ledgerState.value = LedgerState.Loading
     }
     fun setAnalysisMonth(month: YearMonth) {
-        if (month <= YearMonth.now(clock.withZone(AccountingTime.zone))) _selectedMonth.value = month
+        if (month <= YearMonth.now(clock.withZone(AccountingTime.zone))) {
+            _selectedMonth.value = month
+            _monthAnalysis.value = BudgetAnalyzer.analyzeMonth(month, _reconciledCache.value)
+        }
     }
     fun setDateRangeFilter(startMillis: Long?, endMillis: Long?) {
         _dateRangeFilter.value = if (startMillis == null && endMillis == null) null else startMillis to endMillis

@@ -113,6 +113,7 @@ dependencies {
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.cio)
     implementation(libs.ktor.server.cors)
+    implementation(libs.koalaplot.core)
 
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
