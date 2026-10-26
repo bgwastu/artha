@@ -341,7 +341,7 @@ fun AnalysisScreen(
             items(slices.size, key = { slices[it].name }) { index ->
                 val slice = slices[index]
                 val isSelected = selectedSliceIndex == index
-                val color = sliceColor(index, slice.isOther)
+                val color = sliceColor(slice.name, slice.isOther)
                 CategorySliceRow(
                     slice = slice,
                     color = color,

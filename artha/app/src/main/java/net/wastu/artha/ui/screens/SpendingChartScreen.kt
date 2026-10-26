@@ -154,22 +154,11 @@ object SpendingChartLogic {
  * Categorical palette: distinct hues for at-a-glance slice identification, mid-tones so it
  * reads on both surfaces. "Others" gets a muted neutral tone.
  */
-internal fun sliceColor(index: Int, isOther: Boolean = false) = Color(
-    if (isOther) {
-        0xFF6B7280
-    } else {
-        when (index % 8) {
-            0 -> 0xFF2B8A64
-            1 -> 0xFF3B72B9
-            2 -> 0xFFD97706
-            3 -> 0xFFDC3545
-            4 -> 0xFF7C5CB7
-            5 -> 0xFFC05282
-            6 -> 0xFF0D9488
-            else -> 0xFF4F46E5
-        }
-    }
-)
+internal fun sliceColor(sliceName: String, isOther: Boolean = false): Color =
+    net.wastu.artha.ui.categoryColorFor(sliceName, isOther)
+
+internal fun sliceColor(index: Int, isOther: Boolean = false): Color =
+    if (isOther) Color(0xFF6B7280) else net.wastu.artha.ui.categoryColorFor("")
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -338,7 +327,7 @@ internal fun DonutChart(
                 val slice = slices.getOrNull(index)
                 if (slice != null && (slice.percent >= 4 || selected == index)) {
                     StraightLineConnector(
-                        connectorColor = sliceColor(index, slice.isOther),
+                        connectorColor = sliceColor(slice.name, slice.isOther),
                         connectorStroke = Stroke(width = if (selected == index) 1.5f else 1f),
                     )
                 }
@@ -346,7 +335,7 @@ internal fun DonutChart(
             label = { index ->
                 val slice = slices.getOrNull(index)
                 if (slice != null && (slice.percent >= 4 || selected == index)) {
-                    val color = sliceColor(index, slice.isOther)
+                    val color = sliceColor(slice.name, slice.isOther)
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(0.dp),
@@ -374,7 +363,7 @@ internal fun DonutChart(
                 val isSelected = selected == index
                 if (slice != null) {
                     DefaultSlice(
-                        color = sliceColor(index, slice.isOther),
+                        color = sliceColor(slice.name, slice.isOther),
                         hoverExpandFactor = 1.06f,
                         antiAlias = true,
                         gap = if (slices.size > 1) 2.5f else 0f,
@@ -413,7 +402,7 @@ internal fun DonutChart(
                                     Icon(
                                         categoryIconFor(state.name, icons),
                                         contentDescription = null,
-                                        tint = sliceColor(slices.indexOf(state), state.isOther),
+                                        tint = sliceColor(state.name, state.isOther),
                                         modifier = Modifier.size(20.dp),
                                     )
                                     Text(
