@@ -8,7 +8,6 @@ import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,39 +17,36 @@ import net.wastu.artha.ui.widget.AnalysisWidgetProvider
 import net.wastu.artha.ui.widget.TransactionsWidgetProvider
 
 class BackgroundSyncJobService : JobService() {
-    private val serviceJob = Job()
-    private val scope = CoroutineScope(Dispatchers.IO + serviceJob)
+    private var serviceJob = Job()
 
     override fun onStartJob(params: JobParameters?): Boolean {
         val app = applicationContext as? ArthaApplication ?: return false
+        val jobParams = params ?: return false
+        val scope = CoroutineScope(Dispatchers.IO + serviceJob)
         scope.launch {
             var allProvidersHealthy = true
             try {
                 if (app.rootAccess.verify()) {
-                    // Refresh GoPay invisibly while the phone sleeps, so the import below sees a
-                    // fresh capture instead of yesterday's pages.
                     val gojekImportEnabled = app.providerPreferences.importEnabled.value
                         .contains(net.wastu.artha.core.model.Provider.GOJEK)
-                    val flash = GojekFlashSync(net.wastu.artha.data.ingestion.RootFileReader(app))
-                        .run(gojekImportEnabled)
-                    app.providerPreferences.recordGojekFlash(flash.name, System.currentTimeMillis())
+                    app.gojekFlash.run(gojekImportEnabled)
                     val summaries = app.ingestion.ingestAll(force = false)
-                    // A provider that could not be read must not silently wait a full hour:
-                    // rescheduling lets the job retry the whole batch sooner.
                     allProvidersHealthy = summaries.values.none { it.startsWith("Unavailable") }
                     AnalysisWidgetProvider.triggerUpdate(app)
                     TransactionsWidgetProvider.triggerUpdate(app)
                 }
             } catch (_: Exception) {
             } finally {
-                jobFinished(params, !allProvidersHealthy)
+                jobFinished(jobParams, !allProvidersHealthy)
             }
         }
         return true
     }
 
     override fun onStopJob(params: JobParameters?): Boolean {
+        (applicationContext as? ArthaApplication)?.gojekFlash?.abortIfRunning()
         serviceJob.cancel()
+        serviceJob = Job()
         return true
     }
 }
@@ -58,20 +54,16 @@ class BackgroundSyncJobService : JobService() {
 object BackgroundSyncScheduler {
     const val JOB_ID = 20261017
 
-    // Frequent attempts make "synced after the screen turns off" land within minutes; when the
-    // display is awake each run costs one dumpsys read and the flash defers.
-    private const val INTERVAL_MILLIS = 15 * 60 * 1000L // 15 minutes
+    private const val INTERVAL_MILLIS = 15 * 60 * 1000L
     fun schedule(context: Context) {
         val scheduler = context.getSystemService(JobScheduler::class.java) ?: return
         val existing = scheduler.getPendingJob(JOB_ID)
-        // A persisted job keeps its old interval across updates; reschedule when it drifted.
         if (existing != null && existing.intervalMillis == INTERVAL_MILLIS) return
 
         val component = ComponentName(context, BackgroundSyncJobService::class.java)
         val builder = JobInfo.Builder(JOB_ID, component)
             .setPeriodic(INTERVAL_MILLIS)
             .setPersisted(true)
-            // Failed background batches retry sooner instead of waiting another full period.
             .setBackoffCriteria(10 * 60 * 1000L, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
             .setRequiresBatteryNotLow(true)
         scheduler.cancel(JOB_ID)

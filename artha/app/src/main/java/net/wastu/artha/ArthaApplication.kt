@@ -5,10 +5,14 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Build
+import android.os.PowerManager
 import net.wastu.artha.core.root.LibsuRootAccess
 import net.wastu.artha.data.ingestion.IngestionCoordinator
 import net.wastu.artha.data.ledger.LedgerDatabase
 import net.wastu.artha.data.ledger.RoomLedgerRepository
+import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.drop
@@ -16,6 +20,9 @@ import kotlinx.coroutines.launch
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.data.analysis.SpendingState
 import net.wastu.artha.data.sync.BackgroundSyncScheduler
+import net.wastu.artha.data.sync.GojekFlashController
+import net.wastu.artha.data.sync.GojekFlashPolicy
+import net.wastu.artha.data.sync.GojekFlashSync
 import net.wastu.artha.ui.widget.AnalysisWidgetProvider
 import net.wastu.artha.ui.widget.TransactionsWidgetProvider
 
@@ -40,6 +47,15 @@ class ArthaApplication : Application() {
         )
         IngestionCoordinator(rootAccess, { ledger }, adapters, reader::invalidate, preferences = providerPreferences)
     }
+
+    val gojekFlash by lazy {
+        GojekFlashController(
+            net.wastu.artha.data.ingestion.RootFileReader(this),
+            providerPreferences,
+            { getSystemService(PowerManager::class.java)?.isInteractive == true },
+        )
+    }
+    private val sleepFlashGeneration = AtomicLong(0)
 
     fun syncInBackground(provider: Provider? = null, force: Boolean = false): kotlinx.coroutines.Job =
         applicationScope.launch {
@@ -122,20 +138,22 @@ class ArthaApplication : Application() {
                     return@launch
                 }
                 val goesEnabled = providerPreferences.importEnabled.value.contains(Provider.GOJEK)
-                val flash = net.wastu.artha.data.sync.GojekFlashSync(
-                    net.wastu.artha.data.ingestion.RootFileReader(this@ArthaApplication)).run(goesEnabled)
-                providerPreferences.recordGojekFlash(flash.name, System.currentTimeMillis())
+                val flash = gojekFlash.run(goesEnabled, ignoreCooldown = true)
                 onResult(when (flash) {
-                    net.wastu.artha.data.sync.GojekFlashSync.Result.FLASHED ->
+                    GojekFlashSync.Result.FLASHED ->
                         joinThenSummary(syncInBackground(Provider.GOJEK, force = true)) ?: "GoPay refreshed"
-                    net.wastu.artha.data.sync.GojekFlashSync.Result.QUIET ->
+                    GojekFlashSync.Result.QUIET, GojekFlashSync.Result.ABORTED ->
                         (joinThenSummary(syncInBackground(Provider.GOJEK, force = true)) ?: "").let { if (it.isBlank()) "GoPay up to date" else it }
-                    net.wastu.artha.data.sync.GojekFlashSync.Result.SKIPPED_SCREEN_ON ->
+                    GojekFlashSync.Result.SKIPPED_SCREEN_ON ->
                         "GoPay syncs automatically in the background; the next refresh happens after the screen turns off"
-                    net.wastu.artha.data.sync.GojekFlashSync.Result.SKIPPED ->
+                    GojekFlashSync.Result.SKIPPED ->
                         "Gojek import is disabled. Enable it in provider details"
-                    net.wastu.artha.data.sync.GojekFlashSync.Result.ROOT_UNAVAILABLE ->
+                    GojekFlashSync.Result.ROOT_UNAVAILABLE ->
                         "Root access unavailable. Allow root, then try again"
+                    GojekFlashSync.Result.BUSY ->
+                        "A GoPay refresh is already running"
+                    GojekFlashSync.Result.SKIPPED_COOLDOWN ->
+                        "GoPay already refreshed recently"
                 })
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -168,43 +186,54 @@ class ArthaApplication : Application() {
     }
 
     /**
-     * Refreshes GoPay as soon as the screen sleeps, instead of waiting for the next job slot.
-     * Registers dynamically (this action cannot be declared in the manifest), debounced so the
-     * many screen-off events of a night only cost one attempt per ten minutes. The flash stays
-     * bounded (~15 s); the import runs through the regular background job.
+     * Screen-off waits two seconds without a wakelock; a flick wakes the phone and this
+     * generation counter drops the pending work. An in-flight launch is aborted and force-stopped.
      */
-    private fun registerScreenOffListener() {
+    private fun registerDisplayListener() {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                if (intent.action != Intent.ACTION_SCREEN_OFF) return
-                val pending = goAsync()
-                applicationScope.launch {
-                    try {
-                        val last = providerPreferences.gojekFlash.value.millis ?: 0L
-                        if (System.currentTimeMillis() - last < 10 * 60_000L) return@launch
-                        if (!rootAccess.verify()) return@launch
-                        val enabled = providerPreferences.importEnabled.value.contains(Provider.GOJEK)
-                        val flash = net.wastu.artha.data.sync.GojekFlashSync(
-                            net.wastu.artha.data.ingestion.RootFileReader(this@ArthaApplication)).run(enabled)
-                        providerPreferences.recordGojekFlash(flash.name, System.currentTimeMillis())
-                        if (flash == net.wastu.artha.data.sync.GojekFlashSync.Result.FLASHED) {
-                            syncInBackground(Provider.GOJEK, force = true)
+                when (intent.action) {
+                    Intent.ACTION_SCREEN_ON -> {
+                        sleepFlashGeneration.incrementAndGet()
+                        gojekFlash.abortIfRunning()
+                    }
+                    Intent.ACTION_SCREEN_OFF -> {
+                        val last = providerPreferences.gojekFlash.value
+                        if (GojekFlashPolicy.cooldownActive(last.result, last.millis, System.currentTimeMillis())) return
+                        if (!providerPreferences.importEnabled.value.contains(Provider.GOJEK)) return
+                        val generation = sleepFlashGeneration.incrementAndGet()
+                        applicationScope.launch {
+                            delay(GojekFlashPolicy.SLEEP_CONFIRM_MILLIS)
+                            if (generation != sleepFlashGeneration.get()) return@launch
+                            if (!rootAccess.verify()) return@launch
+                            val flash = gojekFlash.run(
+                                providerPreferences.importEnabled.value.contains(Provider.GOJEK),
+                            )
+                            if (flash == GojekFlashSync.Result.FLASHED) {
+                                syncInBackground(Provider.GOJEK, force = true)
+                            }
                         }
-                    } catch (_: Exception) {
-                    } finally {
-                        pending.finish()
                     }
                 }
             }
         }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+        }
         runCatching {
-            registerReceiver(receiver, IntentFilter(Intent.ACTION_SCREEN_OFF))
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                registerReceiver(receiver, filter)
+            }
         }
     }
     override fun onCreate() {
         super.onCreate()
         BackgroundSyncScheduler.schedule(this)
-        registerScreenOffListener()
+        registerDisplayListener()
         applicationScope.launch {
             spending.state
                 .filterIsInstance<SpendingState.Ready>()

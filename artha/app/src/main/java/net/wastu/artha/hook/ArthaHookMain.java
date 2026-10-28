@@ -184,6 +184,8 @@ public final class ArthaHookMain implements IXposedHookLoadPackage {
              .append(",\"resp_body\":").append(escBody(respBody))
              .append("}\n");
             fo.write(s.toString().getBytes(StandardCharsets.UTF_8));
+            fo.flush();
+            try { fo.getFD().sync(); } catch (Throwable ignored) {}
         } catch (Throwable ignored) {}
     }
 
