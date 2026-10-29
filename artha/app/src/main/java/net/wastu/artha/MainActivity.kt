@@ -9,6 +9,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import androidx.compose.ui.platform.createLifecycleAwareWindowRecomposer
 import net.wastu.artha.ui.ArthaApp
 import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.theme.ArthaTheme
@@ -23,6 +24,7 @@ class MainActivity : ComponentActivity() {
         if (!isDebuggable) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
+        if (BuildConfig.DEMO) keepAnimationsOn()
         val initialDest = intent?.getStringExtra("extra_destination")
         val application = application as ArthaApplication
         setContent {
@@ -50,6 +52,7 @@ class MainActivity : ComponentActivity() {
                                     net.wastu.artha.ui.widget.TransactionsWidgetProvider.triggerUpdate(application)
                                 }
                             },
+                            categorize = if (BuildConfig.DEMO) net.wastu.artha.data.demo.DemoAi::categorize else null,
                             preferences = application.providerPreferences,
                             syncingProvider = application.ingestion.syncingProvider,
                             analysisStore = application.analysisStore,
@@ -66,8 +69,22 @@ class MainActivity : ComponentActivity() {
                     }
                 })
                 viewModelInstance = model
-                ArthaApp(model)
+                androidx.compose.foundation.layout.Box {
+                    ArthaApp(model)
+                    if (BuildConfig.DEMO) net.wastu.artha.ui.DemoRibbon()
+                }
             }
+        }
+    }
+
+    /** The demo always animates, even when the device has animations switched off. */
+    @OptIn(androidx.compose.ui.InternalComposeUiApi::class)
+    private fun keepAnimationsOn() {
+        val fullSpeed = object : androidx.compose.ui.MotionDurationScale {
+            override val scaleFactor = 1f
+        }
+        androidx.compose.ui.platform.WindowRecomposerPolicy.setFactory { view ->
+            view.createLifecycleAwareWindowRecomposer(fullSpeed)
         }
     }
 

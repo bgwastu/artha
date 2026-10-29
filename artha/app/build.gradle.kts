@@ -48,8 +48,16 @@ android {
             signingConfig = signingConfigs.findByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
+        all { if (name != "demo") buildConfigField("boolean", "DEMO", "false") }
         debug {
             signingConfigs.findByName("release")?.let { signingConfig = it }
+        }
+        // Installs beside the real app with its own data, filled with invented transactions and with sync off.
+        create("demo") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".demo"
+            versionNameSuffix = "-demo"
+            buildConfigField("boolean", "DEMO", "true")
         }
     }
 
@@ -58,7 +66,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     packaging {
         // cloudflared must be extracted to nativeLibraryDir so Android 10+ lets us exec it.
         jniLibs.useLegacyPackaging = true

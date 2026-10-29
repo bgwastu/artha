@@ -2,6 +2,7 @@ package net.wastu.artha
 
 import android.app.Application
 import android.os.PowerManager
+import androidx.core.content.edit
 import net.wastu.artha.core.root.LibsuRootAccess
 import net.wastu.artha.data.ingestion.IngestionCoordinator
 import net.wastu.artha.data.ledger.LedgerDatabase
@@ -51,6 +52,7 @@ class ArthaApplication : Application() {
 
     fun syncInBackground(provider: Provider? = null, force: Boolean = false): kotlinx.coroutines.Job =
         applicationScope.launch {
+            if (BuildConfig.DEMO) return@launch
             try {
                 if (!rootAccess.verify()) return@launch
                 val result = if (provider != null) {
@@ -77,6 +79,10 @@ class ArthaApplication : Application() {
      */
     fun syncGojekFlashNow(onResult: (String) -> Unit) {
         applicationScope.launch {
+            if (BuildConfig.DEMO) {
+                onResult("GoPay up to date")
+                return@launch
+            }
             try {
                 if (!rootAccess.verify()) {
                     onResult("Root access unavailable. Allow root, then try again")
@@ -134,8 +140,13 @@ class ArthaApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        BackgroundSyncScheduler.schedule(this)
-        SleepFlashListener(this).register()
+        if (BuildConfig.DEMO) {
+            resetDemoIfNewDay()
+            applicationScope.launch { seedDemoLedger() }
+        } else {
+            BackgroundSyncScheduler.schedule(this)
+            SleepFlashListener(this).register()
+        }
         applicationScope.launch {
             spending.state
                 .filterIsInstance<SpendingState.Ready>()
@@ -147,6 +158,38 @@ class ArthaApplication : Application() {
                     AnalysisWidgetProvider.triggerUpdate(this@ArthaApplication)
                     TransactionsWidgetProvider.triggerUpdate(this@ArthaApplication)
                 }
+        }
+    }
+
+    /** The demo ledger ends on the day it was made, so a new day or build starts from scratch. Runs before the database or store opens. */
+    private fun resetDemoIfNewDay() {
+        val state = getSharedPreferences("demo_state", MODE_PRIVATE)
+        // A new day or a new build both regenerate, so a reinstalled demo never keeps old rows.
+        val today = "${java.time.LocalDate.now(net.wastu.artha.core.model.AccountingTime.zone)}@${packageManager.getPackageInfo(packageName, 0).lastUpdateTime}"
+        if (state.getString("seeded_on", null) == today) return
+        deleteDatabase("artha-ledger.db")
+        deleteSharedPreferences("artha_analysis_store")
+        deleteSharedPreferences("provider_visibility")
+        state.edit { putString("seeded_on", today) }
+    }
+
+    /** Fills an empty demo ledger once, through the same append and label path as a file import. */
+    private suspend fun seedDemoLedger() {
+        if (analysisStore.snapshot.value.aiConfig.apiKey.isBlank()) {
+            analysisStore.setAiConfig(net.wastu.artha.data.analysis.AiConfig("https://ai.demo.example", "demo-key", "artha-demo-1"))
+        }
+        if (ledger.loadTransactions().isNotEmpty()) return
+        val demo = net.wastu.artha.data.demo.DemoLedger.generate(java.time.Instant.now(), net.wastu.artha.core.model.AccountingTime.zone)
+        analysisStore.mergeImportedAnalysis(null, demo.labels)
+        ledger.append(demo.transactions)
+        // Every source looks connected and recently synced, as it would on a rooted phone.
+        val accounts = mapOf(Provider.JAGO to "Rina P. ••0482", Provider.GOJEK to "0812••••3391", Provider.GRAB to "0812••••5507", Provider.SHOPEE to "rina_demo")
+        Provider.entries.forEach { provider ->
+            val times = demo.transactions.filter { it.provider == provider }.map { it.occurredAt.toEpochMilli() }
+            providerPreferences.recordSyncSuccess(
+                provider, "${times.size} payments, up to date", accounts[provider],
+                importWindow = net.wastu.artha.data.providers.ProviderImportWindow(times.size, times.minOrNull(), times.maxOrNull()),
+            )
         }
     }
 }

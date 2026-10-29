@@ -323,13 +323,14 @@ class ArthaViewModel(
             try {
                 previous?.join()
                 _rootGate.value = RootGateState.CHECKING
-                val granted = try { rootAccess.verify() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { false }
+                val granted = net.wastu.artha.BuildConfig.DEMO || try { rootAccess.verify() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { false }
                 _rootGate.value = if (granted) RootGateState.GRANTED else RootGateState.DENIED
                 if (!granted) {
                     if (!automatic) _importFeedback.value = ImportFeedback(++importSequence, provider, "Root access unavailable. Allow root, then try again", true)
                     return@launch
                 }
-                val result = if (provider != null && syncSingle != null) mapOf(provider to syncSingle.invoke(provider))
+                val result = if (net.wastu.artha.BuildConfig.DEMO) simulateDemoSync(provider)
+                    else if (provider != null && syncSingle != null) mapOf(provider to syncSingle.invoke(provider))
                     else if (automatic && ingestStale != null) ingestStale.invoke() else ingest?.invoke().orEmpty()
                 _ingestionStatus.value = _ingestionStatus.value + result
                 if (!automatic) {
@@ -356,6 +357,18 @@ class ArthaViewModel(
         }
         ingestionJob = job
         job.start()
+    }
+
+    /** Demo builds have no sources to read, so a sync pauses briefly and stamps each source as freshly synced. */
+    private suspend fun simulateDemoSync(provider: Provider?): Map<Provider, String> {
+        kotlinx.coroutines.delay(900)
+        val targets = provider?.let { listOf(it) } ?: importEnabled.value.toList()
+        return targets.associateWith { p ->
+            val count = _providerCounts.value[p] ?: 0
+            val previous = preferences?.diagnostics?.value?.get(p)
+            preferences?.recordSyncSuccess(p, "$count payments, up to date", previous?.accountIdentifier, previous?.coverageHint, null, previous?.lastImportWindow)
+            "$count payments, up to date"
+        }
     }
 
     fun stopForegroundImports() {

@@ -39,6 +39,7 @@ object AiClient {
     /** Exercises generation with the draft configuration; no ledger, notes or settings are sent or saved. */
     suspend fun testConnection(config: AiConfig) {
         require(aiConfigValidation(config) == null)
+        if (net.wastu.artha.BuildConfig.DEMO) { delay(1_200); return }
         if (call(config, "Reply only with OK.").isBlank()) throw EmptyAiResponseException()
     }
 
