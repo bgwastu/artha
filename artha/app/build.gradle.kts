@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -68,6 +70,8 @@ android {
         // The scaffold deliberately pins a verified API 36 toolchain. Version notices
         // are upgrade suggestions; correctness and accessibility checks remain strict.
         disable += listOf("OldTargetApi", "AndroidGradlePluginVersion", "GradleDependency", "NewerVersionAvailable")
+        // Artha ships an arm64 cloudflared and needs root, so Chrome OS (x86) support is intentionally absent.
+        disable += "ChromeOsAbiSupport"
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
@@ -75,15 +79,44 @@ android {
 }
 
 val cloudflaredVersion = "2026.10.3"
+// SHA-256 of cloudflared-linux-arm64 for cloudflaredVersion; the build refuses anything else.
+val cloudflaredSha256 = "89297ebfb9e8c99c0dc013a1140601453cf3798d8306c5591651f4a3f5210be8"
 val cloudflaredLib = layout.projectDirectory.file("src/main/jniLibs/arm64-v8a/libcloudflared.so").asFile
 val fetchCloudflared by tasks.registering {
     outputs.file(cloudflaredLib)
     onlyIf { !cloudflaredLib.exists() }
     doLast {
+        val partial = cloudflaredLib.parentFile.resolve("${cloudflaredLib.name}.part")
         cloudflaredLib.parentFile.mkdirs()
-        uri("https://github.com/cloudflare/cloudflared/releases/download/$cloudflaredVersion/cloudflared-linux-arm64")
-            .toURL().openStream().use { input -> cloudflaredLib.outputStream().use { input.copyTo(it) } }
+        partial.delete()
+        try {
+            uri("https://github.com/cloudflare/cloudflared/releases/download/$cloudflaredVersion/cloudflared-linux-arm64")
+                .toURL().openStream().use { input -> partial.outputStream().use { input.copyTo(it) } }
+            val actual = sha256(partial)
+            if (actual != cloudflaredSha256) {
+                cloudflaredLib.delete()
+                throw GradleException(
+                    "cloudflared $cloudflaredVersion checksum mismatch: expected $cloudflaredSha256 but got $actual",
+                )
+            }
+            partial.copyTo(cloudflaredLib, overwrite = true)
+        } finally {
+            partial.delete()
+        }
     }
+}
+
+fun sha256(file: java.io.File): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    file.inputStream().use { input ->
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val read = input.read(buffer)
+            if (read <= 0) break
+            digest.update(buffer, 0, read)
+        }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
 }
 tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(fetchCloudflared) }
 
@@ -109,15 +142,14 @@ dependencies {
     ksp(libs.room.compiler)
     implementation(libs.coroutines.android)
     implementation(libs.libsu.core)
-    implementation("org.brotli:dec:0.1.2")
+    implementation(libs.brotli.dec)
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.cio)
-    implementation(libs.ktor.server.cors)
     implementation(libs.koalaplot.core)
 
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
-    testImplementation("org.json:json:20240303")
+    testImplementation(libs.json.test)
     androidTestImplementation(libs.androidx.test.junit)
     androidTestImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.test.runner)

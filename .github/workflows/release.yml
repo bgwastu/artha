@@ -54,7 +54,7 @@ jobs:
         env:
           VERSION_NAME: ${{ steps.version.outputs.name }}
           VERSION_CODE: ${{ steps.version.outputs.number }}
-        run: ./artha/gradlew -p artha -ParthaVersionName="$VERSION_NAME" -ParthaVersionCode="$VERSION_CODE" testDebugUnitTest assembleDebug assembleRelease
+        run: ./artha/gradlew -p artha -ParthaVersionName="$VERSION_NAME" -ParthaVersionCode="$VERSION_CODE" testDebugUnitTest assembleDebug assembleRelease lintDebug
       - name: Verify release signing identity
         run: |
           python3 - <<'PY'

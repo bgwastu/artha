@@ -1,6 +1,5 @@
 # Agent instructions
 
-- Work directly on `main`. Keep commits signed and history linear; no branches or PRs.
 - Ship small usable changes promptly.
 - Run only local checks relevant to the change (`./gradlew -p artha testDebugUnitTest assembleDebug`). Use JDK 21 for Gradle; newer JDKs can fail the build.
 - Android device checks use real ADB devices. Never use emulators.

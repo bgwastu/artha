@@ -6,13 +6,13 @@ Artha helps people in Indonesia understand their spending on rooted Android phon
 
 ## Features
 
-- **Unified timeline:** Automatically collect transactions and reconcile duplicates across providers.
-- **Order details:** See food items, shopping purchases, and ride routes.
-- **Monthly spending:** Compare categories and totals with the previous month.
-- **Spending insights:** Local summaries are ready immediately; AI analysis chooses its own historical comparisons and follow-up queries across saved spending, then reviews its findings and recommendations. Manual categories stay protected.
-- **Search and filters:** Find transactions by keyword, provider, or date range.
-- **Demo mode:** Explore multi-year fictional payments and example AI analysis from Settings, without changing personal history.
-- **Homescreen widgets:** Check recent transactions and monthly spending without opening the app.
+- **Transactions:** One timeline of transfers, expenses and income, deduplicated across providers.
+- **Analysis:** Monthly expenses and income by category, compared with the previous month. Expenses and income have separate category lists.
+- **Category review:** Step through uncategorized transactions with back and undo, or categorize a whole month by merchant.
+- **AI categorization (optional):** Bring your own OpenAI-compatible endpoint. Merchant names and amounts are sent to it, so it is off until you configure it.
+- **Remote access (optional):** A public Cloudflare link for AI agents and scripts to read your data. Anyone with the link can read it.
+- **Export and import:** JSONL backup of your ledger and edits.
+- **Homescreen widgets:** Recent transactions and monthly spending.
 
 ## Providers
 
@@ -20,6 +20,10 @@ Artha helps people in Indonesia understand their spending on rooted Android phon
 - **Shopee (Marketplace, Food & Digital Products):** Uses the app's saved session cookies to fetch order history and match Jago payments.
 - **Gojek & GoPay:** Imports locally saved Gojek orders and payments identified in Jago history.
 - **Grab:** Decrypts the app's local session to fetch ride routes, GrabFood orders, and GrabPay history directly.
+
+## Build
+
+Use JDK 21: `./gradlew -p artha testDebugUnitTest assembleDebug`. Reading provider data needs root. The Gojek hook needs an Xposed framework.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-dark.png">
