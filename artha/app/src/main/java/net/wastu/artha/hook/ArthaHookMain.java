@@ -38,7 +38,6 @@ public final class ArthaHookMain implements IXposedHookLoadPackage {
     private static volatile boolean bodyHookInstalled;
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
-        maybeBridge(lpparam.classLoader);
         for (Target t : TARGETS) {
             if (!t.pkg.equals(lpparam.packageName)) continue;
             install(lpparam, t);
@@ -46,45 +45,9 @@ public final class ArthaHookMain implements IXposedHookLoadPackage {
         }
     }
 
-    private static void maybeBridge(ClassLoader targetLoader) {
-        if (bridgeHook != null) return;
-        ClassLoader[] loaders = { ArthaHookMain.class.getClassLoader(), targetLoader };
-
-        for (ClassLoader loader : loaders) {
-            try { android.util.Log.i(TAG, "[diag] trying loader " + loader); } catch (Throwable ignored) {}
-
-            String[] names = { "de.robv.android.xposed.XposedBridge", "jbn.cVltwUuGgmbcKtQK.q.XposedBridge" };
-            for (String n : names) {
-                try {
-                    Class<?> c = Class.forName(n, false, loader == null ? XposedBridgeCxl.class.getClassLoader() : loader);
-                    try { android.util.Log.i(TAG, "[diag] " + n + " with " + c.getDeclaredMethods().length + " methods"); } catch (Throwable ignored) {}
-                    for (Method m2 : c.getDeclaredMethods()) {
-                        String sig = m2.getName() + "(";
-                        for (Class tt : m2.getParameterTypes()) sig += tt.getSimpleName() + ",";
-                        sig += ")";
-                        try { android.util.Log.i(TAG, "[diag] m " + sig); } catch (Throwable ignored) {}
-                    }
-                    for (Method m : c.getDeclaredMethods()) {
-                        Class<?>[] p = m.getParameterTypes();
-                        if (bridgeLog == null && "log".equals(m.getName()) && p.length == 1 && p[0] == String.class) bridgeLog = m;
-                        if (bridgeHook == null
-                            && ("hookMethod".equals(m.getName()) || "hookAllMethods".equals(m.getName()))
-                            && p.length >= 2
-                            && java.lang.reflect.Member.class.isAssignableFrom(p[0])
-                            && p[1] != null && p[1].isAssignableFrom(XC_MethodHook.class)) { bridgeHook = m; }
-                        if (bridgeLog != null && bridgeHook != null) return;
-                    }
-                } catch (Throwable ignored) {}
-            }
-            if (bridgeHook != null) return;
-        }
-    }
-
-    private static final class XposedBridgeCxl {}
-
     /**
      * Vector renames the de.robv.* legacy bridge per boot (e.g. jbn.*... today, wUHnPe.* tomorrow),
-     * so the hard-coded candidate names in maybeBridge() can miss. Our probe callback's runtime
+     * so the bridge's name cannot be hard-coded. Our probe callback's runtime
      * superclass carries the renamed XC_MethodHook name, and its package hosts the sibling
      * XposedBridge class — derive both from the probe instead of guessing.
      */
@@ -155,7 +118,9 @@ public final class ArthaHookMain implements IXposedHookLoadPackage {
             int code = ((Number) one(resp, "code")).intValue();
             StringBuilder rq = new StringBuilder(); heads(req, "headers", rq);
             StringBuilder rs = new StringBuilder(); heads(resp, "headers", rs);
-            byte[] rb = bodyOf(req); byte[] sb = peekBody(resp, 262144);
+            // No reader parses a captured request body, so none is persisted; header values are
+            // filtered through CaptureRedaction and history bodies keep the readers' response path.
+            byte[] rb = null; byte[] sb = peekBody(resp, 262144);
             logJson(out, t.pkg, code, method, url, rq.toString(), rb, rs.toString(), sb);
         } catch (Throwable ignored) {}
     }
@@ -177,7 +142,7 @@ public final class ArthaHookMain implements IXposedHookLoadPackage {
              .append(",\"target\":\"").append(target).append('"')
              .append(",\"code\":").append(code)
              .append(",\"method\":\"").append(method).append('"')
-             .append(",\"url\":\"").append(esc(url)).append('"')
+             .append(",\"url\":\"").append(esc(CaptureRedaction.url(url))).append('"')
              .append(",\"req_headers\":\"").append(esc(reqHead)).append('"')
              .append(",\"req_body\":").append(escBody(reqBody))
              .append(",\"resp_headers\":\"").append(esc(respHead)).append('"')
@@ -258,35 +223,10 @@ public final class ArthaHookMain implements IXposedHookLoadPackage {
             int n = (sizeO instanceof Number) ? ((Number) sizeO).intValue() : 0;
             for (int i = 0; i < n; i++) {
                 String name = String.valueOf(two(hs, "name", i));
-                String val = String.valueOf(two(hs, "value", i));
+                String val = CaptureRedaction.headerValue(name, String.valueOf(two(hs, "value", i)));
                 out.append(name).append(": ").append(val).append("\n");
             }
         } catch (Throwable ignored) {}
-    }
-
-    private static byte[] bodyOf(Object req) {
-        try {
-            Object body = one(req, "body");
-            if (body == null) return null;
-            Class<?> bufCls = Class.forName("okio.Buffer", false, body.getClass().getClassLoader());
-            Object buf = bufCls.getDeclaredConstructor().newInstance();
-            // locate writeTo(BufferedSink) and invoke with our buffer
-            for (Method mm : body.getClass().getDeclaredMethods()) {
-                if (!mm.getName().equals("writeTo")) continue;
-                Class<?>[] p = mm.getParameterTypes();
-                if (p.length != 1 || !p[0].isAssignableFrom(bufCls)) continue;
-                mm.setAccessible(true);
-                mm.invoke(body, buf);
-                Object s = one(buf, "readUtf8");
-                return String.valueOf(s).getBytes(StandardCharsets.UTF_8);
-            }
-        } catch (Throwable ignored) {}
-        return null;
-    }
-
-    private static Object newInstanceOf(String clsName, ClassLoader cl) throws Exception {
-        Class<?> c = Class.forName(clsName, false, cl);
-        return c.getDeclaredConstructor().newInstance();
     }
 
     private static byte[] peekBody(Object resp, int max) {

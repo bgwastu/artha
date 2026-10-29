@@ -23,7 +23,8 @@ class LibsuRootAccess(private val context: Context) : RootAccess {
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                android.util.Log.w("ArthaRoot", "Root check failed", e)
                 false
             }
         }

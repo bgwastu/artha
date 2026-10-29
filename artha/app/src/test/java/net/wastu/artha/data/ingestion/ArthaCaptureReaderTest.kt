@@ -61,4 +61,30 @@ class ArthaCaptureReaderTest {
         assertTrue(result.transactions.isEmpty())
         assertTrue(result.notes.first().contains("no usable GoPay history"))
     }
+
+    @Test fun redactedCaptureLineStillParses() = runTest {
+        // Fixture mirrors the sanitized hook output: header values redacted, request body absent.
+        val pageUrl = "https://customer.gopayapi.com/v3/users/order-history?page=1&access_token=[redacted]"
+        val body = JSONObject().put("success", true).put("data", JSONObject().put("completed", JSONArray()
+            .put(JSONObject().put("group_key", "1").put("display_date", "2026-10-19")
+                .put("items", JSONArray().put(JSONObject()
+                    .put("order_id", "capt-redacted").put("description", "Indomaret UBM Tower")
+                    .put("service_type", "COLLECT").put("payment_type", "DEBIT")
+                    .put("status", "COMPLETED").put("display_status", "Selesai")
+                    .put("order_timestamp", "2026-10-19T11:00:00")
+                    .put("amount", JSONObject().put("value", 15000).put("currency", "IDR").put("display_value", "Rp15.000"))
+                    .put("payment_method_breakup", JSONArray()
+                        .put(JSONObject().put("payment_method", "JAGO").put("payment_method_name", "Jago")))))))).toString()
+        val line = """{"seq":1,"ts":900,"target":"com.gojek.app","code":200,"method":"POST","url":""" +
+            JSONObject.quote(pageUrl) +
+            ""","req_headers":"authorization: [redacted]\ncookie: [redacted]","req_body":null,""" +
+            """"resp_headers":"set-cookie: [redacted]","resp_body":""" + JSONObject.quote(body) + "}"
+        val file = snapshot { line }
+        val result = ArthaCaptureReader { file }.read()
+        assertEquals(1, result.transactions.size)
+        val row = result.transactions.single()
+        assertEquals(Provider.GOJEK, row.provider)
+        assertEquals(1_500_000L, row.money.amountMinor)
+        assertEquals(Direction.DEBIT, row.direction)
+    }
 }

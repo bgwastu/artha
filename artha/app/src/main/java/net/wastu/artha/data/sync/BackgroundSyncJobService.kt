@@ -8,6 +8,7 @@ import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,6 +19,10 @@ import net.wastu.artha.ui.widget.TransactionsWidgetProvider
 
 class BackgroundSyncJobService : JobService() {
     private var serviceJob = Job()
+
+    private companion object {
+        const val TAG = "BackgroundSync"
+    }
 
     override fun onStartJob(params: JobParameters?): Boolean {
         val app = applicationContext as? ArthaApplication ?: return false
@@ -35,7 +40,17 @@ class BackgroundSyncJobService : JobService() {
                     AnalysisWidgetProvider.triggerUpdate(app)
                     TransactionsWidgetProvider.triggerUpdate(app)
                 }
-            } catch (_: Exception) {
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (t: Exception) {
+                // Surface the failure instead of retrying silently, and reschedule with JobScheduler
+                // backoff. Only the exception class and message are logged, never provider content.
+                allProvidersHealthy = false
+                val message = t.message?.takeIf { it.isNotBlank() } ?: "Background sync failed"
+                for (provider in app.providerPreferences.importEnabled.value) {
+                    app.providerPreferences.recordSyncError(provider, message)
+                }
+                android.util.Log.w(TAG, "background sync failed: ${t.javaClass.simpleName}: $message")
             } finally {
                 jobFinished(jobParams, !allProvidersHealthy)
             }

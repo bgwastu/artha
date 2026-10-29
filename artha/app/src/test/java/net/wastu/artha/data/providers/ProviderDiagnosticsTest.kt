@@ -63,29 +63,6 @@ class ProviderDiagnosticsTest {
         assertEquals(Provider.JAGO.historyCoverageHint, diagnostic.coverageHint)
     }
 
-    @Test fun legacyCapabilityOnlyMovesOutOfErrorButActualPartialAndErrorsStay() {
-        val fixture = PreferencesFixture()
-        fun legacy(provider: Provider, error: String, status: AccountStatus = AccountStatus.PARTIAL) {
-            fixture.values["${provider.name}_last_sync_ms"] = 1L
-            fixture.values["${provider.name}_status"] = status.name
-            fixture.values["${provider.name}_last_error"] = error
-            fixture.values["${provider.name}_last_summary"] = "2 added. $error"
-        }
-        legacy(Provider.JAGO, Provider.JAGO.legacyCoverageHint)
-        legacy(Provider.SHOPEE, "${Provider.SHOPEE.legacyCoverageHint}. Full food listing blocked")
-        legacy(Provider.GRAB, Provider.GRAB.legacyCoverageHint, AccountStatus.ERROR)
-        val diagnostics = ProviderPreferences(fixture.context).diagnostics.value
-        assertEquals(AccountStatus.CONNECTED, diagnostics.getValue(Provider.JAGO).accountStatus)
-        assertNull(diagnostics.getValue(Provider.JAGO).lastError)
-        assertEquals("2 added", diagnostics.getValue(Provider.JAGO).lastSyncSummary)
-        assertEquals(Provider.JAGO.historyCoverageHint, diagnostics.getValue(Provider.JAGO).coverageHint)
-        assertEquals(AccountStatus.PARTIAL, diagnostics.getValue(Provider.SHOPEE).accountStatus)
-        assertEquals("Full food listing blocked", diagnostics.getValue(Provider.SHOPEE).lastError)
-        assertEquals("2 added. Full food listing blocked", diagnostics.getValue(Provider.SHOPEE).lastSyncSummary)
-        assertEquals(AccountStatus.ERROR, diagnostics.getValue(Provider.GRAB).accountStatus)
-        assertEquals(Provider.GRAB.legacyCoverageHint, diagnostics.getValue(Provider.GRAB).lastError)
-    }
-
     @Test fun lastImportWindowTracksOnlyVerifiedPaymentsAndSurvivesFailedRefresh() = runTest {
         val fixture = PreferencesFixture()
         val preferences = ProviderPreferences(fixture.context)
@@ -139,17 +116,6 @@ class ProviderDiagnosticsTest {
         val errorState = ProviderPreferences(fixture.context)
         assertFalse(errorState.isStale(Provider.GRAB, attemptedAt + 4 * 60_000))
         assertTrue(errorState.isStale(Provider.GRAB, attemptedAt + 5 * 60_000))
-    }
-
-    @Test fun obsoleteTokopediaPreferencesArePurged() {
-        val fixture = PreferencesFixture()
-        fixture.values["TOKOPEDIA_status"] = "ERROR"
-        fixture.values["TOKOPEDIA_last_sync_ms"] = 123456L
-        fixture.values["JAGO_status"] = "CONNECTED"
-        ProviderPreferences(fixture.context)
-        assertFalse(fixture.values.containsKey("TOKOPEDIA_status"))
-        assertFalse(fixture.values.containsKey("TOKOPEDIA_last_sync_ms"))
-        assertTrue(fixture.values.containsKey("JAGO_status"))
     }
 
     private class FixtureLedger : LedgerRepository {

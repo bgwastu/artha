@@ -85,21 +85,14 @@ class ProviderPreferences(context: Context) {
             val statusStr = preferences.getString("${p.name}_status", AccountStatus.UNKNOWN.name) ?: AccountStatus.UNKNOWN.name
             val status = runCatching { AccountStatus.valueOf(statusStr) }.getOrDefault(AccountStatus.UNKNOWN)
             val ident = preferences.getString("${p.name}_identifier", null)
-            val legacyHint = p.legacyCoverageHint
-            // Old releases stored capabilities as errors. Only migrate a known successful
-            // import's exact prefix; retain every actual partial/failure reason.
-            val legacy = syncTime != null && status == AccountStatus.PARTIAL &&
-                (err == legacyHint || err?.startsWith("$legacyHint. ") == true)
-            val importError = if (legacy) err?.removePrefix(legacyHint)?.removePrefix(". ")?.takeIf { it.isNotBlank() } else err
             ProviderDiagnostic(
                 lastSyncEpochMillis = syncTime,
                 lastAttemptEpochMillis = preferences.getLong("${p.name}_last_attempt_ms", 0).takeIf { it > 0 },
-                lastSyncSummary = summary?.replace(". $legacyHint", ""),
-                lastError = importError,
-                accountStatus = if (legacy && importError == null) AccountStatus.CONNECTED else status,
+                lastSyncSummary = summary,
+                lastError = err,
+                accountStatus = status,
                 accountIdentifier = ident,
-                coverageHint = preferences.getString("${p.name}_coverage_hint", null)
-                    ?: if (legacy) p.historyCoverageHint else null,
+                coverageHint = preferences.getString("${p.name}_coverage_hint", null),
                 lastImportWindow = preferences.getLong("${p.name}_read_count", -1L).takeIf { it in 0..Int.MAX_VALUE.toLong() }?.let { count ->
                     runCatching { ProviderImportWindow(count.toInt(),
                         preferences.getLong("${p.name}_read_first_ms", Long.MIN_VALUE).takeUnless { it == Long.MIN_VALUE },

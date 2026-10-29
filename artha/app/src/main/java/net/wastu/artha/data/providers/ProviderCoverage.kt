@@ -9,12 +9,3 @@ internal val Provider.historyCoverageHint: String
         Provider.GOJEK -> "Saved GoPay history. Cash and direct card payments are not supported"
         Provider.GRAB -> "GrabPay/OVO payments and recent rides. Full food history, cash and refunds are not supported"
     }
-
-/** Exact previous capability text; never treat an arbitrary provider error as a limitation. */
-internal val Provider.legacyCoverageHint: String
-    get() = when (this) {
-        Provider.JAGO -> "Cached bank history only"
-        Provider.SHOPEE -> "Verified marketplace/food payments; bounded history; digital purchases excluded"
-        Provider.GOJEK -> "Verified native GoPay cache and exact booking enrichment; live/cash history may be unavailable"
-        Provider.GRAB -> "Settled card charges and recent rides; other wallet/cash and food receipts remain unverified"
-    }

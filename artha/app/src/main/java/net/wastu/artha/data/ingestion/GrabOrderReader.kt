@@ -162,7 +162,7 @@ internal class GrabOrderReader(
             val json = JSONObject()
             cache.entries.toList().takeLast(200).forEach { (k, v) -> json.put(k, v) }
             file.writeText(json.toString(), Charsets.UTF_8)
-        } catch (_: Exception) {}
+        } catch (e: Exception) { android.util.Log.w("ArthaGrab", "Could not save receipt cache", e) }
     }
 
     private suspend fun request(token: String, path: String, allowRateLimitRetry: Boolean = true): JSONObject {

@@ -50,7 +50,7 @@ internal class ShopeeOrderReader(private val files: RootFileReader) {
             val json = JSONObject()
             cache.entries.toList().takeLast(500).forEach { (k, v) -> json.put(k, v) }
             file.writeText(json.toString(), Charsets.UTF_8)
-        } catch (_: Exception) {}
+        } catch (e: Exception) { android.util.Log.w("ArthaShopee", "Could not save order cache", e) }
     }
 
     suspend fun transactions(): List<UnifiedTransaction> = withContext(Dispatchers.IO) {
