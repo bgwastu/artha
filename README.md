@@ -25,10 +25,12 @@ Artha helps people in Indonesia understand their spending on rooted Android phon
 
 Use JDK 21: `./gradlew -p artha testDebugUnitTest assembleDebug`. Reading provider data needs root. The Gojek hook needs an Xposed framework.
 
+For demos, `./gradlew -p artha assembleDemo` builds "Artha Demo" (`net.wastu.artha.demo`). It installs beside the real app with its own empty data, rebuilds itself each day with a year of invented transactions ending today, and never syncs, so your real ledger is not touched.
+
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="assets/screenshot.png">
-  <img src="assets/screenshot.png" alt="Artha transaction timeline and spending analysis with fictional sample data">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/thumbnail-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/thumbnail-light.png">
+  <img src="assets/thumbnail-light.png" alt="Artha transaction timeline, spending analysis, and transaction details with demo data">
 </picture>
 
 AI disclosure: Human validated.
