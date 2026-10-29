@@ -249,7 +249,7 @@ fun TransactionDetailsSheet(
 @Composable
 fun TransactionDetailsContent(
     transaction: UnifiedTransaction,
-    viewModel: ArthaViewModel? = null,
+    viewModel: ArthaViewModel?,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     state: TransactionDetailsState = rememberTransactionDetailsState(transaction.key),
@@ -279,15 +279,17 @@ private fun TransactionDetailsBody(
     showRecordBack: Boolean = false,
 ) {
     val snapshot = viewModel?.analysisSnapshot?.collectAsStateWithLifecycle()?.value
-    val availableCategories = snapshot?.customCategories ?: net.wastu.artha.data.analysis.INITIAL_DEFAULT_CATEGORIES
     val projected = viewModel?.allTransactions?.collectAsStateWithLifecycle()?.value
     val record = projected?.firstOrNull { it.key == transaction.key } ?: projected?.firstOrNull {
         it.provider == transaction.provider && it.providerTransactionId == transaction.providerTransactionId
     } ?: transaction
+    val recordType = record.type
+    val availableCategories = snapshot?.categoriesFor(recordType)
+        ?: if (recordType == net.wastu.artha.core.model.TransactionType.INCOME) net.wastu.artha.data.analysis.INITIAL_INCOME_CATEGORIES else net.wastu.artha.data.analysis.INITIAL_DEFAULT_CATEGORIES
     val currentCategory = snapshot?.categories?.get(record.key) ?: record.category ?: "Uncategorized"
     val currentNote = if (snapshot?.updatedAt?.containsKey("note:${record.key}") == true)
         snapshot.userNotes[record.key].orEmpty() else record.userNote.orEmpty()
-    val categorySource = if (snapshot != null && snapshot.analysisEnabled) categorySource(record, snapshot) else CategorySource.NONE
+    val categorySource = if (snapshot != null) categorySource(record, snapshot) else CategorySource.NONE
     val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(CategoryProgress()) }
     val paymentState = paymentCategoryState(record.key, categoryProgress)
     val isBusy = paymentState != PaymentCategoryState.IDLE
@@ -421,7 +423,7 @@ private fun TransactionDetailsBody(
                     TagRow(tags)
                     if (records.isNotEmpty()) GroupRecordsSection(records, record.occurredAt, linkedRecordsExplanation(record)) { state.recordIndex = it }
 
-                    if (!credit && snapshot?.analysisEnabled != false) {
+                    if (recordType != net.wastu.artha.core.model.TransactionType.TRANSFER) {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             DetailEditRow(
                                 label = "Category", value = currentCategory,
@@ -471,7 +473,7 @@ private fun TransactionDetailsBody(
                                     state.categoryDraft = currentCategory; state.saveError = null; state.savedFeedback = null; state.editor = "category"
                                 }
                             }
-                            if (snapshot?.analysisEnabled == true) {
+                            if (snapshot != null) {
                                 val reason = categoryReasonText(snapshot, record.key)
                                 if (reason != null && !isBusy) Text(
                                     reason,
@@ -548,6 +550,24 @@ private fun TransactionDetailsBody(
                                         },
                                     )
                                 }
+                            }
+                        }
+                    }
+                    if (viewModel?.analysisStore != null && records.isEmpty()) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(
+                                net.wastu.artha.core.model.TransactionType.EXPENSE to "Expense",
+                                net.wastu.artha.core.model.TransactionType.INCOME to "Income",
+                                net.wastu.artha.core.model.TransactionType.TRANSFER to "Transfer",
+                            ).forEach { (type, label) ->
+                                androidx.compose.material3.FilterChip(
+                                    selected = recordType == type,
+                                    onClick = { if (recordType != type) viewModel.setTransactionType(record, type) },
+                                    label = { Text(label) },
+                                )
+                            }
+                            if (snapshot?.typeOverrides?.containsKey(record.key) == true) {
+                                TextButton(onClick = { viewModel.setTransactionType(record, null) }) { Text("Reset") }
                             }
                         }
                     }
@@ -1073,15 +1093,15 @@ private fun EditorActions(saving: Boolean, onCancel: () -> Unit, onSave: () -> U
 }
 
 internal fun transactionAccountingLabel(transaction: UnifiedTransaction): String? {
-    if (BudgetAnalyzer.isSpending(transaction)) return null
+    if (transaction.isExpense) return null
     val payload = try { JSONObject(transaction.rawPayload) } catch (_: JSONException) { null }
     return when {
         transaction.isReversedRecord -> if (transaction.direction == Direction.CREDIT) "Incoming reversal" else "Reversed"
         transaction.direction == Direction.CREDIT -> "Incoming"
         transaction.money.currencyCode != "IDR" -> "Outside IDR spending"
-        payload?.optBoolean("isWalletFunding") == true || payload?.optString("code") in BudgetAnalyzer.WALLET_FUNDING_CODES -> "Wallet funding"
+        payload?.optBoolean("isWalletFunding") == true || payload?.optString("code") in net.wastu.artha.core.model.TransactionClassifier.WALLET_FUNDING_CODES -> "Wallet funding"
         payload?.optBoolean("isPocketTransfer") == true || transaction.description.startsWith("Pocket Transfer:", ignoreCase = true) -> "Pocket transfer"
-        payload?.optString("code") in BudgetAnalyzer.INTERNAL_TRANSFER_CODES ||
+        payload?.optString("code") in net.wastu.artha.core.model.TransactionClassifier.INTERNAL_TRANSFER_CODES ||
             payload?.optJSONObject("fields")?.optString("f22") == "INTERNAL" -> "Transfer"
         else -> "Not included in spending"
     }
@@ -1089,7 +1109,7 @@ internal fun transactionAccountingLabel(transaction: UnifiedTransaction): String
 
 internal fun linkedRecordsExplanation(transaction: UnifiedTransaction): String? {
     val groups = try { JSONObject(transaction.rawPayload).optJSONArray("groupedTransactions") } catch (_: JSONException) { null } ?: return null
-    return if (groups.length() > 1 && transaction.canonicalKey != null && BudgetAnalyzer.isSpending(transaction))
+    return if (groups.length() > 1 && transaction.canonicalKey != null && transaction.isExpense)
         "Counted once in spending." else null
 }
 

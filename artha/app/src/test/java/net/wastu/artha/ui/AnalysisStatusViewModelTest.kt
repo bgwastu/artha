@@ -81,11 +81,11 @@ class AnalysisStatusViewModelTest {
         val p1 = testPayment("tx1", 10000, manual = false)
         val p2 = testPayment("tx2", 20000, manual = false)
         val p3 = testPayment("tx3", 30000, manual = false)
-        val pCredit = testPayment("txCredit", 50000, manual = false).copy(direction = Direction.CREDIT)
+        val pCredit = testPayment("txCredit", 50000, manual = false).copy(direction = Direction.CREDIT, typeOverride = net.wastu.artha.core.model.TransactionType.TRANSFER)
         val pManual = testPayment("txManual", 60000, manual = true)
 
         val rows = listOf(p1, p2, p3, pCredit, pManual)
-        var snapshot = AnalysisSnapshot(analysisEnabled = true, aiConfig = AiConfig("https://ai.wastu.net", "key", "model"))
+        var snapshot = AnalysisSnapshot(aiConfig = AiConfig("https://ai.wastu.net", "key", "model"))
 
         // Initially 3 eligible spending transactions (p1, p2, p3), none labeled
         var (labeled, total) = AiCategorization.progress(rows, snapshot)

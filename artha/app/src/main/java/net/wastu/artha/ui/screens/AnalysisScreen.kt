@@ -1,5 +1,6 @@
 package net.wastu.artha.ui.screens
 
+import androidx.compose.material3.SegmentedButton
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.material.icons.filled.Category
@@ -148,7 +149,6 @@ fun AnalysisScreen(
     val categoryAutomation by viewModel.categoryAutomation.collectAsStateWithLifecycle()
     val categoryProgress by viewModel.categoryProgress.collectAsStateWithLifecycle()
     val selectedMonth by viewModel.selectedMonth.collectAsStateWithLifecycle()
-    val analysisEnabled = snapshot.analysisEnabled
 
     var showRecategorizeMonth by remember { mutableStateOf(false) }
     val monthPendingScope = remember(selectedMonth) { RecategorizeScope.MonthPending(selectedMonth) }
@@ -168,31 +168,6 @@ fun AnalysisScreen(
         }
     }
 
-    if (!analysisEnabled) {
-        Column(
-            Modifier.fillMaxSize().padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                "Analysis is turned off",
-                style = MaterialTheme.typography.titleMedium,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Text(
-                "Enable it in Settings to see categories and monthly insights",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            )
-            TextButton(onClick = { viewModel.setTargetDestination("SETTINGS") }, modifier = Modifier.padding(top = 12.dp)) {
-                Text("Open Settings")
-            }
-        }
-        return
-    }
     if (ledgerState is net.wastu.artha.ui.LedgerState.Loading && savedTransactions.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(Modifier.semantics { contentDescription = "Loading saved spending" })
@@ -202,7 +177,7 @@ fun AnalysisScreen(
     if (ledgerState is net.wastu.artha.ui.LedgerState.Failed && savedTransactions.isEmpty()) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Text("Unable to load saved spending")
-            TextButton(onClick = { viewModel.setTargetDestination("TRANSACTIONS") }) { Text("Open expenses") }
+            TextButton(onClick = { viewModel.setTargetDestination("TRANSACTIONS") }) { Text("Open transactions") }
         }
         return
     }
@@ -222,9 +197,22 @@ fun AnalysisScreen(
                 month = selectedMonth,
                 editable = viewModel.analysisStore != null,
                 onOpenCategories = onOpenCategories,
+                onOpenReview = onOpenCategoryReview,
                 onPreviousMonth = { viewModel.setAnalysisMonth(selectedMonth.minusMonths(1)) },
                 onNextMonth = { viewModel.setAnalysisMonth(selectedMonth.plusMonths(1)) },
             )
+        }
+        item(key = "type_toggle") {
+            val types = listOf(net.wastu.artha.core.model.TransactionType.EXPENSE to "Expenses", net.wastu.artha.core.model.TransactionType.INCOME to "Income")
+            androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                types.forEachIndexed { index, (type, label) ->
+                    SegmentedButton(
+                        selected = analysis.type == type,
+                        onClick = { viewModel.setAnalysisType(type) },
+                        shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(index, types.size),
+                    ) { Text(label) }
+                }
+            }
         }
         if (slices.isNotEmpty()) {
             item(key = "chart") {
@@ -253,9 +241,9 @@ fun AnalysisScreen(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 ) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(if (canGoNext) "Spending" else "Spending to date", style = MaterialTheme.typography.labelMedium)
+                        Text(if (analysis.type == net.wastu.artha.core.model.TransactionType.INCOME) (if (canGoNext) "Income" else "Income to date") else if (canGoNext) "Spending" else "Spending to date", style = MaterialTheme.typography.labelMedium)
                         Text("Rp0", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                        Text("No confirmed spending this month", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (analysis.type == net.wastu.artha.core.model.TransactionType.INCOME) "No income this month" else "No confirmed spending this month", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -380,6 +368,7 @@ private fun MonthHeader(
     month: YearMonth,
     editable: Boolean = true,
     onOpenCategories: () -> Unit,
+    onOpenReview: () -> Unit,
     onPreviousMonth: () -> Unit,
     onNextMonth: () -> Unit,
 ) {
@@ -408,6 +397,7 @@ private fun MonthHeader(
         Box {
             IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Month options") }
             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                DropdownMenuItem(enabled = editable, text = { Text("Review month") }, onClick = { showMenu = false; onOpenReview() })
                 DropdownMenuItem(enabled = editable, text = { Text("Manage categories") }, onClick = { showMenu = false; onOpenCategories() })
             }
         }
@@ -471,7 +461,7 @@ fun IconPickerDialog(currentKey: String?, onDismiss: () -> Unit, onSelect: (Stri
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Category icon") },
         text = {
             LazyVerticalGrid(columns = GridCells.Adaptive(56.dp),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 280.dp).selectableGroup(),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 360.dp).selectableGroup(),
                 contentPadding = PaddingValues(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(AVAILABLE_CATEGORY_ICONS, key = { it.first }) { (key, vector) ->

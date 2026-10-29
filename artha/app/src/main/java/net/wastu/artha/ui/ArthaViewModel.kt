@@ -51,7 +51,6 @@ class ArthaViewModel(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val spendingState: StateFlow<SpendingState>? = null,
     private val retrySpending: (() -> Unit)? = null,
-    private val gojekHistoryWalk: (() -> Unit)? = null,
     private val gojekFlashRefresh: (() -> Unit)? = null,
     /** Test seam; null sends batches to the configured model with the saved rows as userExamples. */
     private val categorize: (suspend (AiConfig, AnalysisSnapshot, List<CategoryCandidate>) -> Map<String, CategorySuggestion>)? = null,
@@ -59,7 +58,6 @@ class ArthaViewModel(
     private val scopeKeysAction: (RecategorizeScope, List<UnifiedTransaction>, AnalysisSnapshot) -> Set<String> = AiCategorization::scopeKeys,
     private val needsReviewAction: (UnifiedTransaction, AnalysisSnapshot) -> Boolean = ::needsReview,
     private val merchantKeyProvider: (UnifiedTransaction) -> String? = ::merchantKey,
-    initialSnapshot: AnalysisSnapshot = AnalysisSnapshot(),
 ) : ViewModel() {
     private val _rootGate = MutableStateFlow(RootGateState.LOCKED)
     val rootGate = _rootGate.asStateFlow()
@@ -70,11 +68,17 @@ class ArthaViewModel(
     @Volatile private var hasSavedProjection = false
     private val _providerCounts = MutableStateFlow<Map<Provider, Int>>(emptyMap())
     val providerCounts = _providerCounts.asStateFlow()
-    val analysisSnapshot = analysisStore?.snapshot ?: MutableStateFlow(initialSnapshot).asStateFlow()
+    val analysisSnapshot = analysisStore?.snapshot ?: MutableStateFlow(AnalysisSnapshot()).asStateFlow()
     private val _providerCoverage = MutableStateFlow<Map<Provider, SourceCoverage>>(emptyMap())
     val providerCoverage = _providerCoverage.asStateFlow()
     private val _selectedMonth = MutableStateFlow(YearMonth.now(clock.withZone(AccountingTime.zone)))
     val selectedMonth = _selectedMonth.asStateFlow()
+    private val _analysisType = MutableStateFlow(TransactionType.EXPENSE)
+    /** Which side of the books Analysis shows; never [TransactionType.TRANSFER]. */
+    val analysisType = _analysisType.asStateFlow()
+    private val _typeFilter = MutableStateFlow<TransactionType?>(null)
+    /** Transactions tab filter; null shows everything. */
+    val typeFilter = _typeFilter.asStateFlow()
     private val _dateRangeFilter = MutableStateFlow<Pair<Long?, Long?>?>(null)
     val dateRangeFilter = _dateRangeFilter.asStateFlow()
     private val _categoryFilter = MutableStateFlow<String?>(null)
@@ -120,14 +124,11 @@ class ArthaViewModel(
     fun setTargetDestination(dest: String?) { _targetDestination.value = dest }
     fun setProviderEnabled(provider: Provider, enabled: Boolean) { preferences?.setEnabled(provider, enabled) }
     fun setImportEnabled(provider: Provider, enabled: Boolean) { preferences?.setImportEnabled(provider, enabled) }
-    fun setAnalysisEnabled(enabled: Boolean) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setAnalysisEnabled(enabled) } }
 
     fun suggestedExportFileName(): String = LedgerExportStorage.fileName(clock.instant())
 
     suspend fun buildExportJsonl(): String = withContext(Dispatchers.IO) {
         val raw = ledger().loadTransactions()
-        val editable = raw.filterNot(ProviderObservations::isObservation)
-        analysisStore?.migrateMetadata(editable)
         LedgerJsonlExport.build(raw, analysisSnapshot.value, clock.instant())
     }
 
@@ -153,8 +154,7 @@ class ArthaViewModel(
         if (observerJob?.isActive != true) {
             observerJob = viewModelScope.launch {
                 val state = spendingState ?: flow {
-                    emitAll(spendingFlow(ledger(), analysisSnapshot, computationDispatcher,
-                        migrate = { analysisStore?.migrateMetadata(it) }))
+                    emitAll(spendingFlow(ledger(), analysisSnapshot, computationDispatcher))
                 }.flowOn(computationDispatcher).catch { emit(SpendingState.Failed) }
                     .stateIn(this, SharingStarted.Eagerly, SpendingState.Loading)
                 launch {
@@ -171,14 +171,14 @@ class ArthaViewModel(
                                 _providerCounts.value = projection.providerCounts
                                 _providerCoverage.value = sourceCoverage(projection.transactions)
                                 _reconciledCache.value = projection.transactions
-                                analysisStore?.migrateAiCategoryFingerprints(projection.transactions)
                                 visibleLedger(projection.transactions, enabled, dates, category, categorySet)
                             }
                         }
                     }.flowOn(computationDispatcher).collect { _ledgerState.value = it }
                 }
                 launch(computationDispatcher) {
-                    combine(_reconciledCache, _selectedMonth) { rows, month -> BudgetAnalyzer.analyzeMonth(month, rows) }.collect { if (it.month == _selectedMonth.value) _monthAnalysis.value = it }
+                    combine(_reconciledCache, _selectedMonth, _analysisType) { rows, month, type -> BudgetAnalyzer.analyzeMonth(month, rows, type) }
+                        .collect { if (it.month == _selectedMonth.value && it.type == _analysisType.value) _monthAnalysis.value = it }
                 }
             }
         }
@@ -219,7 +219,7 @@ class ArthaViewModel(
         val snapshot = analysisSnapshot.value
         return _reconciledCache.value.count { peer ->
             peer.key != transaction.key &&
-                BudgetAnalyzer.isSpending(peer) &&
+                peer.isExpense &&
                 !peer.classificationIsManual &&
                 peer.key !in snapshot.manualCategories &&
                 merchantKeyProvider(peer) == targetKey &&
@@ -237,7 +237,7 @@ class ArthaViewModel(
         val snapshot = analysisSnapshot.value
         val peers = _reconciledCache.value.filter { peer ->
             peer.key != transaction.key &&
-                BudgetAnalyzer.isSpending(peer) &&
+                peer.isExpense &&
                 !peer.classificationIsManual &&
                 peer.key !in snapshot.manualCategories &&
                 merchantKeyProvider(peer) == targetKey &&
@@ -283,7 +283,7 @@ class ArthaViewModel(
         return LedgerState.Ready(rows.filter { tx ->
             val millis = tx.occurredAt.toEpochMilli()
             (activeSet != null || tx.provider in enabled) &&
-                (activeSet == null || (tx.category in activeSet && BudgetAnalyzer.isSpending(tx))) &&
+                (activeSet == null || ((tx.category ?: net.wastu.artha.data.analysis.UNCATEGORIZED_LABEL) in activeSet && tx.type == _analysisType.value)) &&
                 (start == null || millis >= start) && (end == null || millis < AccountingTime.dayAfter(end))
         })
     }
@@ -305,7 +305,6 @@ class ArthaViewModel(
     fun refresh() { importHistory(null) }
     fun syncProvider(provider: Provider) { importHistory(provider) }
     /** Gojek needs its visible history walked first; the host decides how (root UI automation). */
-    fun requestGojekWalk() { (gojekHistoryWalk ?: { syncProvider(Provider.GOJEK) }).invoke() }
     /** Manual GOJEK refresh: invisible flash + import now; when the screen is on it defers to the next idle window. */
     fun requestGojekRefresh() { (gojekFlashRefresh ?: { syncProvider(Provider.GOJEK) }).invoke() }
     private fun importHistory(provider: Provider?, automatic: Boolean = false) {
@@ -372,9 +371,18 @@ class ArthaViewModel(
     fun setAnalysisMonth(month: YearMonth) {
         if (month <= YearMonth.now(clock.withZone(AccountingTime.zone))) {
             _selectedMonth.value = month
-            _monthAnalysis.value = BudgetAnalyzer.analyzeMonth(month, _reconciledCache.value)
+            _monthAnalysis.value = BudgetAnalyzer.analyzeMonth(month, _reconciledCache.value, _analysisType.value)
         }
     }
+    fun setAnalysisType(type: TransactionType) {
+        require(type != TransactionType.TRANSFER)
+        _analysisType.value = type
+        _monthAnalysis.value = BudgetAnalyzer.analyzeMonth(_selectedMonth.value, _reconciledCache.value, type)
+    }
+    fun setTypeFilter(type: TransactionType?) { _typeFilter.value = type }
+    fun clearClassification(key: String) { storeWrite("Categories are unavailable", {}) { clearClassification(key) } }
+    fun setTransactionType(transaction: UnifiedTransaction, type: TransactionType?, onComplete: (Result<Unit>) -> Unit = {}) =
+        storeWrite("Transactions are unavailable", onComplete) { setTypeOverride(transaction.key, type) }
     fun setDateRangeFilter(startMillis: Long?, endMillis: Long?) {
         _dateRangeFilter.value = if (startMillis == null && endMillis == null) null else startMillis to endMillis
     }
@@ -433,9 +441,9 @@ class ArthaViewModel(
             onComplete(error)
         }
     }
-    fun addCustomCategory(category: String, onComplete: (Result<Unit>) -> Unit = {}) =
-        storeWrite("Categories unavailable", onComplete) { addCustomCategory(category) }
-    fun removeCustomCategory(category: String) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.removeCustomCategory(category) } }
+    fun addCustomCategory(category: String, type: TransactionType = TransactionType.EXPENSE, onComplete: (Result<Unit>) -> Unit = {}) =
+        storeWrite("Categories unavailable", onComplete) { addCustomCategory(category, type) }
+    fun removeCustomCategory(category: String, type: TransactionType = TransactionType.EXPENSE) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.removeCustomCategory(category, type) } }
     fun resetCategoriesToDefault() { viewModelScope.launch(Dispatchers.IO) { analysisStore?.resetCategoriesToDefault() } }
     fun setCategoryIcon(category: String, iconKey: String?) { viewModelScope.launch(Dispatchers.IO) { analysisStore?.setCategoryIcon(category, iconKey) } }
 }

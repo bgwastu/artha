@@ -49,6 +49,30 @@ import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.Color
+import kotlinx.coroutines.launch
+import net.wastu.artha.data.analysis.UNCATEGORIZED_LABEL
+import net.wastu.artha.ui.formatMoney
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -80,7 +104,6 @@ import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.analysis.AI_REASON_PREFIX
 import net.wastu.artha.data.analysis.AnalysisSnapshot
 import net.wastu.artha.data.analysis.BudgetAnalyzer
-import net.wastu.artha.data.analysis.CategoryConstants
 import net.wastu.artha.data.analysis.CategorySource
 import net.wastu.artha.data.analysis.attentionSource
 import net.wastu.artha.data.analysis.inMonth
@@ -148,6 +171,20 @@ internal fun buildReviewQueue(
     today: LocalDate = LocalDate.now(AccountingTime.clock.withZone(AccountingTime.zone)),
     month: java.time.YearMonth? = null,
 ): List<ReviewItem> {
+    // Spending payments whose categorySource is REVIEW or FAILED, newest first, excluding busy.
+    val candidates: List<UnifiedTransaction> = rows.filter { tx ->
+        tx.key !in busyKeys && inMonth(tx, month) && attentionSource(tx, snapshot) != null
+    }.sortedWith(compareByDescending<UnifiedTransaction> { it.occurredAt }.thenByDescending { it.key })
+    return buildReviewItems(candidates, rows, snapshot, today)
+}
+
+/** Review cards for [candidates], in that order; [rows] supplies merchant peers and the user's habits. */
+internal fun buildReviewItems(
+    candidates: List<UnifiedTransaction>,
+    rows: List<UnifiedTransaction>,
+    snapshot: AnalysisSnapshot,
+    today: LocalDate,
+): List<ReviewItem> {
     // 1. Merchant index built once across all transactions
     val merchantIndex: Map<String, List<UnifiedTransaction>> = rows.groupBy { txMerchantKey(it) }
 
@@ -156,9 +193,7 @@ internal fun buildReviewQueue(
         .mapNotNull { tx ->
             val cat = snapshot.categories[tx.key] ?: tx.category
             cat?.trim()?.takeIf {
-                it.isNotBlank() &&
-                    it != CategoryConstants.UNCATEGORIZED &&
-                    it != CategoryConstants.INVESTMENTS_TRANSFERS
+                it.isNotBlank()
             }
         }
         .groupingBy { it }
@@ -169,19 +204,10 @@ internal fun buildReviewQueue(
         .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
         .map { it.key }
 
-    val fallbackCustom: List<String> = snapshot.customCategories.filter {
-        it.isNotBlank() &&
-            it != CategoryConstants.UNCATEGORIZED &&
-            it != CategoryConstants.INVESTMENTS_TRANSFERS &&
-            it !in overallCategoryCounts
+    fun overallTopFor(type: net.wastu.artha.core.model.TransactionType): List<String> {
+        val own = snapshot.categoriesFor(type)
+        return overallTopFromRows.filter { it in own } + own.filter { it !in overallCategoryCounts }
     }
-
-    val overallTopCategories: List<String> = overallTopFromRows + fallbackCustom
-
-    // 3. Filter candidates: spending payments whose categorySource is REVIEW or FAILED, newest first, excluding busy
-    val candidates: List<UnifiedTransaction> = rows.filter { tx ->
-        tx.key !in busyKeys && inMonth(tx, month) && attentionSource(tx, snapshot) != null
-    }.sortedWith(compareByDescending<UnifiedTransaction> { it.occurredAt }.thenByDescending { it.key })
 
     // 4. Precompute sibling grouping within the queue items
     val candidateMerchantKeys = candidates.map { it to txMerchantKey(it) }
@@ -199,7 +225,7 @@ internal fun buildReviewQueue(
             human.ifBlank { tx.description.trim() }.ifBlank { "Payment" }
         }
 
-        val aiCategory = snapshot.categories[tx.key] ?: tx.category ?: CategoryConstants.UNCATEGORIZED
+        val aiCategory = snapshot.categories[tx.key] ?: tx.category.orEmpty()
 
         val source = categorySource(tx, snapshot)
         val reason: String? = if (source == CategorySource.FAILED) {
@@ -222,8 +248,6 @@ internal fun buildReviewQueue(
                 val cat = snapshot.categories[peer.key] ?: peer.category
                 cat?.trim()?.takeIf {
                     it.isNotBlank() &&
-                        it != CategoryConstants.UNCATEGORIZED &&
-                        it != CategoryConstants.INVESTMENTS_TRANSFERS &&
                         it != aiCategory
                 }
             }
@@ -241,7 +265,7 @@ internal fun buildReviewQueue(
             if (alternatives.size >= 2) break
         }
         if (alternatives.size < 2) {
-            for (cat in overallTopCategories) {
+            for (cat in overallTopFor(tx.type)) {
                 if (cat != aiCategory && cat !in alternatives) {
                     alternatives.add(cat)
                 }
@@ -266,6 +290,41 @@ internal fun buildReviewQueue(
     }
 }
 
+/** A merchant's payments in a month, categorized together in whole-month mode. */
+internal data class MerchantGroup(
+    val merchant: String,
+    val transactions: List<UnifiedTransaction>,
+    val totalMinor: Long,
+    /** The shared category, or null when payments differ or none is set. */
+    val category: String?,
+    val mixed: Boolean,
+)
+
+internal fun buildMonthGroups(
+    rows: List<UnifiedTransaction>,
+    snapshot: AnalysisSnapshot,
+    month: java.time.YearMonth,
+    type: net.wastu.artha.core.model.TransactionType,
+): List<MerchantGroup> = rows
+    .filter { it.type == type && it.money.currencyCode == "IDR" && inMonth(it, month) }
+    .groupBy { txMerchantKey(it) }
+    .values
+    .map { txs ->
+        val categories = txs.map { snapshot.categories[it.key] ?: it.category }.distinct()
+        MerchantGroup(
+            merchant = CategoryReviewLogic.transactionMerchant(txs.first()),
+            transactions = txs.sortedByDescending { it.occurredAt },
+            totalMinor = txs.sumOf { it.money.amountMinor },
+            category = categories.singleOrNull(),
+            mixed = categories.size > 1,
+        )
+    }
+    .sortedByDescending { it.totalMinor }
+
+private enum class ReviewMode(val label: String) { NEEDS_REVIEW("Needs review"), WHOLE_MONTH("Whole month") }
+
+private data class ReviewData(val order: List<String>, val items: Map<String, ReviewItem>)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CategoryReviewScreen(
@@ -274,583 +333,327 @@ fun CategoryReviewScreen(
     month: java.time.YearMonth,
     onOpenTransaction: (UnifiedTransaction) -> Unit = {},
 ) {
+    var mode by rememberSaveable { mutableStateOf(ReviewMode.NEEDS_REVIEW) }
+    var browsedMonth by rememberSaveable { mutableStateOf(month.toString()) }
+    var wholeType by rememberSaveable { mutableStateOf(net.wastu.artha.core.model.TransactionType.EXPENSE) }
+    val snackbar = remember { SnackbarHostState() }
+    val monthValue = remember(browsedMonth) { java.time.YearMonth.parse(browsedMonth) }
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
+        topBar = {
+            Column(Modifier.fillMaxWidth()) {
+                TopAppBar(
+                    title = { Text(monthValue.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.US))) },
+                    navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
+                    actions = {
+                        if (mode == ReviewMode.WHOLE_MONTH) {
+                            IconButton(onClick = { browsedMonth = monthValue.minusMonths(1).toString() }) { Icon(Icons.Default.ChevronLeft, "Previous month") }
+                            IconButton(
+                                enabled = monthValue < java.time.YearMonth.now(AccountingTime.clock),
+                                onClick = { browsedMonth = monthValue.plusMonths(1).toString() },
+                            ) { Icon(Icons.Default.ChevronRight, "Next month") }
+                        }
+                    },
+                )
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    ReviewMode.entries.forEachIndexed { index, entry ->
+                        SegmentedButton(
+                            selected = mode == entry,
+                            onClick = { mode = entry },
+                            shape = SegmentedButtonDefaults.itemShape(index, ReviewMode.entries.size),
+                        ) { Text(entry.label) }
+                    }
+                }
+            }
+        },
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
+            when (mode) {
+                ReviewMode.NEEDS_REVIEW -> NeedsReviewPane(viewModel, monthValue, snackbar, onBack, onOpenTransaction)
+                ReviewMode.WHOLE_MONTH -> WholeMonthPane(viewModel, monthValue, wholeType, { wholeType = it }, onOpenTransaction)
+            }
+        }
+    }
+}
+
+@Composable
+private fun NeedsReviewPane(
+    viewModel: ArthaViewModel,
+    month: java.time.YearMonth,
+    snackbar: SnackbarHostState,
+    onDone: () -> Unit,
+    onOpenTransaction: (UnifiedTransaction) -> Unit,
+) {
     val snapshot by viewModel.analysisSnapshot.collectAsStateWithLifecycle()
     val categoryProgress by viewModel.categoryProgress.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    var session by rememberSaveable(month, stateSaver = ReviewSession.Saver) { mutableStateOf<ReviewSession?>(null) }
+    val restoredKeys = remember(month) { session?.keys }
 
-    val initialQueueState = produceState<List<ReviewItem>?>(initialValue = null) {
+    val data by produceState<ReviewData?>(null, month) {
         // A restored screen opens before the saved ledger loads; an empty first read would freeze an empty queue.
         viewModel.ledgerState.first { it !is net.wastu.artha.ui.LedgerState.Loading }
         value = withContext(Dispatchers.Default) {
             val rows = viewModel.allTransactions.value
-            val initialSnapshot = viewModel.analysisSnapshot.value
-            val progress = viewModel.categoryProgress.value
-            val busyKeys = progress.activeKeys + progress.queuedKeys
+            val current = viewModel.analysisSnapshot.value
             val today = LocalDate.now(AccountingTime.clock.withZone(AccountingTime.zone))
-            buildReviewQueue(rows, initialSnapshot, busyKeys, today, month)
+            val items = if (restoredKeys != null) {
+                val byKey = rows.associateBy { it.key }
+                buildReviewItems(restoredKeys.mapNotNull(byKey::get), rows, current, today)
+            } else {
+                val progress = viewModel.categoryProgress.value
+                buildReviewQueue(rows, current, progress.activeKeys + progress.queuedKeys, today, month)
+            }
+            ReviewData(items.map { it.tx.key }, items.associateBy { it.tx.key })
+        }
+    }
+    val loaded = data
+    if (loaded == null) {
+        CircularProgressIndicator(Modifier.padding(32.dp))
+        return
+    }
+    val state = session ?: ReviewSession(loaded.order).also { session = it }
+    val item = state.current?.let(loaded.items::get)
+
+    var noteDraft by remember(item?.tx?.key) { mutableStateOf(item?.tx?.userNote.orEmpty()) }
+    var showNote by remember(item?.tx?.key) { mutableStateOf(!item?.tx?.userNote.isNullOrBlank()) }
+    var selected by remember(item?.tx?.key, state.cursor) { mutableStateOf(item?.let { state.selection(it.aiCategory) }.orEmpty()) }
+    var applySimilar by remember(item?.tx?.key) { mutableStateOf(true) }
+    var picking by remember { mutableStateOf(false) }
+
+    // The categorizer took over this payment; leave it to the automation.
+    LaunchedEffect(item?.tx?.key, categoryProgress.activeKeys, categoryProgress.queuedKeys) {
+        val key = item?.tx?.key ?: return@LaunchedEffect
+        if (key in categoryProgress.activeKeys || key in categoryProgress.queuedKeys) session = state.skip()
+    }
+
+    if (item == null) {
+        Column(
+            Modifier.widthIn(max = 480.dp).padding(24.dp).padding(top = 48.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Icon(Icons.Outlined.CheckCircle, null, Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+            Text(if (loaded.order.isEmpty()) "Nothing to review" else "All reviewed", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (state.canGoBack) OutlinedButton(onClick = { session = state.back() }) { Text("Back") }
+                Button(onClick = onDone) { Text("Done") }
+            }
+        }
+        return
+    }
+
+    val similar = item.siblingKeys.filter { it !in state.decisions && it in loaded.items }
+    val categories = snapshot.categoriesFor(item.tx.type)
+    fun applyCurrent() {
+        val grouped = if (applySimilar) similar else emptyList()
+        viewModel.confirmCategory(item.tx, selected) {}
+        grouped.forEach { key -> loaded.items[key]?.let { viewModel.confirmCategory(it.tx, selected) {} } }
+        session = state.apply(selected, grouped)
+        if (grouped.isNotEmpty()) scope.launch {
+            snackbar.currentSnackbarData?.dismiss()
+            val result = snackbar.showSnackbar("${selected} applied to ${grouped.size + 1} payments", actionLabel = "Undo", duration = SnackbarDuration.Long)
+            if (result == SnackbarResult.ActionPerformed) {
+                val (reverted, cleared) = (session ?: return@launch).undo()
+                cleared.forEach(viewModel::clearClassification)
+                session = reverted
+            }
         }
     }
 
-    var queue by remember { mutableStateOf<List<ReviewItem>?>(null) }
-    var totalCount by remember { mutableIntStateOf(0) }
-    var reviewedCount by remember { mutableIntStateOf(0) }
-
-    val initialQueue = initialQueueState.value
-    if (queue == null && initialQueue != null) {
-        queue = initialQueue
-        totalCount = initialQueue.size
-    }
-
-    val currentQueue = queue
-    val currentItem = currentQueue?.firstOrNull()
-
-    var currentItemKey by remember { mutableStateOf<String?>(null) }
-    var selectedCategory by remember { mutableStateOf("") }
-    var customCategory by remember { mutableStateOf<String?>(null) }
-    var applyToSiblings by remember { mutableStateOf(true) }
-    var showOtherCategoryDialog by remember { mutableStateOf(false) }
-    var noteDraft by remember { mutableStateOf("") }
-    var showNoteInput by remember { mutableStateOf(false) }
-
-    if (currentItem != null && currentItem.tx.key != currentItemKey) {
-        currentItemKey = currentItem.tx.key
-        selectedCategory = currentItem.aiCategory
-        customCategory = null
-        applyToSiblings = true
-        showOtherCategoryDialog = false
-        noteDraft = currentItem.tx.userNote.orEmpty()
-        showNoteInput = currentItem.tx.userNote.isNullOrBlank().not()
-    }
-
-    // Auto-skip if the current item becomes busy
-    LaunchedEffect(currentItem?.tx?.key, categoryProgress.activeKeys, categoryProgress.queuedKeys) {
-        val key = currentItem?.tx?.key ?: return@LaunchedEffect
-        if (key in categoryProgress.activeKeys || key in categoryProgress.queuedKeys) {
-            queue = queue?.filterNot { it.tx.key == key }
-            reviewedCount += 1
+    Column(
+        Modifier.widthIn(max = 600.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        LinearProgressIndicator(progress = { if (state.total == 0) 0f else (state.cursor.toFloat() / state.total).coerceIn(0f, 1f) }, Modifier.fillMaxWidth())
+        Text("${state.position} of ${state.total}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.fillMaxWidth().clickable { onOpenTransaction(item.tx) }, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(item.merchant, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("${item.amountText}  ${item.dateText}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(Icons.Default.ChevronRight, "View transaction", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-    }
-
-    Scaffold(
-        topBar = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                TopAppBar(
-                    title = { Text(month.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.US))) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    actions = {
-                        if (totalCount > 0 && currentQueue?.isNotEmpty() == true) {
-                            Text(
-                                text = "${(totalCount - (currentQueue?.size ?: 0) + 1).coerceAtMost(totalCount)} of $totalCount",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(end = 16.dp),
-                            )
-                        }
-                    },
+        item.reason?.takeIf { it.isNotBlank() }?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        val options = (listOf(item.aiCategory) + item.alternatives + listOfNotNull(selected.takeIf { it.isNotBlank() }))
+            .filter { it.isNotBlank() }.distinct()
+        Column(Modifier.selectableGroup()) {
+            options.forEach { option ->
+                ListItem(
+                    modifier = Modifier.selectable(selected = selected == option, role = Role.RadioButton, onClick = { selected = option }),
+                    leadingContent = { RadioButton(selected = selected == option, onClick = null) },
+                    headlineContent = { Text(option) },
+                    supportingContent = if (option == item.aiCategory) {
+                        { Text(snapshot.aiRecords[item.tx.key]?.confidence?.let { "AI suggestion, $it% sure" } ?: "AI suggestion") }
+                    } else null,
+                    trailingContent = { Icon(categoryIconFor(option, snapshot.categoryIcons), null) },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 )
-                val progressFraction = if (totalCount > 0) {
-                    (reviewedCount.toFloat() / totalCount.toFloat()).coerceIn(0f, 1f)
-                } else {
-                    0f
+            }
+            ListItem(
+                modifier = Modifier.clickable { picking = true },
+                headlineContent = { Text("Other category", color = MaterialTheme.colorScheme.primary) },
+                trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
+        }
+        if (similar.isNotEmpty()) {
+            ListItem(
+                modifier = Modifier.toggleable(value = applySimilar, role = Role.Checkbox, onValueChange = { applySimilar = it }),
+                leadingContent = { Checkbox(checked = applySimilar, onCheckedChange = null) },
+                headlineContent = { Text("Apply to ${similar.size} similar") },
+                supportingContent = { Text(item.merchant) },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
+        }
+        if (!showNote) {
+            TextButton(onClick = { showNote = true }, modifier = Modifier.align(Alignment.Start)) {
+                Icon(Icons.Default.EditNote, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(if (noteDraft.isBlank()) "Add note for AI" else "Edit note")
+            }
+        } else {
+            OutlinedTextField(
+                value = noteDraft, onValueChange = { noteDraft = it },
+                label = { Text("Note for AI") },
+                supportingText = { Text("Saving the note re-runs AI categorization") },
+                minLines = 1, maxLines = 3, modifier = Modifier.fillMaxWidth(),
+            )
+            if (noteDraft.isNotBlank()) TextButton(
+                onClick = {
+                    viewModel.setUserNote(item.tx, noteDraft.trim()) {}
+                    viewModel.recategorize(RecategorizeScope.Payment(item.tx.key, replaceManual = true))
+                    session = state.skip()
+                },
+                modifier = Modifier.align(Alignment.End),
+            ) { Text("Save and re-analyze") }
+        }
+        Row(Modifier.fillMaxWidth().padding(bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(enabled = state.canGoBack, onClick = { session = state.back() }) { Text("Back") }
+            Spacer(Modifier.weight(1f))
+            OutlinedButton(onClick = { session = state.skip() }) { Text("Skip") }
+            Button(enabled = selected.isNotBlank(), onClick = ::applyCurrent) {
+                Text(if (state.cursor >= state.total - 1) "Confirm" else "Next")
+            }
+        }
+    }
+
+    if (picking) AlertDialog(
+        onDismissRequest = { picking = false },
+        title = { Text("Select category") },
+        text = {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).selectableGroup()) {
+                categories.forEach { category ->
+                    ListItem(
+                        headlineContent = { Text(category) },
+                        leadingContent = { RadioButton(selected = category == selected, onClick = null) },
+                        modifier = Modifier.selectable(selected = category == selected, role = Role.RadioButton, onClick = { selected = category; picking = false }),
+                    )
                 }
-                LinearProgressIndicator(
-                    progress = { progressFraction },
-                    modifier = Modifier.fillMaxWidth(),
-                )
             }
         },
-    ) { padding ->
-        when {
-            currentQueue == null -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator()
-                }
-            }
-            currentQueue.isEmpty() -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier
-                            .widthIn(max = 480.dp)
-                            .padding(24.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.CheckCircle,
-                            contentDescription = null,
-                            modifier = Modifier.size(56.dp),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Text(
-                            text = if (totalCount == 0) "Nothing to review" else "All reviewed",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = if (totalCount == 0) "No transactions need category review." else "All transactions have been categorized.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                        )
-                        Button(onClick = onBack, modifier = Modifier.heightIn(min = 44.dp)) {
-                            Text("Done")
-                        }
+        confirmButton = { TextButton(onClick = { picking = false }) { Text("Cancel") } },
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun WholeMonthPane(
+    viewModel: ArthaViewModel,
+    month: java.time.YearMonth,
+    type: net.wastu.artha.core.model.TransactionType,
+    onType: (net.wastu.artha.core.model.TransactionType) -> Unit,
+    onOpenTransaction: (UnifiedTransaction) -> Unit,
+) {
+    val snapshot by viewModel.analysisSnapshot.collectAsStateWithLifecycle()
+    val rows by viewModel.allTransactions.collectAsStateWithLifecycle()
+    val groups by produceState(emptyList<MerchantGroup>(), rows, snapshot, month, type) {
+        value = withContext(Dispatchers.Default) { buildMonthGroups(rows, snapshot, month, type) }
+    }
+    var expanded by rememberSaveable(month, type) { mutableStateOf<String?>(null) }
+    var picking by remember { mutableStateOf<MerchantGroup?>(null) }
+    val categories = snapshot.categoriesFor(type)
+    val topCategories = remember(rows, snapshot, type) {
+        val used = rows.filter { it.type == type }.mapNotNull { snapshot.categories[it.key] ?: it.category }
+            .filter { it in categories }.groupingBy { it }.eachCount()
+        (used.entries.sortedByDescending { it.value }.map { it.key } + categories).distinct().take(4)
+    }
+    fun assign(group: MerchantGroup, category: String) {
+        group.transactions.forEach { viewModel.confirmCategory(it, category) {} }
+    }
+    LazyColumn(Modifier.widthIn(max = 600.dp).fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+        item {
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                listOf(net.wastu.artha.core.model.TransactionType.EXPENSE to "Expenses", net.wastu.artha.core.model.TransactionType.INCOME to "Income")
+                    .forEachIndexed { index, (value, label) ->
+                        SegmentedButton(selected = type == value, onClick = { onType(value) }, shape = SegmentedButtonDefaults.itemShape(index, 2)) { Text(label) }
                     }
-                }
             }
-            else -> {
-                AnimatedContent(
-                    targetState = currentItem,
-                    transitionSpec = {
-                        fadeIn(animationSpec = tween(150)) togetherWith fadeOut(animationSpec = tween(150))
-                    },
-                    contentKey = { it?.tx?.key },
-                    label = "ReviewItemTransition",
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                ) { item ->
-                    if (item != null) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.TopCenter,
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .widthIn(max = 600.dp)
-                                    .fillMaxWidth()
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(horizontal = 20.dp, vertical = 16.dp),
-                                verticalArrangement = Arrangement.spacedBy(16.dp),
-                            ) {
-                                // Transaction Card
-                                OutlinedCard(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = CardDefaults.outlinedCardColors(
-                                        containerColor = MaterialTheme.colorScheme.surface,
-                                    ),
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(16.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable { onOpenTransaction(item.tx) },
-                                        ) {
-                                            Text(
-                                                text = item.merchant,
-                                                style = MaterialTheme.typography.titleLarge,
-                                                fontWeight = FontWeight.SemiBold,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.weight(1f),
-                                            )
-                                            Icon(
-                                                Icons.Default.ChevronRight,
-                                                contentDescription = "View transaction",
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(20.dp),
-                                            )
-                                        }
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                        ) {
-                                            Text(
-                                                text = item.amountText,
-                                                style = MaterialTheme.typography.headlineSmall,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                            )
-                                            Text(
-                                                text = item.dateText,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                        if (!item.reason.isNullOrBlank()) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            ) {
-                                                Icon(
-                                                    Icons.Outlined.AutoAwesome,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.size(18.dp).padding(top = 2.dp),
-                                                )
-                                                Text(
-                                                    text = item.reason,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = MaterialTheme.colorScheme.onSurface,
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Category Selection
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text(
-                                        text = "Category",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                    )
-                                    OutlinedCard(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(16.dp),
-                                        colors = CardDefaults.outlinedCardColors(
-                                            containerColor = MaterialTheme.colorScheme.surface,
-                                        ),
-                                    ) {
-                                        Column(modifier = Modifier.selectableGroup()) {
-                                            // AI Suggestion item
-                                            val isAiSelected = selectedCategory == item.aiCategory
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .selectable(
-                                                        selected = isAiSelected,
-                                                        role = Role.RadioButton,
-                                                        onClick = { selectedCategory = item.aiCategory },
-                                                    )
-                                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                            ) {
-                                                RadioButton(
-                                                    selected = isAiSelected,
-                                                    onClick = null,
-                                                )
-                                                Icon(
-                                                    categoryIconFor(item.aiCategory, snapshot.categoryIcons),
-                                                    contentDescription = null,
-                                                    tint = if (isAiSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.size(24.dp),
-                                                )
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(
-                                                        text = item.aiCategory,
-                                                        style = MaterialTheme.typography.bodyLarge,
-                                                        fontWeight = if (isAiSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                                    )
-                                                    Text(
-                                                        text = snapshot.aiRecords[item.tx.key]?.confidence
-                                                            ?.let { "AI suggestion, $it% sure" } ?: "AI suggestion",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.primary,
-                                                    )
-                                                }
-                                            }
-
-                                            // Alternatives
-                                            item.alternatives.forEach { alt ->
-                                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                                val isAltSelected = selectedCategory == alt
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .selectable(
-                                                            selected = isAltSelected,
-                                                            role = Role.RadioButton,
-                                                            onClick = { selectedCategory = alt },
-                                                        )
-                                                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                                ) {
-                                                    RadioButton(
-                                                        selected = isAltSelected,
-                                                        onClick = null,
-                                                    )
-                                                    Icon(
-                                                        categoryIconFor(alt, snapshot.categoryIcons),
-                                                        contentDescription = null,
-                                                        tint = if (isAltSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        modifier = Modifier.size(24.dp),
-                                                    )
-                                                    Text(
-                                                        text = alt,
-                                                        style = MaterialTheme.typography.bodyLarge,
-                                                        fontWeight = if (isAltSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                                        modifier = Modifier.weight(1f),
-                                                    )
-                                                }
-                                            }
-
-                                            // Custom category if chosen
-                                            if (customCategory != null && customCategory != item.aiCategory && customCategory !in item.alternatives) {
-                                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                                val isCustomSelected = selectedCategory == customCategory
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .selectable(
-                                                            selected = isCustomSelected,
-                                                            role = Role.RadioButton,
-                                                            onClick = { selectedCategory = customCategory!! },
-                                                        )
-                                                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                                ) {
-                                                    RadioButton(
-                                                        selected = isCustomSelected,
-                                                        onClick = null,
-                                                    )
-                                                    Icon(
-                                                        categoryIconFor(customCategory!!, snapshot.categoryIcons),
-                                                        contentDescription = null,
-                                                        tint = if (isCustomSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        modifier = Modifier.size(24.dp),
-                                                    )
-                                                    Text(
-                                                        text = customCategory!!,
-                                                        style = MaterialTheme.typography.bodyLarge,
-                                                        fontWeight = if (isCustomSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                                        modifier = Modifier.weight(1f),
-                                                    )
-                                                }
-                                            }
-
-                                            // Other category button
-                                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable { showOtherCategoryDialog = true }
-                                                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                            ) {
-                                                Icon(
-                                                    Icons.AutoMirrored.Outlined.Label,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(24.dp),
-                                                )
-                                                Text(
-                                                    text = "Other category...",
-                                                    style = MaterialTheme.typography.bodyLarge,
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.weight(1f),
-                                                )
-                                                Icon(
-                                                    Icons.Default.ChevronRight,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.size(20.dp),
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    // Sibling propagation
-                                    val siblingsStillInQueue = currentQueue.filter { it.tx.key in item.siblingKeys }
-                                    if (siblingsStillInQueue.isNotEmpty()) {
-                                        Surface(
-                                            shape = RoundedCornerShape(12.dp),
-                                            color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(top = 4.dp)
-                                                .toggleable(
-                                                    value = applyToSiblings,
-                                                    role = Role.Checkbox,
-                                                    onValueChange = { applyToSiblings = it },
-                                                ),
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                            ) {
-                                                Checkbox(
-                                                    checked = applyToSiblings,
-                                                    onCheckedChange = null,
-                                                )
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(
-                                                        text = "Also apply to ${siblingsStillInQueue.size} more payments",
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        fontWeight = FontWeight.Medium,
-                                                    )
-                                                    Text(
-                                                        text = item.merchant,
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Optional Note Section
-                                if (!showNoteInput) {
-                                    TextButton(
-                                        onClick = { showNoteInput = true },
-                                        modifier = Modifier.align(Alignment.Start),
-                                    ) {
-                                        Icon(
-                                            Icons.Default.EditNote,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Text(if (noteDraft.isBlank()) "Add note for AI" else "Edit note")
-                                    }
-                                } else {
-                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        OutlinedTextField(
-                                            value = noteDraft,
-                                            onValueChange = { noteDraft = it },
-                                            label = { Text("Note for AI") },
-                                            placeholder = { Text("e.g. what this purchase was for") },
-                                            supportingText = { Text("Saving note re-runs AI categorization") },
-                                            minLines = 1,
-                                            maxLines = 3,
-                                            shape = RoundedCornerShape(12.dp),
-                                            modifier = Modifier.fillMaxWidth(),
-                                        )
-                                        if (noteDraft.isNotBlank()) {
-                                            Row(
-                                                horizontalArrangement = Arrangement.End,
-                                                modifier = Modifier.fillMaxWidth(),
-                                            ) {
-                                                TextButton(
-                                                    onClick = {
-                                                        val itm = currentItem ?: return@TextButton
-                                                        viewModel.setUserNote(itm.tx, noteDraft.trim()) {}
-                                                        viewModel.recategorize(RecategorizeScope.Payment(itm.tx.key, replaceManual = true))
-                                                        queue = queue?.filterNot { it.tx.key == itm.tx.key }
-                                                        reviewedCount += 1
-                                                    },
-                                                ) {
-                                                    Text("Save & re-analyze")
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Action Buttons (Right below the form, NO wide gap!)
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .navigationBarsPadding()
-                                        .padding(top = 8.dp, bottom = 24.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                ) {
-                                    OutlinedButton(
-                                        onClick = {
-                                            val itm = currentItem ?: return@OutlinedButton
-                                            queue = queue?.filterNot { it.tx.key == itm.tx.key }
-                                            reviewedCount += 1
-                                        },
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .heightIn(min = 48.dp),
-                                        shape = RoundedCornerShape(12.dp),
-                                    ) {
-                                        Text("Skip")
-                                    }
-                                    Button(
-                                        onClick = {
-                                            val itm = currentItem ?: return@Button
-                                            val targetCategory = selectedCategory
-                                            viewModel.confirmCategory(itm.tx, targetCategory) {}
-                                            val siblings = currentQueue.filter { it.tx.key in itm.siblingKeys }
-                                            if (applyToSiblings && siblings.isNotEmpty()) {
-                                                for (sibling in siblings) {
-                                                    viewModel.confirmCategory(sibling.tx, targetCategory) {}
-                                                }
-                                                val keysToRemove = setOf(itm.tx.key) + siblings.map { it.tx.key }
-                                                queue = queue?.filterNot { it.tx.key in keysToRemove }
-                                                reviewedCount += keysToRemove.size
-                                            } else {
-                                                queue = queue?.filterNot { it.tx.key == itm.tx.key }
-                                                reviewedCount += 1
-                                            }
-                                        },
-                                        enabled = selectedCategory.isNotBlank(),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .heightIn(min = 48.dp),
-                                        shape = RoundedCornerShape(12.dp),
-                                    ) {
-                                        Text(if (currentQueue.size <= 1) "Confirm" else "Next")
-                                    }
-                                }
+        }
+        if (groups.isEmpty()) item {
+            Text("Nothing in this month", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        groups.forEach { group ->
+            val id = txMerchantKey(group.transactions.first())
+            item(key = id) {
+                Column {
+                    ListItem(
+                        modifier = Modifier.clickable { expanded = if (expanded == id) null else id },
+                        headlineContent = { Text(group.merchant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        supportingContent = {
+                            val status = when {
+                                group.mixed -> "Mixed categories"
+                                group.category != null -> group.category
+                                else -> UNCATEGORIZED_LABEL
                             }
+                            val count = group.transactions.size
+                            Text("$count ${if (count == 1) "payment" else "payments"}, $status")
+                        },
+                        trailingContent = { Text(formatMoney(net.wastu.artha.core.model.Money(group.totalMinor))) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
+                    FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val chips = if (!group.mixed && group.category != null && group.category !in topCategories) listOf(group.category) + topCategories else topCategories
+                        chips.forEach { category ->
+                            FilterChip(
+                                selected = !group.mixed && group.category == category,
+                                onClick = { assign(group, category) },
+                                label = { Text(category) },
+                            )
                         }
+                        AssistChip(onClick = { picking = group }, label = { Text("Other") })
                     }
+                    if (expanded == id) group.transactions.forEach { tx ->
+                        ListItem(
+                            modifier = Modifier.clickable { onOpenTransaction(tx) }.padding(start = 16.dp),
+                            headlineContent = { Text(formatReviewDate(tx.occurredAt, LocalDate.now(AccountingTime.clock.withZone(AccountingTime.zone)))) },
+                            supportingContent = { Text(snapshot.categories[tx.key] ?: tx.category ?: UNCATEGORIZED_LABEL) },
+                            trailingContent = { Text(paymentRowAmount(tx)) },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        )
+                    }
+                    HorizontalDivider(Modifier.padding(top = 8.dp))
                 }
             }
         }
     }
-
-    if (showOtherCategoryDialog) {
-        val availableCategories = remember(snapshot.customCategories) {
-            snapshot.customCategories.filter { it != CategoryConstants.INVESTMENTS_TRANSFERS }
-        }
+    picking?.let { group ->
         AlertDialog(
-            onDismissRequest = { showOtherCategoryDialog = false },
+            onDismissRequest = { picking = null },
             title = { Text("Select category") },
             text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .selectableGroup(),
-                ) {
-                    availableCategories.forEach { category ->
-                        val isSelected = category == selectedCategory
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    categories.forEach { category ->
                         ListItem(
                             headlineContent = { Text(category) },
-                            leadingContent = {
-                                RadioButton(
-                                    selected = isSelected,
-                                    onClick = null,
-                                )
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .selectable(
-                                    selected = isSelected,
-                                    role = Role.RadioButton,
-                                    onClick = {
-                                        selectedCategory = category
-                                        customCategory = category
-                                        showOtherCategoryDialog = false
-                                    },
-                                ),
+                            modifier = Modifier.clickable { assign(group, category); picking = null },
                         )
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = { showOtherCategoryDialog = false }) {
-                    Text("Cancel")
-                }
-            },
+            confirmButton = { TextButton(onClick = { picking = null }) { Text("Cancel") } },
         )
     }
 }

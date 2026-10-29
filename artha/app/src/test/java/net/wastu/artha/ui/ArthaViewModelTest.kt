@@ -161,11 +161,11 @@ class ArthaViewModelTest {
             payment.copy(providerTransactionId = "credit", direction = net.wastu.artha.core.model.Direction.CREDIT))
         val model = ArthaViewModel(RootAccess { false }, { ledger }, clock = java.time.Clock.fixed(instant, net.wastu.artha.core.model.AccountingTime.zone), computationDispatcher = dispatcher)
         model.enterForeground(); advanceUntilIdle()
-        assertEquals(123400L, model.monthAnalysis.value.totalPersonalSpendingMinor)
+        assertEquals(123400L, model.monthAnalysis.value.totalMinor)
         model.openCategoryTransactions("Uncategorized"); advanceUntilIdle()
         val visible = (model.ledgerState.value as LedgerState.Ready).transactions
         assertEquals(listOf(payment.key), visible.map { it.key })
-        assertEquals(model.monthAnalysis.value.totalPersonalSpendingMinor, visible.sumOf { it.money.amountMinor })
+        assertEquals(model.monthAnalysis.value.totalMinor, visible.sumOf { it.money.amountMinor })
         assertEquals("TRANSACTIONS", model.targetDestination.value)
         model.clearCategoryFilter(); model.clearDateRangeFilter(); advanceUntilIdle()
         assertEquals(4, (model.ledgerState.value as LedgerState.Ready).transactions.size)

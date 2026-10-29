@@ -1,0 +1,12 @@
+<resources>
+    <style name="Theme.Artha" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">@color/artha_background</item>
+        <item name="android:windowSplashScreenBackground">@color/artha_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
+        <!-- Android 13+ only: keep the icon splash over windowBackground in night mode. -->
+        <item name="android:windowSplashScreenBehavior">icon_preferred</item>
+    </style>
+</resources>

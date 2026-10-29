@@ -1,5 +1,6 @@
 package net.wastu.artha.ui.screens
 
+import androidx.core.net.toUri
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -98,65 +99,15 @@ import net.wastu.artha.ui.SourceCoverage
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProvidersScreen(
+fun SourcesScreen(
     enabled: Set<Provider> = Provider.entries.toSet(),
     syncingProvider: Provider? = null,
     providerCounts: Map<Provider, Int> = emptyMap(),
     onEnabled: (Provider, Boolean) -> Unit = { _, _ -> },
     viewModel: ArthaViewModel? = null,
-    onOpenDemo: (() -> Unit)? = null,
-    onDetailOpenChanged: (Boolean) -> Unit = {},
-    onOpenCategoryReview: () -> Unit = {},
-    onOpenAiCategories: () -> Unit = {},
+    onBack: () -> Unit = {},
 ) {
     var selectedProvider by rememberSaveable { mutableStateOf<Provider?>(null) }
-    DisposableEffect(selectedProvider) {
-        onDetailOpenChanged(selectedProvider != null)
-        onDispose { onDetailOpenChanged(false) }
-    }
-    var showApiServerSettings by rememberSaveable { mutableStateOf(false) }
-    var exporting by remember { mutableStateOf(false) }
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var importingFile by remember { mutableStateOf(false) }
-
-    val importDocument = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        val vm = viewModel ?: return@rememberLauncherForActivityResult
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            importingFile = true
-            try {
-                vm.importExportFile(context, uri)
-                Toast.makeText(context, "Import saved", Toast.LENGTH_SHORT).show()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                Toast.makeText(context, "Import failed: ${error.message ?: error::class.java.simpleName}", Toast.LENGTH_LONG).show()
-                importingFile = false
-            }
-        }
-    }
-
-    val exportDocument = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        val vm = viewModel ?: return@rememberLauncherForActivityResult
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            exporting = true
-            try {
-                val body = vm.buildExportJsonl()
-                LedgerExportStorage.writeToUri(context, uri, body)
-                Toast.makeText(context, "Export saved", Toast.LENGTH_SHORT).show()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                Toast.makeText(context, "Export failed", Toast.LENGTH_SHORT).show()
-            } finally {
-                exporting = false
-            }
-        }
-    }
-
-    val snapshot by viewModel?.analysisSnapshot?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val importEnabled by viewModel?.importEnabled?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(Provider.entries.toSet()) }
     val diagnostics by viewModel?.providerDiagnostics?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap()) }
     val importing by viewModel?.syncingProvider?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(syncingProvider) }
@@ -180,43 +131,22 @@ fun ProvidersScreen(
     BoxWithConstraints(Modifier.widthIn(max = 1320.dp).fillMaxSize()) {
         val expanded = maxWidth >= 840.dp && maxHeight >= 480.dp
         Row(Modifier.fillMaxSize()) {
+            Column(Modifier.weight(1f).widthIn(max = 600.dp).fillMaxSize()) {
+            TopAppBar(
+                title = { Text("Sources") },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
+                actions = {
+                    if (anyImportRunning) {
+                        CircularProgressIndicator(Modifier.padding(end = 16.dp).size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        TextButton(onClick = { viewModel?.refresh() }, enabled = viewModel != null) { Text("Sync all") }
+                    }
+                },
+            )
             LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .widthIn(max = 600.dp)
-                    .fillMaxSize(),
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 16.dp),
             ) {
-                item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "Sources",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.semantics { heading() },
-                        )
-                        Spacer(Modifier.weight(1f))
-                        if (anyImportRunning) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                            )
-                        } else {
-                            TextButton(
-                                onClick = { viewModel?.refresh() },
-                                enabled = viewModel != null,
-                            ) {
-                                Text("Sync all")
-                            }
-                        }
-                    }
-                }
-
                 items(Provider.entries, key = { it.name }) { provider ->
                     val diagnostic = diagnostics[provider]
                     val isProviderImportEnabled = provider in importEnabled
@@ -261,85 +191,7 @@ fun ProvidersScreen(
                     }
                 }
 
-                if (viewModel != null) {
-                    item { SettingsHeading("AI") }
-                    item {
-                        val isAiEnabled = snapshot?.analysisEnabled == true
-                        val config = snapshot?.aiConfig
-                        val isConfigured = config != null && config.baseUrl.isNotBlank() && config.apiKey.isNotBlank() && config.model.isNotBlank()
-                        val aiSummary = when {
-                            !isConfigured -> "Not set up"
-                            !isAiEnabled -> "Off"
-                            else -> "On"
-                        }
-                        SettingsLink(
-                            title = "AI categorization",
-                            summary = aiSummary,
-                            icon = Icons.Default.SettingsSuggest,
-                        ) {
-                            onDetailOpenChanged(false)
-                            onOpenAiCategories()
-                        }
-                    }
-
-                    item { SettingsHeading("Data") }
-                    item {
-                        SettingsLink(
-                            title = "Export backup",
-                            summary = if (exporting) "Exporting" else "Save all data to a file",
-                            icon = Icons.Default.FileDownload,
-                        ) {
-                            if (exporting) return@SettingsLink
-                            exportDocument.launch(viewModel.suggestedExportFileName())
-                        }
-                    }
-                    item {
-                        SettingsLink(
-                            title = "Import backup",
-                            summary = if (importingFile) "Importing" else "Restore from a backup file",
-                            icon = Icons.Default.FileUpload,
-                        ) {
-                            if (importingFile) return@SettingsLink
-                            importDocument.launch(arrayOf("application/json", "application/*", "text/*", "*/*"))
-                        }
-                    }
-                }
-
-                item { SettingsHeading("Other") }
-                item {
-                    ListItem(
-                        headlineContent = { Text("Widgets") },
-                        supportingContent = { Text("Add from your home screen") },
-                        leadingContent = { Icon(Icons.Default.Widgets, null) },
-                    )
-                }
-                if (onOpenDemo != null) {
-                    item {
-                        SettingsLink(
-                            title = "Demo mode",
-                            summary = "Explore sample data",
-                            icon = Icons.Default.PlayArrow,
-                            onClick = onOpenDemo,
-                        )
-                    }
-                }
-                item { SettingsHeading("Remote access") }
-                item {
-                    val tunnelState by net.wastu.artha.api.service.ApiServerController.tunnelState.collectAsStateWithLifecycle()
-                    val apiSummary = when (tunnelState) {
-                        is net.wastu.artha.api.tunnel.TunnelState.Active -> "Link is live"
-                        is net.wastu.artha.api.tunnel.TunnelState.Starting -> "Creating link"
-                        is net.wastu.artha.api.tunnel.TunnelState.Failed -> "Could not connect"
-                        is net.wastu.artha.api.tunnel.TunnelState.Inactive -> "Off"
-                    }
-                    SettingsLink(
-                        title = "Remote access",
-                        summary = apiSummary,
-                        icon = Icons.Default.Link,
-                    ) {
-                        showApiServerSettings = true
-                    }
-                }
+            }
             }
 
             if (expanded) {
@@ -357,7 +209,6 @@ fun ProvidersScreen(
                         onEnabled = { onEnabled(provider, it) },
                         onImportEnabled = { viewModel?.setImportEnabled(provider, it) },
                         onImport = { syncAction(provider) },
-                        onRequestGojekWalk = { viewModel?.requestGojekWalk() },
                         busy = importBusy && !automaticImport,
                         feedback = feedback(provider),
                         flash = gojekFlash.takeIf { provider == Provider.GOJEK },
@@ -383,7 +234,6 @@ fun ProvidersScreen(
                 onEnabled = { onEnabled(provider, it) },
                 onImportEnabled = { viewModel?.setImportEnabled(provider, it) },
                 onImport = { syncAction(provider) },
-                onRequestGojekWalk = { viewModel?.requestGojekWalk() },
                 busy = importBusy && !automaticImport,
                 feedback = feedback(provider),
                 flash = gojekFlash.takeIf { provider == Provider.GOJEK },
@@ -391,9 +241,6 @@ fun ProvidersScreen(
             )
         }
 
-        if (showApiServerSettings) {
-            ShareLinkDialog(onDismiss = { showApiServerSettings = false })
-        }
     }
 }
 
@@ -411,14 +258,12 @@ private fun SourcePage(
     onEnabled: (Boolean) -> Unit,
     onImportEnabled: (Boolean) -> Unit,
     onImport: () -> Unit,
-    onRequestGojekWalk: () -> Unit,
     busy: Boolean = false,
     feedback: String? = null,
     flash: GojekFlashRecord? = null,
     onBack: (() -> Unit)? = null,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
-    var showGojekWalkDialog by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(feedback) {
         if (!feedback.isNullOrBlank()) {
@@ -460,26 +305,6 @@ private fun SourcePage(
                             enabled = importEnabled && !busy,
                             onSync = onImport,
                         )
-                        if (provider == Provider.GOJEK) {
-                            var menuExpanded by remember { mutableStateOf(false) }
-                            Box {
-                                IconButton(onClick = { menuExpanded = true }) {
-                                    Icon(Icons.Default.MoreVert, contentDescription = "More options")
-                                }
-                                DropdownMenu(
-                                    expanded = menuExpanded,
-                                    onDismissRequest = { menuExpanded = false },
-                                ) {
-                                    DropdownMenuItem(
-                                        text = { Text("Load older history") },
-                                        onClick = {
-                                            menuExpanded = false
-                                            showGojekWalkDialog = true
-                                        },
-                                    )
-                                }
-                            }
-                        }
                     },
                 )
             },
@@ -505,33 +330,12 @@ private fun SourcePage(
                     onEnabled = onEnabled,
                     onImportEnabled = onImportEnabled,
                     onImport = onImport,
-                    onOpenGojekWalkDialog = { showGojekWalkDialog = true },
                     flash = flash,
                 )
             }
         }
     }
 
-    if (showGojekWalkDialog) {
-        AlertDialog(
-            onDismissRequest = { showGojekWalkDialog = false },
-            title = { Text("Load older history") },
-            text = { Text("Artha opens Gojek and scrolls through your history. Keep the phone unlocked until it finishes.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showGojekWalkDialog = false
-                    onRequestGojekWalk()
-                }) {
-                    Text("Start")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showGojekWalkDialog = false }) {
-                    Text("Cancel")
-                }
-            },
-        )
-    }
 }
 
 @Composable
@@ -547,7 +351,6 @@ private fun SourcePageContent(
     onEnabled: (Boolean) -> Unit,
     onImportEnabled: (Boolean) -> Unit,
     onImport: () -> Unit,
-    onOpenGojekWalkDialog: () -> Unit,
     flash: GojekFlashRecord? = null,
 ) {
     val context = LocalContext.current
@@ -597,13 +400,13 @@ private fun SourcePageContent(
                     } else {
                         val playStoreIntent = Intent(
                             Intent.ACTION_VIEW,
-                            Uri.parse("market://details?id=${provider.appPackage}"),
+                            "market://details?id=${provider.appPackage}".toUri(),
                         ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                         runCatching { context.startActivity(playStoreIntent) }
                             .onFailure {
                                 val webIntent = Intent(
                                     Intent.ACTION_VIEW,
-                                    Uri.parse("https://play.google.com/store/apps/details?id=${provider.appPackage}"),
+                                    "https://play.google.com/store/apps/details?id=${provider.appPackage}".toUri(),
                                 ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                                 runCatching { context.startActivity(webIntent) }
                             }
@@ -675,12 +478,6 @@ private fun SourcePageContent(
     // GOJEK only, SettingsHeading "Gojek"
     if (provider == Provider.GOJEK) {
         SettingsHeading("Gojek")
-        ListItem(
-            modifier = Modifier.clickable(onClick = onOpenGojekWalkDialog),
-            headlineContent = { Text("Load older history") },
-            supportingContent = { Text("Opens Gojek and scrolls your history") },
-            trailingContent = { Icon(Icons.Default.ChevronRight, contentDescription = null) },
-        )
         val backgroundRefreshText = flash?.millis?.let { ms ->
             val stamp = DateTimeFormatter.ofPattern("d MMM, HH:mm", Locale.US)
                 .format(Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()))
@@ -720,7 +517,7 @@ private fun SyncHeaderAction(importing: Boolean, enabled: Boolean, onSync: () ->
 }
 
 @Composable
-private fun SettingsHeading(title: String) {
+internal fun SettingsHeading(title: String) {
     Text(
         text = title,
         style = MaterialTheme.typography.titleSmall,
@@ -732,7 +529,7 @@ private fun SettingsHeading(title: String) {
 }
 
 @Composable
-private fun SettingsLink(
+internal fun SettingsLink(
     title: String,
     summary: String?,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -749,7 +546,7 @@ private fun SettingsLink(
 }
 
 @Composable
-private fun SettingsSwitch(
+internal fun SettingsSwitch(
     title: String,
     checked: Boolean,
     onChange: (Boolean) -> Unit,

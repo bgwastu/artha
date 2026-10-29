@@ -96,8 +96,7 @@ internal object AiCategoriesLogic {
         else -> "$pending payments not categorized"
     }
 
-    fun historySupporting(progress: CategoryProgress, configured: Boolean, enabled: Boolean): String? = when {
-        !enabled -> "AI analysis is off"
+    fun historySupporting(progress: CategoryProgress, configured: Boolean): String? = when {
         !configured -> "Add a provider below"
         progress.stopped || progress.state == CategoryAutomationState.ERROR -> headerStatusText(progress)
         else -> null
@@ -125,11 +124,10 @@ internal object AiCategoriesLogic {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AiCategoriesScreen(
+fun AiScreen(
     viewModel: ArthaViewModel,
     onBack: () -> Unit,
     onOpenReview: () -> Unit,
-    scrollToCategories: Boolean = false,
 ) {
     val snapshot by viewModel.analysisSnapshot.collectAsStateWithLifecycle()
     val progress by viewModel.categoryProgress.collectAsStateWithLifecycle()
@@ -146,16 +144,10 @@ fun AiCategoriesScreen(
     var saving by remember { mutableStateOf(false) }
 
     var menu by remember { mutableStateOf(false) }
-    var rowMenu by rememberSaveable { mutableStateOf<String?>(null) }
-    var editingIcon by rememberSaveable { mutableStateOf<String?>(null) }
-    var removing by rememberSaveable { mutableStateOf<String?>(null) }
-    var adding by rememberSaveable { mutableStateOf(false) }
-    var resetting by rememberSaveable { mutableStateOf(false) }
     var pendingScope by remember { mutableStateOf<RecategorizeScope?>(null) }
 
     val snackbar = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
-    val listState = rememberLazyListState()
     fun say(message: String) { coroutineScope.launch { snackbar.showSnackbar(message) } }
 
     LaunchedEffect(Unit) {
@@ -167,13 +159,12 @@ fun AiCategoriesScreen(
             if (result == SnackbarResult.ActionPerformed) onOpenReview()
         }
     }
-    LaunchedEffect(scrollToCategories) { if (scrollToCategories) listState.scrollToItem(CATEGORIES_INDEX) }
 
     fun draft() = saved.copy(baseUrl = baseUrl.trim(), apiKey = apiKey.trim(), model = model.trim())
     val providerDirty = draft() != saved
     val contextDirty = context != snapshot.knowledge.orEmpty()
     val busy = testing || saving
-    val providerEnabled = !busy && snapshot.analysisEnabled
+    val providerEnabled = !busy
 
     fun save() {
         if (contextDirty) viewModel.applyKnowledgeRewrite(context)
@@ -221,7 +212,6 @@ fun AiCategoriesScreen(
                                     enabled = !working && allCount > 0,
                                     onClick = { menu = false; pendingScope = RecategorizeScope.All },
                                 )
-                                DropdownMenuItem(text = { Text("Reset categories") }, onClick = { menu = false; resetting = true })
                             }
                         }
                     },
@@ -242,12 +232,12 @@ fun AiCategoriesScreen(
             item {
                 ListItem(
                     headlineContent = { Text(AiCategoriesLogic.historyHeadline(historyCount, progress)) },
-                    supportingContent = AiCategoriesLogic.historySupporting(progress, configured, snapshot.analysisEnabled)
+                    supportingContent = AiCategoriesLogic.historySupporting(progress, configured)
                         ?.let { text -> { Text(text) } },
                     trailingContent = if (!working && historyCount > 0) {
                         {
                             FilledTonalButton(
-                                enabled = configured && snapshot.analysisEnabled,
+                                enabled = configured,
                                 onClick = { pendingScope = RecategorizeScope.AllPending },
                             ) { Text("Categorize") }
                         }
@@ -257,19 +247,6 @@ fun AiCategoriesScreen(
             }
             item { SectionHeader("Provider") }
             item {
-                ListItem(
-                    headlineContent = { Text("AI analysis") },
-                    trailingContent = { Switch(checked = snapshot.analysisEnabled, onCheckedChange = null, enabled = !busy) },
-                    modifier = Modifier.toggleable(
-                        value = snapshot.analysisEnabled,
-                        enabled = !busy,
-                        role = Role.Switch,
-                        onValueChange = { viewModel.setAnalysisEnabled(it) },
-                    ),
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
-            item {
                 Column(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -277,8 +254,8 @@ fun AiCategoriesScreen(
                     OutlinedTextField(
                         value = baseUrl, onValueChange = { baseUrl = it },
                         label = { Text("Endpoint URL") },
-                        placeholder = { Text("https://api.openai.com/v1") },
-                        supportingText = { Text("Payment details are sent here") },
+                        placeholder = { Text("https://example.com/v1") },
+                        supportingText = { Text("Merchant names and amounts are sent to this endpoint") },
                         singleLine = true, enabled = providerEnabled,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -292,7 +269,7 @@ fun AiCategoriesScreen(
                     OutlinedTextField(
                         value = model, onValueChange = { model = it },
                         label = { Text("Model") },
-                        placeholder = { Text("gpt-4o-mini") },
+                        placeholder = { Text("model name") },
                         singleLine = true, enabled = providerEnabled,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -324,36 +301,12 @@ fun AiCategoriesScreen(
                 ListItem(
                     headlineContent = { Text("Auto-categorize") },
                     supportingContent = { Text("New payments in the current month") },
-                    trailingContent = { Switch(checked = snapshot.autoCategorize, onCheckedChange = null, enabled = snapshot.analysisEnabled) },
+                    trailingContent = { Switch(checked = snapshot.autoCategorize, onCheckedChange = null) },
                     modifier = Modifier.toggleable(
                         value = snapshot.autoCategorize,
-                        enabled = snapshot.analysisEnabled,
                         role = Role.Switch,
                         onValueChange = { viewModel.setAutoCategorize(it) },
                     ),
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
-            item {
-                ListItem(
-                    headlineContent = { Text("Categories", style = MaterialTheme.typography.titleSmall) },
-                    trailingContent = { IconButton(onClick = { adding = true }) { Icon(Icons.Default.Add, "Add category") } },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
-            items(snapshot.customCategories, key = { it }) { category ->
-                ListItem(
-                    leadingContent = { Icon(categoryIconFor(category, snapshot.categoryIcons), null) },
-                    headlineContent = { Text(category) },
-                    trailingContent = {
-                        Box {
-                            IconButton(onClick = { rowMenu = category }) { Icon(Icons.Default.MoreVert, "Options for $category") }
-                            DropdownMenu(rowMenu == category, onDismissRequest = { rowMenu = null }) {
-                                DropdownMenuItem(text = { Text("Change icon") }, onClick = { rowMenu = null; editingIcon = category })
-                                DropdownMenuItem(text = { Text("Remove") }, onClick = { rowMenu = null; removing = category })
-                            }
-                        }
-                    },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 )
             }
@@ -370,33 +323,6 @@ fun AiCategoriesScreen(
         }
     }
 
-    editingIcon?.let { category ->
-        IconPickerDialog(snapshot.categoryIcons[category], onDismiss = { editingIcon = null }, onSelect = {
-            viewModel.setCategoryIcon(category, it)
-            editingIcon = null
-        })
-    }
-    removing?.let { category ->
-        AlertDialog(
-            onDismissRequest = { removing = null },
-            title = { Text("Remove category?") },
-            text = { Text("Saved payments keep their categories and notes.") },
-            confirmButton = { TextButton(onClick = { viewModel.removeCustomCategory(category); removing = null }) { Text("Remove") } },
-            dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } },
-        )
-    }
-    if (resetting) AlertDialog(
-        onDismissRequest = { resetting = false },
-        title = { Text("Reset categories?") },
-        text = { Text("Restores default categories and icons. Saved payments keep their categories and notes.") },
-        confirmButton = { TextButton(onClick = { viewModel.resetCategoriesToDefault(); resetting = false }) { Text("Reset") } },
-        dismissButton = { TextButton(onClick = { resetting = false }) { Text("Cancel") } },
-    )
-    if (adding) AddCategoryDialog(
-        existing = snapshot.customCategories,
-        onDismiss = { adding = false },
-        onAdd = { name, done -> viewModel.addCustomCategory(name) { result -> done(result.isSuccess) } },
-    )
     pendingScope?.let { scope ->
         val count = viewModel.recategorizeCount(scope)
         val monthLabel = remember(selectedMonth) { DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US).format(selectedMonth) }
@@ -414,9 +340,6 @@ fun AiCategoriesScreen(
     }
 }
 
-// List position of the Categories header: history, provider header, AI switch, provider fields, auto-categorize.
-private const val CATEGORIES_INDEX = 5
-
 @Composable
 private fun SectionHeader(title: String) {
     ListItem(
@@ -425,35 +348,3 @@ private fun SectionHeader(title: String) {
     )
 }
 
-@Composable
-private fun AddCategoryDialog(existing: List<String>, onDismiss: () -> Unit, onAdd: (String, (Boolean) -> Unit) -> Unit) {
-    var name by rememberSaveable { mutableStateOf("") }
-    var failed by remember { mutableStateOf(false) }
-    var saving by remember { mutableStateOf(false) }
-    val duplicate = existing.any { it.equals(name.trim(), ignoreCase = true) }
-    fun submit() {
-        if (saving || name.isBlank() || duplicate) return
-        saving = true
-        onAdd(name.trim()) { ok ->
-            saving = false
-            if (ok) onDismiss() else failed = true
-        }
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add category") },
-        text = {
-            OutlinedTextField(
-                value = name, onValueChange = { name = it; failed = false },
-                label = { Text("Category name") },
-                isError = duplicate || failed,
-                supportingText = (if (duplicate) "Already exists" else if (failed) "Couldn't add category" else null)?.let { message -> { Text(message) } },
-                singleLine = true, enabled = !saving,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { submit() }),
-            )
-        },
-        confirmButton = { TextButton(enabled = !saving && name.isNotBlank() && !duplicate, onClick = ::submit) { Text("Add") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}

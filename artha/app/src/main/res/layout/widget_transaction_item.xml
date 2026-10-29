@@ -47,7 +47,7 @@
                 android:paddingEnd="4dp"
                 android:paddingBottom="2dp"
                 android:textColor="@color/widget_tag_secondary_text"
-                android:textSize="10sp"
+                android:textSize="12sp"
                 android:importantForAccessibility="no"
                 android:text="Grouped"
                 android:visibility="gone" />
@@ -65,7 +65,7 @@
                 android:paddingEnd="4dp"
                 android:paddingBottom="2dp"
                 android:textColor="@color/widget_tag_secondary_text"
-                android:textSize="10sp"
+                android:textSize="12sp"
                 android:importantForAccessibility="no"
                 android:visibility="gone" />
             <TextView
@@ -82,7 +82,7 @@
                 android:paddingEnd="4dp"
                 android:paddingBottom="2dp"
                 android:textColor="@color/widget_tag_tertiary_text"
-                android:textSize="10sp"
+                android:textSize="12sp"
                 android:importantForAccessibility="no"
                 android:visibility="gone" />
             <TextView
@@ -99,7 +99,7 @@
                 android:paddingEnd="4dp"
                 android:paddingBottom="2dp"
                 android:textColor="@color/widget_text_secondary"
-                android:textSize="10sp"
+                android:textSize="12sp"
                 android:importantForAccessibility="no"
                 android:visibility="gone"
                 android:drawableStart="@drawable/ic_widget_card"

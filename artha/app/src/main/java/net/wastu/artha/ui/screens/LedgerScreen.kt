@@ -2,6 +2,7 @@ package net.wastu.artha.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -43,6 +44,7 @@ import androidx.compose.material3.ModalBottomSheet
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.data.analysis.BudgetAnalyzer
 import net.wastu.artha.ui.theme.expenseColor
+import net.wastu.artha.ui.theme.incomeColor
 import androidx.compose.material3.Surface
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalFocusManager
@@ -69,6 +71,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.ContentScale
@@ -111,6 +114,7 @@ import net.wastu.artha.ui.GroupBadge
 import net.wastu.artha.ui.groupBadgeInfo
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.heading
@@ -125,7 +129,7 @@ import androidx.compose.ui.platform.LocalDensity
 import net.wastu.artha.core.model.AccountingTime
 import java.time.Instant
 
-enum class TransactionType(val label: String) {
+enum class PaymentMethod(val label: String) {
     QRIS("QRIS"),
     TRANSFER("Transfer"),
     CARD("Card");
@@ -144,8 +148,8 @@ enum class TransactionType(val label: String) {
                 payload?.optBoolean("isWalletFunding") == true ||
                 payload?.optBoolean("isOwnTransfer") == true ||
                 payload?.optString("paymentMethod") in setOf("Transfer", "Top Up", "Pocket", "Savings") ||
-                payload?.optString("code") in BudgetAnalyzer.INTERNAL_TRANSFER_CODES ||
-                payload?.optString("code") in BudgetAnalyzer.WALLET_FUNDING_CODES ||
+                payload?.optString("code") in net.wastu.artha.core.model.TransactionClassifier.INTERNAL_TRANSFER_CODES ||
+                payload?.optString("code") in net.wastu.artha.core.model.TransactionClassifier.WALLET_FUNDING_CODES ||
                 payload?.optString("code") in setOf("OTD10", "TFD70", "TFC51", "WTD01", "WTC01") ||
                 transaction.description.startsWith("Pocket Transfer:", ignoreCase = true) ||
                 transaction.description.startsWith("Transfer ", ignoreCase = true) ||
@@ -164,7 +168,7 @@ enum class TransactionType(val label: String) {
 data class TransactionFilters(
     val provider: Provider? = null,
     val direction: Direction? = null,
-    val type: TransactionType? = null,
+    val type: PaymentMethod? = null,
 ) {
     fun matches(transaction: UnifiedTransaction): Boolean =
         transaction.isConfirmed &&
@@ -197,7 +201,7 @@ val TransactionFiltersSaver = listSaver<TransactionFilters, String>(
                 runCatching { Direction.valueOf(name) }.getOrNull()
             },
             type = list.getOrNull(2)?.takeIf(String::isNotBlank)?.let { name ->
-                TransactionType.entries.firstOrNull { it.name == name }
+                PaymentMethod.entries.firstOrNull { it.name == name }
             },
         )
     },
@@ -228,7 +232,23 @@ internal fun rangeLabel(range: Pair<Long?, Long?>): String {
     return if (start != null && end != null && start != end) "$start to $end" else start ?: end ?: "Dates"
 }
 
-internal data class PeriodSummary(val totalMinor: Long, val count: Int, val label: String)
+internal data class PeriodSummary(
+    val totalMinor: Long,
+    val count: Int,
+    val label: String,
+    val incomeMinor: Long = 0L,
+    val incomeCount: Int = 0,
+) {
+    val netMinor: Long get() = incomeMinor - totalMinor
+    val rows: Int get() = count + incomeCount
+}
+
+/** "+Rp1.000", "-Rp1.000" or "Rp0"; Money rejects zero so the sign and amount are formatted separately. */
+internal fun formatNetTotal(netMinor: Long): String = when {
+    netMinor > 0L -> "+" + formatMoney(Money(netMinor))
+    netMinor < 0L -> "-" + formatMoney(Money(-netMinor))
+    else -> "Rp0"
+}
 
 internal fun periodSummary(
     rows: List<UnifiedTransaction>,
@@ -236,15 +256,16 @@ internal fun periodSummary(
     today: LocalDate,
     category: String? = null,
 ): PeriodSummary {
-    val spending = rows.filter(BudgetAnalyzer::isSpending)
+    val spending = rows.filter(UnifiedTransaction::isExpense)
     val totalMinor = spending.sumOf { it.money.amountMinor }
     val count = spending.size
+    val income = rows.filter(UnifiedTransaction::isIncome)
     val label = when {
         range != null -> periodLabel(range, today)
         category != null -> category
         else -> ""
     }
-    return PeriodSummary(totalMinor, count, label)
+    return PeriodSummary(totalMinor, count, label, income.sumOf { it.money.amountMinor }, income.size)
 }
 
 /** Preset name when the range matches one ("This month"), otherwise the dates. Used by the summary and the chip. */
@@ -253,6 +274,19 @@ internal fun periodLabel(range: Pair<Long?, Long?>, today: LocalDate): String = 
     TransactionPeriod.LAST_MONTH.range(today) -> TransactionPeriod.LAST_MONTH.label
     TransactionPeriod.LAST_30_DAYS.range(today) -> TransactionPeriod.LAST_30_DAYS.label
     else -> rangeLabel(range)
+}
+
+@Composable
+private fun TypeChips(selected: net.wastu.artha.core.model.TransactionType?, onSelect: (net.wastu.artha.core.model.TransactionType?) -> Unit) {
+    val options = listOf<Pair<String, net.wastu.artha.core.model.TransactionType?>>(
+        "All" to null,
+        "Expenses" to net.wastu.artha.core.model.TransactionType.EXPENSE,
+        "Income" to net.wastu.artha.core.model.TransactionType.INCOME,
+        "Transfers" to net.wastu.artha.core.model.TransactionType.TRANSFER,
+    )
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.forEach { (label, type) -> FilterChip(selected = selected == type, onClick = { onSelect(type) }, label = { Text(label) }) }
+    }
 }
 
 private data class ActiveTransactionFilter(val label: String, val clear: () -> Unit)
@@ -274,7 +308,7 @@ fun LedgerScreen(
     val dateRange by viewModel?.dateRangeFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val category by viewModel?.categoryFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(CategoryProgress()) }
-    val showCategory = analysisShown(viewModel)
+    val showCategory = true
     // Category drill-down is all-source confirmed spending; prior browsing choices stay intact for Back.
     val effectiveFilters = if (category == null) filters.copy(direction = null) else TransactionFilters()
     val visibleProviders = Provider.entries.filter { it in enabledProviders }
@@ -293,31 +327,36 @@ fun LedgerScreen(
         dateRange?.let { add(ActiveTransactionFilter(periodLabel(it, LocalDate.now(AccountingTime.clock))) { viewModel?.clearDateRangeFilter() }) }
     }
     val today = remember { LocalDate.now(AccountingTime.clock.withZone(AccountingTime.zone)) }
-    val allDebitTransactions = remember(state) {
-        (state as? LedgerState.Ready)?.transactions.orEmpty().filter { it.direction == Direction.DEBIT }
+    val typeFilter by viewModel?.typeFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val allDebitTransactions = remember(state) { (state as? LedgerState.Ready)?.transactions.orEmpty() }
+    val filteredTransactions = remember(allDebitTransactions, effectiveFilters, typeFilter, category) {
+        allDebitTransactions.filter { effectiveFilters.matches(it) && (category != null || typeFilter == null || it.type == typeFilter) }
     }
-    val filteredTransactions = remember(allDebitTransactions, effectiveFilters) {
-        allDebitTransactions.filter(effectiveFilters::matches)
-    }
-    val periodSummary = if (dateRange != null || category != null) {
-        remember(filteredTransactions, dateRange, today, category) {
+    val periodSummary = if (active.isNotEmpty()) {
+        remember(filteredTransactions, dateRange, today, category, active.map { it.label }) {
             periodSummary(filteredTransactions, dateRange, today, category)
+                .let { if (it.label.isBlank()) it.copy(label = active.joinToString(", ") { f -> f.label }) else it }
         }
     } else null
 
     when (state) {
         LedgerState.Loading -> LedgerFeedback(loading = true)
-        LedgerState.Failed -> LedgerFeedback(title = "Couldn't load expenses", onRetry = onRetry)
-        is LedgerState.Ready -> TransactionList(
+        LedgerState.Failed -> LedgerFeedback(title = "Couldn't load transactions", onRetry = onRetry)
+        is LedgerState.Ready -> Column {
+          if (category == null && viewModel != null) TypeChips(typeFilter, viewModel::setTypeFilter)
+          TransactionList(
             transactions = filteredTransactions,
             onTransaction = onTransaction, resetKey = listOf(effectiveFilters, dateRange, category),
             activeFilters = active, onClearFilters = ::clearAll,
-            emptyTitle = if (active.isNotEmpty()) "No matching expenses" else "No saved payments",
+            emptyTitle = if (active.isNotEmpty()) "No matching transactions" else "No saved payments",
             onImportHistory = if (active.isEmpty()) onImportHistory else null,
             showCategory = showCategory,
             categoryProgress = categoryProgress,
             periodSummary = periodSummary,
-        )
+            onFilterDates = viewModel?.let { vm -> { start, end -> vm.setDateRangeFilter(start, end) } },
+            activeRange = dateRange,
+          )
+        }
     }
     if (showFilter) {
         TransactionFilterSheet(
@@ -405,7 +444,7 @@ private fun TransactionFilterSheet(
                         }
                     }
                     if (category == null || clearCategory) {
-                        FilterOptions("Type", listOf(null) + TransactionType.entries, draft.type, { it?.label ?: "All" }) { draft = draft.copy(type = it) }
+                        FilterOptions("Method", listOf(null) + PaymentMethod.entries, draft.type, { it?.label ?: "All" }) { draft = draft.copy(type = it) }
                         FilterOptions("Source", listOf(null) + providers, draft.provider, { it?.displayName ?: "All" }) { draft = draft.copy(provider = it) }
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -428,7 +467,7 @@ private fun TransactionFilterSheet(
                                 val endExclusive = customRange.second?.let(AccountingTime::dayAfter)
                                 val spending = transactions.filter {
                                     val millis = it.occurredAt.toEpochMilli()
-                                    BudgetAnalyzer.isSpending(it) &&
+                                    it.isExpense &&
                                         (start == null || millis >= start) &&
                                         (endExclusive == null || millis < endExclusive)
                                 }
@@ -494,11 +533,11 @@ fun SearchTransactionsScreen(
     var lastDay by rememberSaveable { mutableStateOf<Long?>(null) }
     var showFilter by rememberSaveable { mutableStateOf(false) }
     val dateRange = if (firstDay != null || lastDay != null) firstDay to lastDay else null
-    val showCategory = analysisShown(viewModel)
+    val showCategory = true
     val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(CategoryProgress()) }
     val allTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle()
         ?: remember(ledgerState) { mutableStateOf((ledgerState as? LedgerState.Ready)?.transactions.orEmpty()) }
-    val debitTransactions = remember(allTransactions) { allTransactions.filter { it.direction == Direction.DEBIT } }
+    val debitTransactions = allTransactions
     val effectiveFilters = remember(filters) { filters.copy(direction = null) }
     val transactions = remember(debitTransactions, effectiveFilters, dateRange) { transactionSearchScope(debitTransactions, effectiveFilters, dateRange) }
     fun clearFilters() { filters = TransactionFilters(); firstDay = null; lastDay = null }
@@ -583,7 +622,7 @@ fun SearchTransactionsScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
             when {
-                ledgerState == LedgerState.Failed -> LedgerFeedback(title = "Couldn't load expenses", onRetry = onRetry)
+                ledgerState == LedgerState.Failed -> LedgerFeedback(title = "Couldn't load transactions", onRetry = onRetry)
                 ledgerState == LedgerState.Loading || results == null || results?.query != keyword ->
                     LedgerFeedback(loading = true)
                 else -> TransactionList(
@@ -596,6 +635,14 @@ fun SearchTransactionsScreen(
                     resultCount = results!!.transactions.size,
                     showCategory = showCategory,
                     categoryProgress = categoryProgress,
+                    periodSummary = if (activeFilters.isNotEmpty() || keyword.isNotEmpty()) {
+                        periodSummary(results!!.transactions, dateRange, LocalDate.now(AccountingTime.clock), null).let {
+                            if (it.label.isNotBlank()) it else it.copy(label = (listOfNotNull(keyword.takeIf(String::isNotEmpty)?.let { k -> "\"$k\"" }) +
+                                activeFilters.map(ActiveTransactionFilter::label)).joinToString(", "))
+                        }
+                    } else null,
+                    onFilterDates = { start, end -> firstDay = start; lastDay = end },
+                    activeRange = dateRange,
                 )
             }
         }
@@ -615,7 +662,7 @@ fun SearchTransactionsScreen(
 }
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
-internal data class DayGroup(val date: LocalDate, val transactions: List<UnifiedTransaction>, val totalMinor: Long)
+internal data class DayGroup(val date: LocalDate, val transactions: List<UnifiedTransaction>)
 
 @Composable
 private fun TransactionList(
@@ -631,8 +678,11 @@ private fun TransactionList(
     showCategory: Boolean = true,
     categoryProgress: CategoryProgress = CategoryProgress(),
     periodSummary: PeriodSummary? = null,
+    onFilterDates: ((Long, Long) -> Unit)? = null,
+    activeRange: Pair<Long?, Long?>? = null,
 ) {
     val listState = rememberLazyListState()
+    var openDay by remember { mutableStateOf<LocalDate?>(null) }
     var previousResetKey by rememberSaveable { mutableStateOf(resetKey?.toString()) }
     LaunchedEffect(resetKey) {
         val next = resetKey?.toString()
@@ -647,10 +697,7 @@ private fun TransactionList(
             val zone = net.wastu.artha.core.model.AccountingTime.zone
             transactions
                 .groupBy { it.occurredAt.atZone(zone).toLocalDate() }
-                .map { (date, dailyTxs) ->
-                    val total = dailyTxs.filter(BudgetAnalyzer::isSpending).sumOf { it.money.amountMinor }
-                    DayGroup(date, dailyTxs, total)
-                }
+                .map { (date, dailyTxs) -> DayGroup(date, dailyTxs) }
         }
     }
 
@@ -667,23 +714,13 @@ private fun TransactionList(
     ) {
         if (periodSummary != null) {
             item(key = "period_summary") {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .padding(top = 8.dp),
-                ) {
-                    Text(
-                        text = formatSpendingTotal(periodSummary.totalMinor),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = "${periodSummary.label}, ${periodSummary.count} ${if (periodSummary.count == 1) "payment" else "payments"}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                TotalsSummary(
+                    label = periodSummary.label,
+                    count = periodSummary.rows,
+                    incomeMinor = periodSummary.incomeMinor,
+                    expenseMinor = periodSummary.totalMinor,
+                    modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp),
+                )
             }
         }
         if (activeFilters.isNotEmpty()) {
@@ -709,7 +746,7 @@ private fun TransactionList(
         if (transactions.isEmpty()) {
             item(key = "empty") {
                 Text(
-                    emptyTitle ?: if (highlightQuery.isBlank()) "No expenses" else "No matching expenses",
+                    emptyTitle ?: if (highlightQuery.isBlank()) "No expenses" else "No matching transactions",
                     modifier = Modifier.fillMaxWidth().padding(vertical = 64.dp),
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.titleMedium,
@@ -722,7 +759,7 @@ private fun TransactionList(
         }
         groupedByDay.forEach { group ->
             stickyHeader(key = "day_${group.date}") {
-                DateGroupHeader(date = group.date, totalMinor = group.totalMinor)
+                DateGroupHeader(date = group.date, onClick = { openDay = group.date })
             }
             items(
                 group.transactions,
@@ -731,6 +768,7 @@ private fun TransactionList(
             ) { transaction ->
                 TransactionRow(
                     transaction = transaction,
+                    modifier = if (transaction.type == net.wastu.artha.core.model.TransactionType.TRANSFER) Modifier.alpha(0.6f) else Modifier,
                     onClick = { onTransaction(transaction) },
                     highlightQuery = highlightQuery,
                     showCategory = showCategory,
@@ -743,24 +781,25 @@ private fun TransactionList(
             }
         }
     }
+    openDay?.let { day ->
+        groupedByDay.firstOrNull { it.date == day }?.let { DayTotalsSheet(it, activeRange, onFilterDates) { openDay = null } }
+    }
 }
 
-/** Categories come from analysis; with it off they are hidden rather than shown stale. */
-@Composable
-internal fun analysisShown(viewModel: ArthaViewModel?): Boolean =
-    viewModel?.analysisSnapshot?.collectAsStateWithLifecycle()?.value?.analysisEnabled ?: true
-
-@Composable
-private fun DateGroupHeader(date: LocalDate, totalMinor: Long = 0L) {
+private fun dayLabel(date: LocalDate): String {
     val today = LocalDate.now(AccountingTime.clock)
-    val dayLabel = when (date) {
+    return when (date) {
         today -> "Today"
         today.minusDays(1) -> "Yesterday"
         else -> date.format(DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", Locale.US))
     }
+}
+
+@Composable
+private fun DateGroupHeader(date: LocalDate, onClick: () -> Unit) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClickLabel = "Show day totals", onClick = onClick),
     ) {
         Row(
             modifier = Modifier
@@ -769,20 +808,106 @@ private fun DateGroupHeader(date: LocalDate, totalMinor: Long = 0L) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = dayLabel,
+                text = dayLabel(date),
                 modifier = Modifier.semantics { heading() },
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
             )
-            if (totalMinor > 0L) {
-                Spacer(Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun TotalsSummary(
+    label: String,
+    count: Int,
+    incomeMinor: Long,
+    expenseMinor: Long,
+    modifier: Modifier = Modifier,
+    showHeader: Boolean = true,
+) {
+    val net = incomeMinor - expenseMinor
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (showHeader) Text(
+                text = listOf(label, "$count ${if (count == 1) "payment" else "payments"}").filter(String::isNotBlank).joinToString(", "),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Column {
+                Text("Difference", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
-                    text = formatSpendingTotal(totalMinor),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    formatNetTotal(net),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = when {
+                        net > 0L -> incomeColor()
+                        net < 0L -> expenseColor()
+                        else -> MaterialTheme.colorScheme.onSurface
+                    },
                 )
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                TotalsFigure("Income", formatSpendingTotal(incomeMinor), incomeColor(), Modifier.weight(1f))
+                TotalsFigure("Expenses", formatSpendingTotal(expenseMinor), expenseColor(), Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun TotalsFigure(title: String, value: String, color: androidx.compose.ui.graphics.Color, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = color)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DayTotalsSheet(
+    group: DayGroup,
+    activeRange: Pair<Long?, Long?>?,
+    onFilterDates: ((Long, Long) -> Unit)?,
+    onDismiss: () -> Unit,
+) {
+    val expenseMinor = group.transactions.filter(UnifiedTransaction::isExpense).sumOf { it.money.amountMinor }
+    val incomeMinor = group.transactions.filter(UnifiedTransaction::isIncome).sumOf { it.money.amountMinor }
+    val zone = AccountingTime.zone
+    val dayStart = group.date.atStartOfDay(zone).toInstant().toEpochMilli()
+    val month = java.time.YearMonth.from(group.date)
+    val monthStart = month.atDay(1).atStartOfDay(zone).toInstant().toEpochMilli()
+    val monthEnd = month.atEndOfMonth().atStartOfDay(zone).toInstant().toEpochMilli()
+    val dayActive = activeRange == dayStart to dayStart
+    val monthActive = activeRange == monthStart to monthEnd
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text(dayLabel(group.date), style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+            TotalsSummary(
+                label = group.date.format(DateTimeFormatter.ofPattern("d MMM yyyy", Locale.US)),
+                count = group.transactions.size,
+                incomeMinor = incomeMinor,
+                expenseMinor = expenseMinor,
+                showHeader = false,
+            )
+            if (onFilterDates != null) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FilledTonalButton(
+                        enabled = !dayActive,
+                        onClick = { onFilterDates(dayStart, dayStart); onDismiss() },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Only this day") }
+                    androidx.compose.material3.OutlinedButton(
+                        enabled = !monthActive,
+                        onClick = { onFilterDates(monthStart, monthEnd); onDismiss() },
+                        modifier = Modifier.weight(1f),
+                    ) { Text(month.format(DateTimeFormatter.ofPattern("MMMM", Locale.US))) }
+                }
             }
         }
     }
@@ -838,6 +963,7 @@ fun HighlightedText(
 fun TransactionRow(
     transaction: UnifiedTransaction,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     highlightQuery: String = "",
     showCategory: Boolean = true,
     categoryState: PaymentCategoryState = PaymentCategoryState.IDLE,
@@ -851,7 +977,7 @@ fun TransactionRow(
     val title = remember(transaction) { transactionHumanLine(transaction) }
     val amount = remember(transaction) { paymentRowAmount(transaction) }
     // Reversed charges and own transfers aren't spending, so their amounts are not shown as expenses.
-    val amountColor = if (reversed || tags.any { it.kind == TransactionTagKind.TRANSFER }) MaterialTheme.colorScheme.onSurfaceVariant else expenseColor()
+    val amountColor = if (reversed || tags.any { it.kind == TransactionTagKind.TRANSFER }) MaterialTheme.colorScheme.onSurfaceVariant else if (transaction.direction == Direction.CREDIT) incomeColor() else expenseColor()
     val payloadValues by produceState(initialValue = emptyList<String>(), transaction.rawPayload, highlightQuery.isNotBlank()) {
         value = if (highlightQuery.isBlank()) emptyList() else withContext(Dispatchers.Default) { payloadTextValues(transaction.rawPayload) }
     }
@@ -860,7 +986,7 @@ fun TransactionRow(
             .firstOrNull { it.contains(highlightQuery, true) && !title.contains(it, true) }
     }
     val fontScale = LocalDensity.current.fontScale
-    Surface(onClick = onClick, color = MaterialTheme.colorScheme.surface, modifier = Modifier.semantics { stateDescription = "Outgoing payment" }) {
+    Surface(onClick = onClick, color = MaterialTheme.colorScheme.surface, modifier = modifier.semantics { stateDescription = if (transaction.direction == Direction.CREDIT) "Incoming payment" else "Outgoing payment" }) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.size(36.dp).clearAndSetSemantics {
                 contentDescription = transaction.provider.displayName + if (groupBadge != null) ", Grouped" else ""

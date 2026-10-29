@@ -74,6 +74,7 @@ import kotlin.math.min
 import kotlin.math.sin
 import net.wastu.artha.core.model.AccountingTime
 import net.wastu.artha.data.analysis.MonthSpendingAnalysis
+import net.wastu.artha.data.analysis.label
 import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.categoryIconFor
 import net.wastu.artha.ui.formatMoney
@@ -95,16 +96,16 @@ object SpendingChartLogic {
 
         val sorted = nonZero.sortedByDescending { it.amountMinor }
         val rawList: List<Triple<String, Long, Set<String>>> = if (sorted.size <= 7) {
-            sorted.map { Triple(it.category, it.amountMinor, setOf(it.category)) }
+            sorted.map { Triple(it.label, it.amountMinor, setOf(it.label)) }
         } else {
             val kept = sorted.take(7)
             val restCategories = sorted.drop(7)
             val rest = restCategories.sumOf { it.amountMinor }
             if (rest > 0) {
-                kept.map { Triple(it.category, it.amountMinor, setOf(it.category)) } +
-                    Triple("Others", rest, restCategories.map { it.category }.toSet())
+                kept.map { Triple(it.label, it.amountMinor, setOf(it.label)) } +
+                    Triple("Others", rest, restCategories.map { it.label }.toSet())
             } else {
-                kept.map { Triple(it.category, it.amountMinor, setOf(it.category)) }
+                kept.map { Triple(it.label, it.amountMinor, setOf(it.label)) }
             }
         }
 
@@ -305,9 +306,9 @@ internal fun DonutChart(
     onSelect: (Int?) -> Unit,
     onOpenCategory: (SpendingChartLogic.Slice) -> Unit,
     total: Long,
+    modifier: Modifier = Modifier,
     totalDeltaPercent: Float? = null,
     canGoNext: Boolean = true,
-    modifier: Modifier = Modifier,
 ) {
     if (slices.isEmpty()) return
 

@@ -102,7 +102,7 @@ class LedgerTotalsTest {
         val credit = tx("cr", amount = 700_000_00L, direction = Direction.CREDIT)
 
         val dailyRows = listOf(spending1, spending2, pocketTransfer, walletFunding, walletFundingCode, internalCode, reversal, credit)
-        val dayTotal = dailyRows.filter(BudgetAnalyzer::isSpending).sumOf { it.money.amountMinor }
+        val dayTotal = dailyRows.filter(UnifiedTransaction::isExpense).sumOf { it.money.amountMinor }
         assertEquals(150_000_00L, dayTotal)
     }
 
@@ -154,5 +154,18 @@ class LedgerTotalsTest {
 
     @Test fun emptyPeriodTotalFormatsAsZeroInsteadOfCrashing() {
         assertEquals("Rp0", net.wastu.artha.ui.screens.formatSpendingTotal(0L))
+    }
+
+    @Test fun periodSummaryTotalsIncomeExpensesAndDifference() {
+        val rows = listOf(
+            tx("e1", amount = 30_000_00L),
+            tx("i1", amount = 100_000_00L, direction = Direction.CREDIT, payload = "{}"),
+        )
+        val summary = periodSummary(rows, null, today)
+        val expected = summary.incomeMinor - summary.totalMinor
+        assertEquals(expected, summary.netMinor)
+        assertEquals("Rp0", net.wastu.artha.ui.screens.formatNetTotal(0L))
+        assertTrue(net.wastu.artha.ui.screens.formatNetTotal(5_000_00L).startsWith("+"))
+        assertTrue(net.wastu.artha.ui.screens.formatNetTotal(-5_000_00L).startsWith("-"))
     }
 }

@@ -9,7 +9,6 @@
     <color name="widget_amount_incoming">#1B5E20</color>
     <color name="widget_amount_outgoing">#18211B</color>
     <color name="widget_amount_supporting">#717A72</color>
-    <color name="widget_pill_background">#EBF0E9</color>
     <color name="widget_tag_secondary_background">#D4E8D1</color>
     <color name="widget_tag_secondary_text">#101F10</color>
     <color name="widget_tag_tertiary_background">#BCEBEE</color>

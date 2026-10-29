@@ -10,7 +10,7 @@ import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.ui.screens.TransactionFilters
 import androidx.compose.runtime.saveable.SaverScope
 import net.wastu.artha.ui.screens.TransactionFiltersSaver
-import net.wastu.artha.ui.screens.TransactionType
+import net.wastu.artha.ui.screens.PaymentMethod
 import net.wastu.artha.ui.screens.TransactionPeriod
 import net.wastu.artha.ui.screens.transactionSearchScope
 import org.junit.Assert.*
@@ -49,7 +49,7 @@ class TransactionPresentationTest {
         val credit = ordinary.copy(direction = Direction.CREDIT, isReversal = true)
         assertEquals("+${formatMoney(credit.money)}", paymentRowAmount(credit))
         assertEquals("Incoming reversal", net.wastu.artha.ui.screens.transactionAccountingLabel(credit))
-        assertFalse(net.wastu.artha.data.analysis.BudgetAnalyzer.isSpending(credit))
+        assertFalse(credit.isExpense)
         assertEquals(ordinary.money, credit.money)
         assertEquals("Rp0", paymentRowAmount(ordinary.copy(isReversal = true)))
         assertEquals(formatMoney(ordinary.money), paymentRowAmount(ordinary))
@@ -57,7 +57,7 @@ class TransactionPresentationTest {
 
     @Test fun walletTopUpCodesReadAsWalletFundingNotAGenericExclusion() {
         val topUp = transaction("wtd").copy(rawPayload = """{"code":"WTD02"}""")
-        assertFalse(net.wastu.artha.data.analysis.BudgetAnalyzer.isSpending(topUp))
+        assertFalse(topUp.isExpense)
         assertEquals("Wallet funding", net.wastu.artha.ui.screens.transactionAccountingLabel(topUp))
         val pocketMove = transaction("sad").copy(rawPayload = """{"code":"SAD01"}""")
         assertEquals("Transfer", net.wastu.artha.ui.screens.transactionAccountingLabel(pocketMove))
@@ -172,19 +172,19 @@ class TransactionPresentationTest {
         val card = transaction("card").copy(cardLast4 = "1234")
         val general = transaction("general")
 
-        val qrisFilter = TransactionFilters(type = TransactionType.QRIS)
+        val qrisFilter = TransactionFilters(type = PaymentMethod.QRIS)
         assertTrue(qrisFilter.matches(qris))
         assertFalse(qrisFilter.matches(transfer))
         assertFalse(qrisFilter.matches(card))
         assertFalse(qrisFilter.matches(general))
 
-        val transferFilter = TransactionFilters(type = TransactionType.TRANSFER)
+        val transferFilter = TransactionFilters(type = PaymentMethod.TRANSFER)
         assertFalse(transferFilter.matches(qris))
         assertTrue(transferFilter.matches(transfer))
         assertFalse(transferFilter.matches(card))
         assertFalse(transferFilter.matches(general))
 
-        val cardFilter = TransactionFilters(type = TransactionType.CARD)
+        val cardFilter = TransactionFilters(type = PaymentMethod.CARD)
         assertFalse(cardFilter.matches(qris))
         assertFalse(cardFilter.matches(transfer))
         assertTrue(cardFilter.matches(card))
@@ -192,7 +192,7 @@ class TransactionPresentationTest {
     }
 
     @Test fun transactionFiltersSaverPreservesTypeAndHandlesLegacyBundles() {
-        val filters = TransactionFilters(provider = Provider.JAGO, direction = Direction.DEBIT, type = TransactionType.QRIS)
+        val filters = TransactionFilters(provider = Provider.JAGO, direction = Direction.DEBIT, type = PaymentMethod.QRIS)
         val scope = object : SaverScope { override fun canBeSaved(value: Any) = true }
         val saved = with(TransactionFiltersSaver) { scope.save(filters) }!!
         val restored = TransactionFiltersSaver.restore(saved)

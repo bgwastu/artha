@@ -11,7 +11,6 @@ import net.wastu.artha.data.analysis.AI_REASON_PREFIX
 import net.wastu.artha.data.analysis.AiConfig
 import net.wastu.artha.data.analysis.AnalysisSnapshot
 import net.wastu.artha.data.analysis.CategoryConfidence
-import net.wastu.artha.data.analysis.CategoryConstants
 import net.wastu.artha.ui.screens.buildReviewQueue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -45,7 +44,6 @@ class CategoryReviewLogicTest {
 
     private val baseSnapshot = AnalysisSnapshot(
         manualCategories = emptySet(),
-        analysisEnabled = true,
         aiConfig = AiConfig(baseUrl = "https://ai.example.com", model = "test", apiKey = "key"),
         customCategories = listOf("Dining Out", "Groceries", "Transport", "Shopping", "Tech & Subscriptions"),
     )
@@ -196,7 +194,6 @@ class CategoryReviewLogicTest {
                 currentTx.key to "Dining Out", // Current aiCategory
                 peer1.key to "Coffee",
                 peer2.key to "Coffee",
-                peer3.key to CategoryConstants.UNCATEGORIZED,
                 other1.key to "Groceries",
                 other2.key to "Groceries",
             ),
@@ -215,7 +212,6 @@ class CategoryReviewLogicTest {
         // "Uncategorized" is excluded; next overall top is "Groceries"
         assertEquals(listOf("Coffee", "Groceries"), item.alternatives)
         assertFalse(item.alternatives.contains("Dining Out"))
-        assertFalse(item.alternatives.contains(CategoryConstants.UNCATEGORIZED))
         assertTrue(item.alternatives.size <= 2)
     }
 

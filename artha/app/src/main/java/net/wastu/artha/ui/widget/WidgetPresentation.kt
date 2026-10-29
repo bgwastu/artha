@@ -71,9 +71,9 @@ internal object WidgetPalette {
 /** Aggregates can be zero even though individual recorded payments must be positive. */
 internal data class AnalysisWidgetAmounts(val total: String, val previous: String?)
 internal fun analysisWidgetAmounts(analysis: MonthSpendingAnalysis): AnalysisWidgetAmounts {
-    require(analysis.totalPersonalSpendingMinor >= 0 && analysis.previousMonthTotalMinor >= 0)
+    require(analysis.totalMinor >= 0 && analysis.previousMonthTotalMinor >= 0)
     return AnalysisWidgetAmounts(
-        formatMinorAmount(BigInteger.valueOf(analysis.totalPersonalSpendingMinor)),
+        formatMinorAmount(BigInteger.valueOf(analysis.totalMinor)),
         analysis.previousMonthTotalMinor.takeIf { it > 0 }?.let { formatMinorAmount(BigInteger.valueOf(it)) },
     )
 }

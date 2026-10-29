@@ -18,12 +18,15 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.IconButton
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -38,25 +41,28 @@ import net.wastu.artha.api.tunnel.TunnelState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ShareLinkDialog(onDismiss: () -> Unit) {
+fun RemoteAccessScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val state by ApiServerController.tunnelState.collectAsStateWithLifecycle()
     val shareUrl by ApiServerController.publicUrl.collectAsStateWithLifecycle()
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-    ) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Remote access") },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
+            )
+        },
+    ) { padding ->
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 32.dp),
+            Modifier.fillMaxSize().padding(padding).padding(horizontal = 24.dp).padding(top = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Remote access", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "A public link for AI agents and scripts to use your data.",
-                        style = MaterialTheme.typography.bodyMedium,
+                        "A public link for AI agents and scripts to read your data. Anyone with the link can read it.",
+                        style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }

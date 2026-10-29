@@ -67,11 +67,13 @@ import androidx.compose.ui.unit.dp
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.ui.LedgerState
+import net.wastu.artha.ui.Page
+import net.wastu.artha.ui.PageStack
 import net.wastu.artha.ui.screens.TransactionFilters
 import net.wastu.artha.ui.screens.TransactionFiltersSaver
 
 internal enum class Destination(val label: String, val icon: ImageVector) {
-    TRANSACTIONS("Expenses", Icons.AutoMirrored.Filled.List),
+    TRANSACTIONS("Transactions", Icons.AutoMirrored.Filled.List),
     ANALYSIS("Analysis", Icons.Default.Analytics),
     SETTINGS("Settings", Icons.Default.Settings);
 
@@ -95,39 +97,17 @@ fun HomeScreen(
     onRefresh: () -> Unit = {},
     onProviderEnabled: (Provider, Boolean) -> Unit = { _, _ -> },
     viewModel: ArthaViewModel? = null,
-    onExitDemo: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val saveableStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     var transactionFilters by rememberSaveable(stateSaver = TransactionFiltersSaver) { mutableStateOf(TransactionFilters()) }
-    val prefs = remember { context.getSharedPreferences("artha_ui_state", android.content.Context.MODE_PRIVATE) }
-    val initialTabName = remember { prefs.getString("active_tab", null) }
-    val initialDestination = remember {
-        initialTabName?.let { name -> Destination.entries.firstOrNull { it.name == name } }
-            ?: Destination.TRANSACTIONS
-    }
-    var destination by rememberSaveable(stateSaver = Destination.Saver) { mutableStateOf(initialDestination) }
-    androidx.compose.runtime.LaunchedEffect(destination) {
-        prefs.edit().putString("active_tab", destination.name).apply()
-    }
+    var destination by rememberSaveable(stateSaver = Destination.Saver) { mutableStateOf(Destination.TRANSACTIONS) }
+    val pages = rememberSaveable(saver = PageStack.Saver) { PageStack() }
 
     var showSearch by rememberSaveable { mutableStateOf(false) }
     var showFilter by rememberSaveable { mutableStateOf(false) }
-    var aiScrollToCategories by rememberSaveable { mutableStateOf(false) }
     var selectedKey by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedFallback by remember { mutableStateOf<UnifiedTransaction?>(null) }
-
-    val initialShowReview = remember { prefs.getBoolean("show_category_review", false) }
-    var showCategoryReview by rememberSaveable { mutableStateOf(initialShowReview) }
-    androidx.compose.runtime.LaunchedEffect(showCategoryReview) {
-        prefs.edit().putBoolean("show_category_review", showCategoryReview).apply()
-    }
-
-    val initialShowAi = remember { prefs.getBoolean("show_ai_categories", false) }
-    var showAiCategories by rememberSaveable { mutableStateOf(initialShowAi) }
-    androidx.compose.runtime.LaunchedEffect(showAiCategories) {
-        prefs.edit().putBoolean("show_ai_categories", showAiCategories).apply()
-    }
 
     val snackbarHost = remember { androidx.compose.material3.SnackbarHostState() }
     val importFeedback by viewModel?.importFeedback?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
@@ -135,13 +115,13 @@ fun HomeScreen(
     androidx.compose.runtime.LaunchedEffect(importFeedback?.sequence) {
         importFeedback?.let { snackbarHost.showSnackbar(it.message) }
     }
-    androidx.compose.runtime.LaunchedEffect(viewModel, showAiCategories) {
-        if (!showAiCategories) viewModel?.categoryRunResults?.collect {
+    androidx.compose.runtime.LaunchedEffect(viewModel, pages.top) {
+        if (pages.top != Page.AI) viewModel?.categoryRunResults?.collect {
             val result = snackbarHost.showSnackbar(
                 net.wastu.artha.data.analysis.categoryRunMessage(it),
                 actionLabel = if (it.review > 0 || it.failed > 0) "Review" else null,
             )
-            if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) showCategoryReview = true
+            if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) pages.open(Page.REVIEW)
         }
     }
     val ledgerLoadFailed by viewModel?.ledgerLoadFailed?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
@@ -161,8 +141,7 @@ fun HomeScreen(
     BackHandler(
         enabled = destination != Destination.TRANSACTIONS &&
             selectedKey == null &&
-            !showAiCategories &&
-            !showCategoryReview &&
+            pages.top == null &&
             !showSearch &&
             !showFilter
     ) {
@@ -173,20 +152,13 @@ fun HomeScreen(
         viewModel?.closeCategoryTransactions()
     }
 
-    BackHandler(enabled = showCategoryReview) {
-        showCategoryReview = false
-    }
-
-    BackHandler(enabled = showAiCategories) {
-        showAiCategories = false
-    }
+    BackHandler(enabled = pages.top != null) { pages.back() }
 
     val latestTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyList<UnifiedTransaction>()) }
     val selected = latestTransactions.firstOrNull { it.key == selectedKey } ?: selectedFallback?.takeIf { it.key == selectedKey }
     val closeDetails = { selectedKey = null; selectedFallback = null }
     val detailsState = selected?.let { rememberTransactionDetailsState(it.key) }
     val largeNavigationText = LocalDensity.current.fontScale > 1.3f
-    var settingsSourceOpen by rememberSaveable { mutableStateOf(false) }
     fun navigationLabel(item: Destination) =
         if (largeNavigationText && item == Destination.TRANSACTIONS) "Payments" else item.label
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -196,7 +168,6 @@ fun HomeScreen(
             snackbarHost = { androidx.compose.material3.SnackbarHost(snackbarHost) },
             modifier = if (showSearch) Modifier.clearAndSetSemantics {} else Modifier,
             topBar = {
-                if (!settingsSourceOpen || destination != Destination.SETTINGS) {
                 TopAppBar(
                     navigationIcon = {
                         if (destination == Destination.TRANSACTIONS && categoryFilter != null) {
@@ -213,7 +184,7 @@ fun HomeScreen(
                     title = { Text(destination.label, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     actions = {
                         if (destination == Destination.TRANSACTIONS) {
-                            IconButton(onClick = onRefresh, enabled = onExitDemo == null && (!refreshing || automaticImport)) {
+                            IconButton(onClick = onRefresh, enabled = !refreshing || automaticImport) {
                                 val angle = if (refreshing) {
                                     val transition = rememberInfiniteTransition(label = "Sync")
                                     val rotation by transition.animateFloat(
@@ -246,7 +217,6 @@ fun HomeScreen(
                         }
                     },
                 )
-                }
             },
             bottomBar = {
                 if (!showRail) {
@@ -306,7 +276,7 @@ fun HomeScreen(
                                     enabledProviders = enabledProviders,
                                     onTransaction = { selectedKey = it.key; selectedFallback = it },
                                     onRetry = onRetryLedger,
-                                    onImportHistory = { destination = Destination.SETTINGS },
+                                    onImportHistory = { pages.open(Page.SOURCES) },
                                     showFilter = showFilter,
                                     onDismissFilter = { showFilter = false },
                                     viewModel = viewModel,
@@ -325,29 +295,13 @@ fun HomeScreen(
                                     AnalysisScreen(
                                         viewModel = viewModel,
                                         onOpenTransaction = { selectedKey = it.key; selectedFallback = it },
-                                        onOpenCategories = { aiScrollToCategories = true; showAiCategories = true },
-                                        onOpenCategoryReview = { showCategoryReview = true },
-                                        onOpenAiCategories = { aiScrollToCategories = false; showAiCategories = true },
+                                        onOpenCategories = { pages.open(Page.CATEGORIES) },
+                                        onOpenCategoryReview = { pages.open(Page.REVIEW) },
+                                        onOpenAiCategories = { pages.open(Page.AI) },
                                     )
                                 }
                             }
-                            Destination.SETTINGS -> if (onExitDemo != null) Column(Modifier.padding(24.dp)) {
-                                Text("Fictional payments and example AI analysis", style = MaterialTheme.typography.bodyLarge)
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Demo mode", modifier = Modifier.weight(1f))
-                                    Switch(checked = true, onCheckedChange = { if (!it) onExitDemo() })
-                                }
-                            } else ProvidersScreen(
-                                enabled = enabledProviders,
-                                syncingProvider = syncingProvider,
-                                providerCounts = providerCounts,
-                                onEnabled = onProviderEnabled,
-                                viewModel = viewModel,
-                                onDetailOpenChanged = { settingsSourceOpen = it },
-                                onOpenDemo = { net.wastu.artha.DemoMode.open(context) },
-                                onOpenCategoryReview = { showCategoryReview = true },
-                                onOpenAiCategories = { aiScrollToCategories = false; showAiCategories = true },
-                            )
+                            Destination.SETTINGS -> SettingsScreen(viewModel, onOpen = pages::open)
                         }
                     }
                     }
@@ -365,24 +319,28 @@ fun HomeScreen(
                 )
             }
         }
-        if (showAiCategories && viewModel != null) {
+        if (viewModel != null) pages.top?.let { page ->
             Surface(Modifier.fillMaxSize()) {
-                AiCategoriesScreen(
-                    viewModel = viewModel,
-                    onBack = { showAiCategories = false },
-                    onOpenReview = { showCategoryReview = true },
-                    scrollToCategories = aiScrollToCategories,
-                )
-            }
-        }
-        if (showCategoryReview && viewModel != null) {
-            Surface(Modifier.fillMaxSize()) {
-                CategoryReviewScreen(
-                    viewModel = viewModel,
-                    onBack = { showCategoryReview = false },
-                    month = viewModel.selectedMonth.collectAsStateWithLifecycle().value,
-                    onOpenTransaction = { selectedKey = it.key; selectedFallback = it },
-                )
+                when (page) {
+                    Page.SOURCES -> SourcesScreen(
+                        enabled = enabledProviders,
+                        syncingProvider = syncingProvider,
+                        providerCounts = providerCounts,
+                        onEnabled = onProviderEnabled,
+                        viewModel = viewModel,
+                        onBack = pages::back,
+                    )
+                    Page.CATEGORIES -> CategoriesScreen(viewModel, onBack = pages::back)
+                    Page.AI -> AiScreen(viewModel, onBack = pages::back, onOpenReview = { pages.open(Page.REVIEW) })
+                    Page.REMOTE -> RemoteAccessScreen(onBack = pages::back)
+                    Page.DATA -> DataScreen(viewModel, onBack = pages::back)
+                    Page.REVIEW -> CategoryReviewScreen(
+                        viewModel = viewModel,
+                        onBack = pages::back,
+                        month = viewModel.selectedMonth.collectAsStateWithLifecycle().value,
+                        onOpenTransaction = { selectedKey = it.key; selectedFallback = it },
+                    )
+                }
             }
         }
         if (!showDetailsPane && selected != null) {

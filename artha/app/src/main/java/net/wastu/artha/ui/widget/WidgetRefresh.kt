@@ -1,5 +1,6 @@
 package net.wastu.artha.ui.widget
 
+import androidx.core.content.edit
 import android.content.BroadcastReceiver
 import android.content.Context
 import kotlinx.coroutines.*
@@ -75,11 +76,9 @@ internal object WidgetUpdatedAt {
     fun read(context: Context, id: Int): Long? = context.getSharedPreferences(STORE, Context.MODE_PRIVATE)
         .getLong(id.toString(), 0).takeIf { it > 0 }
     fun save(context: Context, id: Int, time: Long) {
-        context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit().putLong(id.toString(), time).apply()
+        context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit { putLong(id.toString(), time) }
     }
     fun remove(context: Context, ids: IntArray) {
-        val edit = context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit()
-        ids.forEach { edit.remove(it.toString()) }
-        edit.apply()
+        context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit { ids.forEach { remove(it.toString()) } }
     }
 }

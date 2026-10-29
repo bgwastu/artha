@@ -1,5 +1,6 @@
 package net.wastu.artha.ui.widget
 
+import androidx.core.net.toUri
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
@@ -123,7 +124,7 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
                     } else {
                         val serviceIntent = Intent(context, TransactionsWidgetService::class.java).apply {
                             putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-                            data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
+                            data = toUri(Intent.URI_INTENT_SCHEME).toUri()
                         }
                         @Suppress("DEPRECATION")
                         views.setRemoteAdapter(R.id.widget_transactions_list, serviceIntent)
@@ -236,7 +237,7 @@ private class TransactionsRemoteViewsFactory(
                 val app = context.applicationContext as net.wastu.artha.ArthaApplication
                 val enabled = app.providerPreferences.enabled.value
                 rows = groupedWidgetPayments(widgetSpending(context).transactions, enabled)
-            } catch (_: Exception) { /* Keep the last valid collection. */ }
+            } catch (e: Exception) { android.util.Log.w("ArthaWidget", "Keeping the last widget rows", e) }
         }
     }
 

@@ -32,7 +32,7 @@ class LedgerRecoveryTest {
             source.value = SpendingState.Failed; advanceUntilIdle()
             assertEquals(LedgerState.Ready(listOf(payment)), model.ledgerState.value)
             assertTrue(model.ledgerLoadFailed.value)
-            assertEquals(10000L, model.monthAnalysis.value.totalPersonalSpendingMinor)
+            assertEquals(10000L, model.monthAnalysis.value.totalMinor)
             model.setDateRangeFilter(time.plusSeconds(86400).toEpochMilli(), null); advanceUntilIdle()
             assertEquals(LedgerState.Ready(emptyList()), model.ledgerState.value)
             assertEquals(listOf(payment), model.allTransactions.value)
@@ -44,7 +44,7 @@ class LedgerRecoveryTest {
             source.value = SpendingState.Ready(listOf(updated), mapOf(Provider.JAGO to 1)); advanceUntilIdle()
             assertFalse(model.ledgerLoadFailed.value)
             assertEquals(LedgerState.Ready(listOf(updated)), model.ledgerState.value)
-            assertEquals(20000L, model.monthAnalysis.value.totalPersonalSpendingMinor)
+            assertEquals(20000L, model.monthAnalysis.value.totalMinor)
             model.lock()
         } finally { Dispatchers.resetMain() }
     }

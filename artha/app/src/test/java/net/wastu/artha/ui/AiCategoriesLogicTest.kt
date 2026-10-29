@@ -79,9 +79,8 @@ class AiCategoriesLogicTest {
         assertEquals("1225 payments not categorized", AiCategoriesLogic.historyHeadline(1225, idle))
         val working = CategoryProgress(state = CategoryAutomationState.WORKING, runDone = 99, runTotal = 1225)
         assertEquals("Categorizing 99 of 1225", AiCategoriesLogic.historyHeadline(1126, working))
-        assertEquals(null, AiCategoriesLogic.historySupporting(working, configured = true, enabled = true))
-        assertEquals("AI analysis is off", AiCategoriesLogic.historySupporting(idle, configured = true, enabled = false))
-        assertEquals("Add a provider below", AiCategoriesLogic.historySupporting(idle, configured = false, enabled = true))
-        assertEquals("Stopped", AiCategoriesLogic.historySupporting(idle.copy(stopped = true), configured = true, enabled = true))
+        assertEquals(null, AiCategoriesLogic.historySupporting(working, configured = true))
+        assertEquals("Add a provider below", AiCategoriesLogic.historySupporting(idle, configured = false))
+        assertEquals("Stopped", AiCategoriesLogic.historySupporting(idle.copy(stopped = true), configured = true))
     }
 }

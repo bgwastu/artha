@@ -62,7 +62,7 @@ class SpendingChartLogicTest {
         }
         val analysis = MonthSpendingAnalysis(
             month = YearMonth.of(2026, 10),
-            totalPersonalSpendingMinor = categories.sumOf { it.amountMinor },
+            totalMinor = categories.sumOf { it.amountMinor },
             previousMonthTotalMinor = 0L,
             totalDeltaPercent = null,
             categories = categories,
@@ -89,7 +89,7 @@ class SpendingChartLogicTest {
         }
         val analysis = MonthSpendingAnalysis(
             month = YearMonth.of(2026, 10),
-            totalPersonalSpendingMinor = categories.sumOf { it.amountMinor },
+            totalMinor = categories.sumOf { it.amountMinor },
             previousMonthTotalMinor = 0L,
             totalDeltaPercent = null,
             categories = categories,

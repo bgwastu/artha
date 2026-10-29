@@ -47,29 +47,32 @@
         android:textSize="22sp"
         android:textStyle="bold" />
 
-    <LinearLayout
+    <RelativeLayout
         android:id="@+id/widget_details"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:layout_marginTop="2dp"
-        android:orientation="vertical"
         android:visibility="gone">
 
         <TextView
             android:id="@+id/widget_delta_text"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_alignParentTop="true"
             android:ellipsize="end"
             android:maxLines="1"
             android:textColor="@color/widget_text_secondary"
             android:textSize="12sp" />
 
+        <!-- Fill the remaining height without a second weight: list and empty text never
+             show at the same time (empty is shown only when the category list is empty). -->
         <ListView
             android:id="@+id/widget_categories_list"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
+            android:layout_height="match_parent"
+            android:layout_below="@id/widget_delta_text"
+            android:layout_alignParentBottom="true"
             android:layout_marginTop="4dp"
             android:cacheColorHint="@android:color/transparent"
             android:divider="@null"
@@ -79,11 +82,12 @@
             android:id="@+id/widget_empty_text"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_below="@id/widget_delta_text"
             android:layout_marginTop="6dp"
             android:text="No spending this month"
             android:textColor="@color/widget_text_secondary"
             android:textSize="12sp"
             android:visibility="gone" />
-    </LinearLayout>
+    </RelativeLayout>
 
 </LinearLayout>
