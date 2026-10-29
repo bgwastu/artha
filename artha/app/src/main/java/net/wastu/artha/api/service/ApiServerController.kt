@@ -26,7 +26,7 @@ object ApiServerController {
         }
     }
 
-    /** [shareUrl] is the public link including the access key; only set while the tunnel is active. */
+    /** [shareUrl] is the plain public tunnel link; only set while the tunnel is active. */
     internal fun updateTunnelState(state: TunnelState, shareUrl: String? = null) {
         _tunnelState.value = state
         _publicUrl.value = if (state is TunnelState.Active) shareUrl else null

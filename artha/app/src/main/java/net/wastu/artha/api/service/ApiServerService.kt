@@ -15,11 +15,13 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
-import java.security.SecureRandom
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import net.wastu.artha.ArthaApplication
 import net.wastu.artha.MainActivity
@@ -36,6 +38,10 @@ class ApiServerService : Service() {
         const val ACTION_COPY = "net.wastu.artha.api.COPY"
         private const val CHANNEL_ID = "artha_api_service"
         private const val NOTIFICATION_ID = 9080
+
+        /** Wake locks are capped in duration by the framework, so renew them while the link stays up. */
+        private const val WAKE_LOCK_TIMEOUT_MS = 60L * 60 * 1000
+        private const val WAKE_LOCK_REFRESH_MS = 30L * 60 * 1000
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -45,8 +51,7 @@ class ApiServerService : Service() {
     private var engine: ApiServerEngine? = null
     private var tunnel: CloudflareQuickTunnel? = null
     private var currentUrl: String? = null
-    private val accessToken: String = ByteArray(24).also { SecureRandom().nextBytes(it) }
-        .joinToString("") { "%02x".format(it) }
+    private var lockRefreshJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -57,7 +62,6 @@ class ApiServerService : Service() {
         val power = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "artha:api_server_wake_lock").apply {
             setReferenceCounted(false)
-            acquire(12 * 60 * 60 * 1000L) // 12 hours max
         }
 
         val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
@@ -69,14 +73,12 @@ class ApiServerService : Service() {
         }
         wifiLock = wifi.createWifiLock(wifiMode, "artha:api_server_wifi_lock").apply {
             setReferenceCounted(false)
-            acquire()
         }
 
         val app = application as ArthaApplication
         engine = ApiServerEngine(
             spendingRepository = app.spending,
             analysisStore = app.analysisStore,
-            accessToken = accessToken,
             port = 8080,
             onTriggerSync = { provider -> app.syncInBackground(provider) },
         )
@@ -85,7 +87,8 @@ class ApiServerService : Service() {
 
         serviceScope.launch {
             tunnel?.state?.collect { state ->
-                currentUrl = (state as? TunnelState.Active)?.let { "${it.url}/?key=$accessToken" }
+                currentUrl = (state as? TunnelState.Active)?.url
+                syncLocks(state is TunnelState.Active)
                 ApiServerController.updateTunnelState(state, currentUrl)
                 updateNotification(state)
             }
@@ -125,27 +128,53 @@ class ApiServerService : Service() {
     override fun onDestroy() {
         tunnel?.stop()
         engine?.stop()
+        lockRefreshJob?.cancel()
         serviceScope.cancel()
 
-        wakeLock?.let { if (it.isHeld) it.release() }
-        wifiLock?.let { if (it.isHeld) it.release() }
+        wakeLock?.takeIf { it.isHeld }?.release()
+        wifiLock?.takeIf { it.isHeld }?.release()
 
         ApiServerController.updateServiceRunning(false)
         super.onDestroy()
     }
 
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Remote access",
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply {
-                description = "Shows while the Artha link is online"
-            }
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.createNotificationChannel(channel)
+    /** Holds the wake and Wi-Fi locks only while the tunnel can actually serve requests. */
+    private fun syncLocks(active: Boolean) {
+        if (!active) {
+            lockRefreshJob?.cancel()
+            lockRefreshJob = null
+            wakeLock?.takeIf { it.isHeld }?.release()
+            wifiLock?.takeIf { it.isHeld }?.release()
+            return
         }
+
+        acquireWakeLock()
+        wifiLock?.takeIf { !it.isHeld }?.acquire()
+
+        if (lockRefreshJob?.isActive != true) {
+            lockRefreshJob = serviceScope.launch {
+                while (isActive) {
+                    delay(WAKE_LOCK_REFRESH_MS)
+                    acquireWakeLock()
+                }
+            }
+        }
+    }
+
+    private fun acquireWakeLock() {
+        wakeLock?.takeIf { !it.isHeld }?.acquire(WAKE_LOCK_TIMEOUT_MS)
+    }
+
+    private fun createNotificationChannel() {
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Remote access",
+            NotificationManager.IMPORTANCE_LOW,
+        ).apply {
+            description = "Shows while the Artha link is online"
+        }
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.createNotificationChannel(channel)
     }
 
     private fun updateNotification(state: TunnelState) {

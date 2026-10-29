@@ -11,7 +11,7 @@ object OpenApiGenerator {
 
         val info = JSONObject().apply {
             put("title", "Artha API")
-            put("description", "Direct HTTP API for Artha transactions and spending insights, running locally on Android and shared through a temporary public link. Send the access key as `Authorization: Bearer <key>`, `X-Api-Key`, or `?key=`. Designed for AI agents, automation, and personal tools.")
+            put("description", "Direct HTTP API for Artha transactions and spending insights, running locally on Android and shared through a temporary public link. The server only listens on the device's loopback interface, so requests must come through that link. Designed for AI agents, automation, and personal tools.")
             put("version", "1.0.0")
         }
         root.put("info", info)
@@ -32,6 +32,7 @@ object OpenApiGenerator {
                 put(param("to", "query", "string", "Filter transactions before this ISO-8601 timestamp"))
                 put(param("provider", "query", "string", "Filter by provider (JAGO, GOJEK, SHOPEE, GRAB)"))
                 put(param("direction", "query", "string", "Filter by flow direction (DEBIT or CREDIT)"))
+                put(param("type", "query", "string", "Filter by type: expense, income or transfer. Transfers are moves between the user's own accounts and are not counted in totals."))
                 put(param("category", "query", "string", "Filter by category name (e.g. 'Dining Out', 'Groceries')"))
                 put(param("search", "query", "string", "Search keyword in description, merchant, or user note"))
                 put(param("unreviewedOnly", "query", "boolean", "Only return transactions needing classification review"))
@@ -58,13 +59,14 @@ object OpenApiGenerator {
         }
         val txKeyPatch = JSONObject().apply {
             put("summary", "Update transaction")
-            put("description", "Update the category, user note, or classification reasoning of a transaction.")
+            put("description", "Update the category, type, user note, or classification reasoning of a transaction. A category must belong to the transaction's type; transfers have no categories.")
             put("operationId", "updateTransaction")
             put("parameters", JSONArray().put(param("key", "path", "string", "Transaction key", required = true)))
             put("requestBody", requestBody(JSONObject().apply {
                 put("type", "object")
                 val props = JSONObject().apply {
-                    put("category", JSONObject().put("type", "string").put("description", "Target category name"))
+                    put("category", JSONObject().put("type", "string").put("description", "Target category name from the transaction's own type list"))
+                    put("type", JSONObject().put("type", "string").put("enum", JSONArray(listOf("expense", "income", "transfer"))).put("description", "Reclassify the transaction"))
                     put("userNote", JSONObject().put("type", "string").put("description", "Custom user note (null or empty to remove)"))
                     put("reason", JSONObject().put("type", "string").put("description", "Explanation or reasoning for this classification"))
                 }
@@ -92,6 +94,7 @@ object OpenApiGenerator {
                         val itemProps = JSONObject().apply {
                             put("key", JSONObject().put("type", "string"))
                             put("category", JSONObject().put("type", "string"))
+                            put("type", JSONObject().put("type", "string").put("enum", JSONArray(listOf("expense", "income", "transfer"))))
                             put("userNote", JSONObject().put("type", "string"))
                             put("reason", JSONObject().put("type", "string"))
                         }
@@ -109,11 +112,11 @@ object OpenApiGenerator {
         // /api/v1/summary
         val summaryPath = JSONObject()
         val summaryGet = JSONObject().apply {
-            put("summary", "Get monthly spending summary")
-            put("description", "Get spending breakdown, category totals, percentage shares, comparison with previous month, and generated human summary.")
+            put("summary", "Get monthly expense or income summary")
+            put("description", "Get the breakdown for expenses (default) or income: category totals, percentage shares, comparison with previous month, and generated human summary.")
             put("operationId", "getSpendingSummary")
-            put("parameters", JSONArray().put(param("month", "query", "string", "Year-Month (e.g. 2026-04). Defaults to current month.")))
-            put("responses", jsonResponse("200", "Monthly spending analysis"))
+            put("parameters", JSONArray().put(param("month", "query", "string", "Year-Month (e.g. 2026-04). Defaults to current month.")).put(param("type", "query", "string", "expense (default) or income")))
+            put("responses", jsonResponse("200", "Monthly analysis"))
         }
         summaryPath.put("get", summaryGet)
         paths.put("/api/v1/summary", summaryPath)
@@ -122,8 +125,9 @@ object OpenApiGenerator {
         val catPath = JSONObject()
         val catGet = JSONObject().apply {
             put("summary", "List categories")
-            put("description", "List all default and custom spending categories with transaction counts.")
+            put("description", "List the expense (default) or income categories with transaction counts.")
             put("operationId", "listCategories")
+            put("parameters", JSONArray().put(param("type", "query", "string", "expense (default) or income")))
             put("responses", jsonResponse("200", "Categories list"))
         }
         val catPost = JSONObject().apply {
@@ -133,7 +137,7 @@ object OpenApiGenerator {
             put("requestBody", requestBody(JSONObject().apply {
                 put("type", "object")
                 put("required", JSONArray().put("name"))
-                put("properties", JSONObject().put("name", JSONObject().put("type", "string")))
+                put("properties", JSONObject().put("name", JSONObject().put("type", "string")).put("type", JSONObject().put("type", "string").put("description", "expense (default) or income")))
             }))
             put("responses", jsonResponse("200", "Category created"))
         }
@@ -147,7 +151,7 @@ object OpenApiGenerator {
             put("summary", "Delete custom category")
             put("description", "Delete an existing custom category.")
             put("operationId", "deleteCategory")
-            put("parameters", JSONArray().put(param("name", "path", "string", "Name of the custom category", required = true)))
+            put("parameters", JSONArray().put(param("name", "path", "string", "Name of the custom category", required = true)).put(param("type", "query", "string", "expense (default) or income")))
             put("responses", jsonResponse("200", "Category deleted"))
         }
         catNamePath.put("delete", catDelete)

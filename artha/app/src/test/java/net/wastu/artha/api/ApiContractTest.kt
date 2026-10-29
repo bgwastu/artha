@@ -13,6 +13,7 @@ import net.wastu.artha.core.model.UnifiedTransaction
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -49,6 +50,18 @@ class ApiContractTest {
     fun openApiSpecHasNoAgentToolsEndpoint() {
         val paths = JSONObject(OpenApiGenerator.generateJson()).getJSONObject("paths")
         assertTrue(!paths.has("/api/v1/agent/tools"))
+    }
+
+    @Test
+    fun openApiSpecDeclaresNoAuthentication() {
+        val spec = JSONObject(OpenApiGenerator.generateJson())
+        assertFalse("The API no longer has any auth scheme", spec.has("security"))
+        assertFalse("The API has no auth components", spec.has("components"))
+
+        val description = spec.getJSONObject("info").getString("description")
+        for (removed in listOf("access key", "Bearer", "X-Api-Key", "key=")) {
+            assertFalse("Description still mentions removed auth: $removed", description.contains(removed))
+        }
     }
 
     @Test

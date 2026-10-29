@@ -5,7 +5,6 @@ import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.core.model.formatMinorAmount
 import net.wastu.artha.data.analysis.AnalysisSnapshot
-import net.wastu.artha.data.analysis.CategoryConstants
 import net.wastu.artha.data.analysis.CategoryContext
 import net.wastu.artha.data.analysis.MerchantMemory
 import net.wastu.artha.data.analysis.MonthSpendingAnalysis
@@ -26,7 +25,8 @@ data class TransactionSummaryDto(
     val occurredAt: String,
     val description: String,
     val merchant: String?,
-    val category: String,
+    val type: String,
+    val category: String?,
     val classificationIsManual: Boolean,
     val userNote: String?,
     val aiReasoning: String?,
@@ -64,7 +64,7 @@ data class TransactionSummaryDto(
         fun fromDomain(tx: UnifiedTransaction, snapshot: AnalysisSnapshot? = null): TransactionSummaryDto {
             val key = tx.key
             val note = snapshot?.userNotes?.get(key) ?: tx.userNote
-            val cat = snapshot?.categories?.get(key) ?: tx.category ?: CategoryConstants.UNCATEGORIZED
+            val cat = snapshot?.categories?.get(key) ?: tx.category
             val manual = tx.classificationIsManual || (snapshot?.manualCategories?.contains(key) == true)
             val reason = snapshot?.reasons?.get(key)?.ifBlank { tx.aiReasoning } ?: tx.aiReasoning
             val merchant = MerchantMemory.displayMerchant(tx)
@@ -82,6 +82,7 @@ data class TransactionSummaryDto(
                 occurredAt = tx.occurredAt.toString(),
                 description = tx.description,
                 merchant = merchant,
+                type = tx.type.name,
                 category = cat,
                 classificationIsManual = manual,
                 userNote = note,
@@ -129,12 +130,14 @@ data class UpdateTransactionRequest(
     val category: String?,
     val userNote: String?,
     val reason: String?,
+    val type: String? = null,
 ) {
     companion object {
         fun fromJson(json: JSONObject): UpdateTransactionRequest = UpdateTransactionRequest(
             category = if (json.has("category") && !json.isNull("category")) json.optString("category").takeIf { it.isNotBlank() } else null,
             userNote = if (json.has("userNote") && !json.isNull("userNote")) json.optString("userNote") else null,
             reason = if (json.has("reason") && !json.isNull("reason")) json.optString("reason").takeIf { it.isNotBlank() } else null,
+            type = if (json.has("type") && !json.isNull("type")) json.optString("type").takeIf { it.isNotBlank() } else null,
         )
     }
 }
@@ -144,6 +147,7 @@ data class BatchUpdateItem(
     val category: String? = null,
     val userNote: String? = null,
     val reason: String? = null,
+    val type: String? = null,
 ) {
     companion object {
         fun fromJson(json: JSONObject): BatchUpdateItem? {
@@ -153,6 +157,7 @@ data class BatchUpdateItem(
                 category = if (json.has("category") && !json.isNull("category")) json.optString("category").takeIf { it.isNotBlank() } else null,
                 userNote = if (json.has("userNote") && !json.isNull("userNote")) json.optString("userNote") else null,
                 reason = if (json.has("reason") && !json.isNull("reason")) json.optString("reason").takeIf { it.isNotBlank() } else null,
+                type = if (json.has("type") && !json.isNull("type")) json.optString("type").takeIf { it.isNotBlank() } else null,
             )
         }
     }
@@ -206,8 +211,9 @@ data class CategoryDto(
 
 data class MonthSummaryDto(
     val month: String,
-    val totalSpendingMinor: Long,
-    val totalSpendingFormatted: String,
+    val type: String,
+    val totalMinor: Long,
+    val totalFormatted: String,
     val previousMonthTotalMinor: Long,
     val previousMonthTotalFormatted: String,
     val deltaPercent: Float?,
@@ -216,8 +222,9 @@ data class MonthSummaryDto(
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("month", month)
-        put("totalSpendingMinor", totalSpendingMinor)
-        put("totalSpendingFormatted", totalSpendingFormatted)
+        put("type", type)
+        put("totalMinor", totalMinor)
+        put("totalFormatted", totalFormatted)
         put("previousMonthTotalMinor", previousMonthTotalMinor)
         put("previousMonthTotalFormatted", previousMonthTotalFormatted)
         put("deltaPercent", deltaPercent?.let { java.lang.Double.valueOf(it.toDouble()) } ?: JSONObject.NULL)
@@ -230,8 +237,9 @@ data class MonthSummaryDto(
     companion object {
         fun fromDomain(analysis: MonthSpendingAnalysis): MonthSummaryDto = MonthSummaryDto(
             month = analysis.month.toString(),
-            totalSpendingMinor = analysis.totalPersonalSpendingMinor,
-            totalSpendingFormatted = formatMinorAmount(BigInteger.valueOf(analysis.totalPersonalSpendingMinor)),
+            type = analysis.type.name,
+            totalMinor = analysis.totalMinor,
+            totalFormatted = formatMinorAmount(BigInteger.valueOf(analysis.totalMinor)),
             previousMonthTotalMinor = analysis.previousMonthTotalMinor,
             previousMonthTotalFormatted = formatMinorAmount(BigInteger.valueOf(analysis.previousMonthTotalMinor)),
             deltaPercent = analysis.totalDeltaPercent,
@@ -252,7 +260,7 @@ data class MonthSummaryDto(
 }
 
 data class CategorySpendingDto(
-    val category: String,
+    val category: String?,
     val amountMinor: Long,
     val amountFormatted: String,
     val sharePercent: Float,

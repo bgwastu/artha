@@ -1,20 +1,13 @@
 package net.wastu.artha.api.service
 
 import io.ktor.http.ContentType
-import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
-import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.call
-import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
-import io.ktor.server.plugins.cors.routing.CORS
-import io.ktor.server.request.httpMethod
 import io.ktor.server.request.receiveText
-import io.ktor.server.response.header
 import io.ktor.server.response.respondRedirect
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.delete
@@ -37,17 +30,16 @@ import net.wastu.artha.api.model.UpdateTransactionRequest
 import net.wastu.artha.api.spec.OpenApiGenerator
 import net.wastu.artha.api.spec.ScalarDocs
 import net.wastu.artha.core.model.AccountingTime
+import net.wastu.artha.core.model.TransactionType
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.data.analysis.AnalysisStore
 import net.wastu.artha.data.analysis.BudgetAnalyzer
-import net.wastu.artha.data.analysis.CategoryConstants
 import net.wastu.artha.data.analysis.MerchantMemory
 import net.wastu.artha.data.analysis.SpendingRepository
 import net.wastu.artha.data.analysis.SpendingState
 import org.json.JSONArray
 import org.json.JSONObject
-import java.security.MessageDigest
 import java.time.Instant
 import java.time.YearMonth
 
@@ -61,31 +53,32 @@ private suspend fun ApplicationCall.badParam(name: String, expected: String) =
     fail(HttpStatusCode.BadRequest, "Invalid '$name': expected $expected")
 
 /** Matches [name] to a known category ignoring case, so agents cannot create stray duplicates by typo. */
+private fun parseType(value: String): TransactionType? =
+    TransactionType.entries.firstOrNull { it.name.equals(value.trim(), ignoreCase = true) }
+
+/** Category lists exist for expenses and income only; a missing value means expenses. */
+private fun categoryType(value: String?): TransactionType? =
+    if (value.isNullOrBlank()) TransactionType.EXPENSE
+    else parseType(value)?.takeIf { it != TransactionType.TRANSFER }
+
 private fun resolveCategory(name: String, known: Collection<String>): String? =
     known.firstOrNull { it.equals(name.trim(), ignoreCase = true) }
 
 class ApiServerEngine(
     private val spendingRepository: SpendingRepository,
     private val analysisStore: AnalysisStore,
-    private val accessToken: String,
     private val port: Int = 8080,
     private val onTriggerSync: (Provider?) -> Unit = {},
 ) {
     private companion object {
-        const val KEY_COOKIE = "artha_key"
         const val MAX_BATCH = 200
     }
 
-    private fun cookieKey(header: String?): String? =
-        header?.split(';')?.map { it.trim() }?.firstOrNull { it.startsWith("$KEY_COOKIE=") }?.substringAfter('=')
+    private fun knownCategories(type: TransactionType): Set<String> =
+        analysisStore.snapshot.value.categoriesFor(type).toSet()
 
-    private fun knownCategories(ready: SpendingState.Ready): Set<String> =
-        analysisStore.snapshot.value.customCategories.toSet() +
-            ready.transactions.mapNotNull { it.category } +
-            setOf(CategoryConstants.UNCATEGORIZED, CategoryConstants.INVESTMENTS_TRANSFERS)
-
-    private fun unknownCategoryMessage(name: String) =
-        "Unknown category '$name'. List valid ones with GET /api/v1/categories or create it with POST /api/v1/categories."
+    private fun unknownCategoryMessage(name: String, type: TransactionType) =
+        "Unknown ${type.name.lowercase()} category '$name'. List valid ones with GET /api/v1/categories?type=${type.name.lowercase()} or create it with POST /api/v1/categories."
 
     private var engine: EmbeddedServer<*, *>? = null
 
@@ -108,35 +101,8 @@ class ApiServerEngine(
     fun start() {
         if (engine != null) return
 
-        val server = embeddedServer(CIO, port = port, host = "0.0.0.0") {
-            install(CORS) {
-                anyHost()
-                allowHeader(HttpHeaders.ContentType)
-                allowHeader(HttpHeaders.Authorization)
-                allowHeader("X-Api-Key")
-                allowMethod(HttpMethod.Options)
-                allowMethod(HttpMethod.Get)
-                allowMethod(HttpMethod.Post)
-                allowMethod(HttpMethod.Patch)
-                allowMethod(HttpMethod.Put)
-                allowMethod(HttpMethod.Delete)
-            }
-
-            // Every request needs the access token (Bearer, X-Api-Key, ?key= or the cookie set from ?key=).
-            intercept(ApplicationCallPipeline.Plugins) {
-                if (call.request.httpMethod == HttpMethod.Options) return@intercept
-                val request = call.request
-                val bearer = request.headers[HttpHeaders.Authorization]?.removePrefix("Bearer ")?.trim()
-                val queryKey = request.queryParameters["key"]
-                val provided = bearer ?: request.headers["X-Api-Key"] ?: queryKey ?: cookieKey(request.headers[HttpHeaders.Cookie])
-                if (provided == null || !MessageDigest.isEqual(provided.toByteArray(), accessToken.toByteArray())) {
-                    call.fail(HttpStatusCode.Unauthorized, "Missing or invalid access key")
-                    finish()
-                } else if (queryKey != null) {
-                    call.response.header(HttpHeaders.SetCookie, "$KEY_COOKIE=$accessToken; Path=/; HttpOnly; SameSite=Lax")
-                }
-            }
-
+        // Loopback only: the Cloudflare tunnel connects from this device, so never expose the port on the LAN.
+        val server = embeddedServer(CIO, port = port, host = "127.0.0.1") {
             routing {
                 // Root redirects to interactive Scalar docs
                 get("/") {
@@ -184,6 +150,7 @@ class ApiServerEngine(
                         Direction.entries.firstOrNull { it.name.equals(d, ignoreCase = true) }
                             ?: return@get call.badParam("direction", Direction.entries.joinToString(" or ") { it.name })
                     }
+                    val type = text("type")?.let { parseType(it) ?: return@get call.badParam("type", "expense, income or transfer") }
                     val category = text("category")
                     val search = text("search")?.lowercase()
                     val unreviewedOnly = params["unreviewedOnly"]?.let { it.toBooleanStrictOrNull() ?: return@get call.badParam("unreviewedOnly", "true or false") } == true
@@ -204,11 +171,11 @@ class ApiServerEngine(
                     if (to != null) stream = stream.filter { it.occurredAt < to }
                     if (provider != null) stream = stream.filter { it.provider == provider }
                     if (direction != null) stream = stream.filter { it.direction == direction }
+                    if (type != null) stream = stream.filter { it.type == type }
                     if (category != null) stream = stream.filter { it.category.equals(category, ignoreCase = true) }
                     if (unreviewedOnly) {
                         stream = stream.filter {
                             it.category == null ||
-                                it.category == CategoryConstants.UNCATEGORIZED ||
                                 (!it.classificationIsManual && it.key !in snapshot.manualCategories)
                         }
                     }
@@ -292,14 +259,18 @@ class ApiServerEngine(
                         return@patch
                     }
 
-                    if (req.category == null && req.userNote == null) {
-                        return@patch call.fail(HttpStatusCode.BadRequest, "Provide 'category' and/or 'userNote'")
+                    if (req.category == null && req.userNote == null && req.type == null) {
+                        return@patch call.fail(HttpStatusCode.BadRequest, "Provide 'category', 'type' and/or 'userNote'")
                     }
+                    val newType = req.type?.let { parseType(it) ?: return@patch call.fail(HttpStatusCode.BadRequest, "'type' must be expense, income or transfer") }
+                    val effectiveType = newType ?: tx.type
                     val category = req.category?.let { name ->
-                        resolveCategory(name, knownCategories(ready))
-                            ?: return@patch call.fail(HttpStatusCode.BadRequest, unknownCategoryMessage(name))
+                        if (effectiveType == TransactionType.TRANSFER) return@patch call.fail(HttpStatusCode.BadRequest, "Transfers have no category")
+                        resolveCategory(name, knownCategories(effectiveType))
+                            ?: return@patch call.fail(HttpStatusCode.BadRequest, unknownCategoryMessage(name, effectiveType))
                     }
 
+                    newType?.let { analysisStore.setTypeOverride(tx.key, it) }
                     req.userNote?.let { note -> analysisStore.setUserNote(tx.key, note) }
                     category?.let { analysisStore.setClassification(tx.key, it, req.reason.orEmpty(), manual = true) }
 
@@ -325,7 +296,6 @@ class ApiServerEngine(
                     }
                     val ready = call.ready() ?: return@post
                     val txMap = ready.transactions.associateBy { it.key }
-                    val known = knownCategories(ready)
 
                     var success = 0
                     var failure = 0
@@ -339,22 +309,30 @@ class ApiServerEngine(
                             errors[item.key] = "Transaction not found"
                             continue
                         }
-                        if (item.category == null && item.userNote == null) {
+                        if (item.category == null && item.userNote == null && item.type == null) {
                             failure++
-                            errors[item.key] = "Provide 'category' and/or 'userNote'"
+                            errors[item.key] = "Provide 'category', 'type' and/or 'userNote'"
                             continue
                         }
+                        val newType = item.type?.let { parseType(it) }
+                        if (item.type != null && newType == null) {
+                            failure++
+                            errors[item.key] = "'type' must be expense, income or transfer"
+                            continue
+                        }
+                        val effectiveType = newType ?: tx.type
                         var category: String? = null
                         if (item.category != null) {
-                            category = resolveCategory(item.category, known)
+                            category = if (effectiveType == TransactionType.TRANSFER) null else resolveCategory(item.category, knownCategories(effectiveType))
                             if (category == null) {
                                 failure++
-                                errors[item.key] = unknownCategoryMessage(item.category)
+                                errors[item.key] = if (effectiveType == TransactionType.TRANSFER) "Transfers have no category" else unknownCategoryMessage(item.category, effectiveType)
                                 continue
                             }
                         }
 
                         try {
+                            newType?.let { analysisStore.setTypeOverride(tx.key, it) }
                             item.userNote?.let { note -> analysisStore.setUserNote(tx.key, note) }
                             category?.let { analysisStore.setClassification(tx.key, it, item.reason.orEmpty(), manual = true) }
                             success++
@@ -385,7 +363,10 @@ class ApiServerEngine(
                         YearMonth.now(AccountingTime.zone)
                     }
 
-                    val analysis = BudgetAnalyzer.analyzeMonth(month, ready.transactions)
+                    val type = call.request.queryParameters["type"]?.takeIf { it.isNotBlank() }
+                        ?.let { parseType(it)?.takeIf { t -> t != TransactionType.TRANSFER } ?: return@get call.badParam("type", "expense or income") }
+                        ?: TransactionType.EXPENSE
+                    val analysis = BudgetAnalyzer.analyzeMonth(month, ready.transactions, type)
                     val dto = MonthSummaryDto.fromDomain(analysis)
                     call.respondText(dto.toJson().toString(), ContentType.Application.Json)
                 }
@@ -394,10 +375,12 @@ class ApiServerEngine(
                 get("/api/v1/categories") {
                     val ready = call.ready() ?: return@get
                     val snapshot = analysisStore.snapshot.value
-                    val counts = ready.transactions.groupingBy { it.category ?: CategoryConstants.UNCATEGORIZED }.eachCount()
+                    val type = categoryType(call.request.queryParameters["type"]) ?: return@get call.badParam("type", "expense or income")
+                    val counts = ready.transactions.filter { it.type == type && it.category != null }.groupingBy { it.category!! }.eachCount()
 
-                    val customSet = snapshot.customCategories.toSet()
-                    val allNames = (snapshot.customCategories + counts.keys).distinct().sorted()
+                    val listed = snapshot.categoriesFor(type)
+                    val customSet = listed.toSet()
+                    val allNames = (listed + counts.keys).distinct().sorted()
 
                     val arr = JSONArray()
                     for (name in allNames) {
@@ -421,8 +404,9 @@ class ApiServerEngine(
                         return@post
                     }
 
+                    val type = categoryType(body.optString("type").takeIf { it.isNotBlank() }) ?: return@post call.fail(HttpStatusCode.BadRequest, "'type' must be expense or income")
                     try {
-                        analysisStore.addCustomCategory(name)
+                        analysisStore.addCustomCategory(name, type)
                         call.respondText(JSONObject().put("name", name).put("created", true).toString(), ContentType.Application.Json, HttpStatusCode.Created)
                     } catch (e: Exception) {
                         call.fail(HttpStatusCode.Conflict, e.message ?: "Could not add category")
@@ -437,7 +421,8 @@ class ApiServerEngine(
                         return@delete
                     }
 
-                    analysisStore.removeCustomCategory(name)
+                    val type = categoryType(call.request.queryParameters["type"]) ?: return@delete call.badParam("type", "expense or income")
+                    analysisStore.removeCustomCategory(name, type)
                     call.respondText(JSONObject().put("name", name).put("deleted", true).toString(), ContentType.Application.Json)
                 }
 
