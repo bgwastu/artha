@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
+import androidx.core.net.toUri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,9 +13,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +51,8 @@ fun RemoteAccessScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val state by ApiServerController.tunnelState.collectAsStateWithLifecycle()
     val shareUrl by ApiServerController.publicUrl.collectAsStateWithLifecycle()
+    val on = state is TunnelState.Starting || state is TunnelState.Active
+    val colors = MaterialTheme.colorScheme
 
     Scaffold(
         topBar = {
@@ -54,68 +62,71 @@ fun RemoteAccessScreen(onBack: () -> Unit) {
             )
         },
     ) { padding ->
-        Column(
-            Modifier.fillMaxSize().padding(padding).padding(horizontal = 24.dp).padding(top = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "A public link for AI agents and scripts to read your data. Anyone with the link can read it.",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = state is TunnelState.Starting || state is TunnelState.Active,
-                    onCheckedChange = { on ->
-                        if (on) ApiServerController.start(context) else ApiServerController.stop(context)
-                    },
-                    modifier = Modifier.padding(start = 16.dp),
-                )
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            val failed = state is TunnelState.Failed
+            val (title, support) = when (val s = state) {
+                is TunnelState.Active -> "Link is live" to "Read access for anyone with the link"
+                TunnelState.Starting -> "Creating link" to "A few seconds"
+                is TunnelState.Failed -> "Couldn’t start" to s.error
+                TunnelState.Inactive -> "Link is off" to "For AI agents and scripts"
             }
-            when (val s = state) {
+            ListItem(
+                headlineContent = { Text(title, style = MaterialTheme.typography.titleLarge) },
+                supportingContent = {
+                    Text(support, maxLines = 2, overflow = TextOverflow.Ellipsis, color = if (failed) colors.error else colors.onSurfaceVariant)
+                },
+                trailingContent = {
+                    Switch(checked = on, onCheckedChange = { want ->
+                        if (want) ApiServerController.start(context) else ApiServerController.stop(context)
+                    })
+                },
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            if (state is TunnelState.Starting) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+            else HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+
+            when (state) {
                 is TunnelState.Active -> shareUrl?.let { url ->
                     Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        color = colors.surfaceVariant,
                         shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(Icons.Default.Link, null, Modifier.size(20.dp))
+                        Row(Modifier.padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = url.removePrefix("https://"),
+                                url.removePrefix("https://").replaceFirst(".", "\n."),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(start = 8.dp),
+                                maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f).padding(vertical = 12.dp),
                             )
+                            IconButton(onClick = { copy(context, url) }) { Icon(Icons.Default.ContentCopy, "Copy link") }
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { copy(context, url) }, modifier = Modifier.weight(1f)) {
-                            Text("Copy")
-                        }
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { share(context, url) }, modifier = Modifier.weight(1f)) {
-                            Text("Share")
+                            Icon(Icons.Default.Share, null, Modifier.size(18.dp))
+                            Text("Share", Modifier.padding(start = 8.dp))
+                        }
+                        OutlinedButton(onClick = { open(context, "$url/docs") }, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, null, Modifier.size(18.dp))
+                            Text("API docs", Modifier.padding(start = 8.dp))
                         }
                     }
                 }
-                is TunnelState.Starting -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    Text("Creating link", Modifier.padding(start = 12.dp))
+                is TunnelState.Failed -> Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Button(onClick = { ApiServerController.start(context) }) {
+                        Icon(Icons.Default.Refresh, null, Modifier.size(18.dp))
+                        Text("Try again", Modifier.padding(start = 8.dp))
+                    }
                 }
-                is TunnelState.Failed -> Text(
-                    s.error,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                TunnelState.Inactive -> Unit
+                else -> Unit
             }
         }
     }
+}
+
+private fun open(context: Context, url: String) {
+    context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
 
 private fun copy(context: Context, url: String) {

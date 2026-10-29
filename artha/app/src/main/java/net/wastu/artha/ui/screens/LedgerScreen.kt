@@ -51,11 +51,8 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.DatePickerDialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.util.Locale
-import androidx.compose.material3.DateRangePicker
-import androidx.compose.material3.rememberDateRangePickerState
 import net.wastu.artha.ui.ArthaViewModel
 import java.time.LocalDate
 import java.time.ZoneId
@@ -394,22 +391,11 @@ private fun TransactionFilterSheet(
 
     // The date picker replaces the filter sheet; changes remain staged until the sheet's Apply.
     if (pickingDates) {
-        fun pickerDay(value: Long?) = value?.let {
-            Instant.ofEpochMilli(it).atZone(AccountingTime.zone).toLocalDate().atStartOfDay(ZoneId.of("UTC")).toInstant().toEpochMilli()
-        }
-        val picker = rememberDateRangePickerState(initialSelectedStartDateMillis = pickerDay(dates?.first),
-            initialSelectedEndDateMillis = pickerDay(dates?.second))
-        DatePickerDialog(onDismissRequest = { pickingDates = false },
-            confirmButton = {
-                TextButton(enabled = picker.selectedStartDateMillis != null, onClick = {
-                    val start = picker.selectedStartDateMillis!!
-                    val end = picker.selectedEndDateMillis ?: start
-                    dates = AccountingTime.pickerDay(start) to AccountingTime.pickerDay(end)
-                    pickingDates = false
-                }) { Text("Done") }
-            }, dismissButton = { TextButton(onClick = { pickingDates = false }) { Text("Cancel") } }) {
-            DateRangePicker(picker, modifier = Modifier.heightIn(max = 520.dp))
-        }
+        DateRangePickerDialog(
+            initial = dates, today = today,
+            onDismiss = { pickingDates = false },
+            onConfirm = { startMillis, endMillis -> dates = startMillis to endMillis; pickingDates = false },
+        )
     } else {
         ModalBottomSheet(onDismissRequest = onDismiss, sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
             Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).imePadding()) {
