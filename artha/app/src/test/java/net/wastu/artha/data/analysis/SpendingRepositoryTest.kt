@@ -23,14 +23,6 @@ class SpendingRepositoryTest {
         assertEquals(payment.key, updated.transactions.single().key)
     }
 
-    @Test fun legacyOrderNoteRemainsVisibleAfterPaymentGroupingAndExplicitClearWins() {
-        val projector = SpendingProjector()
-        val old = AnalysisSnapshot(userNotes = mapOf("42" to "Keep this legacy note"))
-        assertEquals("Keep this legacy note", projector.project(listOf(order, payment), old).transactions.single().userNote)
-        val cleared = old.copy(updatedAt = mapOf("note:${payment.key}" to 10))
-        assertNull(projector.project(listOf(order, payment), cleared).transactions.single().userNote)
-    }
-
     @Test fun unchangedRowsAreReusedWhenOneAnnotationChanges() {
         val other = payment.copy(providerTransactionId = "jago:other", description = "Kopi Kenangan")
         val facts = listOf(payment, other)
@@ -41,7 +33,7 @@ class SpendingRepositoryTest {
         assertEquals("New context", changed.transactions.first { it.key == payment.key }.userNote)
         assertSame(original.transactions.first { it.key == other.key }, changed.transactions.first { it.key == other.key })
         val newFacts = projector.project(listOf(payment, other.copy(description = "Netflix")), AnalysisSnapshot())
-        assertEquals("Uncategorized", newFacts.transactions.first { it.key == other.key }.category)
+        assertNull(newFacts.transactions.first { it.key == other.key }.category)
     }
 
     @Test fun customPickerDaysHaveTheSameLocalBoundariesAsPresets() {

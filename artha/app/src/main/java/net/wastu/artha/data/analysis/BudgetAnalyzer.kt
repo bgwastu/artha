@@ -1,29 +1,30 @@
 package net.wastu.artha.data.analysis
 
-import net.wastu.artha.core.model.toLowerHex
-import net.wastu.artha.core.model.Direction
+import net.wastu.artha.core.model.TransactionType
 import net.wastu.artha.core.model.UnifiedTransaction
 import java.time.YearMonth
-import org.json.JSONObject
 
 object BudgetAnalyzer {
     fun analyzeMonth(
         month: YearMonth,
         allTransactions: List<UnifiedTransaction>,
+        type: TransactionType = TransactionType.EXPENSE,
     ): MonthSpendingAnalysis {
+        require(type != TransactionType.TRANSFER) { "Transfers are not analysed" }
         val zone = net.wastu.artha.core.model.AccountingTime.zone
         val currentMonthTxs = allTransactions.filter { YearMonth.from(it.occurredAt.atZone(zone)) == month }
         val prevMonth = month.minusMonths(1)
         val prevMonthTxs = allTransactions.filter { YearMonth.from(it.occurredAt.atZone(zone)) == prevMonth }
 
-        val currentSpendingTxs = currentMonthTxs.filter(::isSpending)
-        val prevSpendingTxs = prevMonthTxs.filter(::isSpending)
+        fun counts(tx: UnifiedTransaction) = tx.type == type && tx.money.currencyCode == "IDR"
+        val currentSpendingTxs = currentMonthTxs.filter(::counts)
+        val prevSpendingTxs = prevMonthTxs.filter(::counts)
 
-        val currentByCategory = currentSpendingTxs.groupBy { it.category ?: CategoryConstants.UNCATEGORIZED }
-        val prevByCategory = prevSpendingTxs.groupBy { it.category ?: CategoryConstants.UNCATEGORIZED }
+        val currentByCategory = currentSpendingTxs.groupBy { it.category }
+        val prevByCategory = prevSpendingTxs.groupBy { it.category }
 
         fun sumCategory(txs: List<UnifiedTransaction>): Long =
-            txs.filter { it.direction == Direction.DEBIT }.sumOf { it.money.amountMinor }
+            txs.sumOf { it.money.amountMinor }
 
         val prevTotal = prevSpendingTxs.sumOf { it.money.amountMinor }
         val categories = currentByCategory.map { (cat, txs) ->
@@ -50,7 +51,8 @@ object BudgetAnalyzer {
 
         return MonthSpendingAnalysis(
             month = month,
-            totalPersonalSpendingMinor = totalCurrent,
+            type = type,
+            totalMinor = totalCurrent,
             previousMonthTotalMinor = prevTotal,
             totalDeltaPercent = totalDelta,
             categories = categoriesWithShare,
@@ -60,34 +62,13 @@ object BudgetAnalyzer {
 
     fun localSummary(analysis: MonthSpendingAnalysis): String {
         fun rupiah(amount: Long) = net.wastu.artha.core.model.formatMinorAmount(java.math.BigInteger.valueOf(amount))
-        if (analysis.totalPersonalSpendingMinor == 0L) return "- No spending recorded for this month."
+        if (analysis.totalMinor == 0L) return if (analysis.type == TransactionType.INCOME) "- No income recorded for this month." else "- No spending recorded for this month."
         return buildString {
-            append("- Spending: ${rupiah(analysis.totalPersonalSpendingMinor)}.\n")
+            append("- ${if (analysis.type == TransactionType.INCOME) "Income" else "Spending"}: ${rupiah(analysis.totalMinor)}.\n")
             analysis.categories.firstOrNull()?.let { append("- Largest category: ${it.category}, ${rupiah(it.amountMinor)} (${it.sharePercent.toInt()}%).\n") }
             if (analysis.previousMonthTotalMinor > 0) append("- Previous recorded month: ${rupiah(analysis.previousMonthTotalMinor)}.\n")
             val largest = analysis.categories.flatMap { it.transactions }.maxByOrNull { it.money.amountMinor }
             largest?.let { append("- Largest payment: ${it.description}, ${rupiah(it.money.amountMinor)}.") }
         }.trim()
     }
-
-    /** Jago codes for moves between the user's own pockets and deposits. */
-    val INTERNAL_TRANSFER_CODES = setOf("TDD02", "TDC02", "TDC03", "TDC08", "TDC12", "SAD01", "SAD02", "SAC01", "SAC02")
-    /** Jago codes for top-ups into the user's own e-wallets. */
-    val WALLET_FUNDING_CODES = setOf("WTD02", "WTD03", "WTD06", "WTD-AJ-EWALLET")
-
-    fun isSpending(tx: UnifiedTransaction): Boolean {
-        if (tx.direction != Direction.DEBIT || !tx.isConfirmed || tx.money.currencyCode != "IDR") return false
-        if (tx.isReversedRecord) return false
-        val p = runCatching { JSONObject(tx.rawPayload) }.getOrNull()
-        if (p?.optBoolean("isOwnTransfer") == true) return false
-        // Money sent to a wallet Artha can't read is the last place Artha sees that spending.
-        if (p?.optBoolean("untrackedWalletTopUp") == true) return true
-        if (p?.optBoolean("isWalletFunding") == true) return false
-        if (p?.optBoolean("isPocketTransfer") == true || tx.description.startsWith("Pocket Transfer:", ignoreCase = true)) return false
-        val code = p?.optString("code").orEmpty()
-        if (code in INTERNAL_TRANSFER_CODES || code in WALLET_FUNDING_CODES) return false
-        if (p?.optJSONObject("fields")?.optString("f22") == "INTERNAL") return false
-        return true // Accounting exclusion is source evidence, never an editable display category.
-    }
-
 }

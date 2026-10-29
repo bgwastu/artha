@@ -92,7 +92,7 @@ class CategorizationEngine(
     private var lastPlan: Plan? = null
 
     private fun configured(s: AnalysisSnapshot) =
-        s.analysisEnabled && s.aiConfig.baseUrl.isNotBlank() && s.aiConfig.apiKey.isNotBlank() && s.aiConfig.model.isNotBlank()
+        s.aiConfig.baseUrl.isNotBlank() && s.aiConfig.apiKey.isNotBlank() && s.aiConfig.model.isNotBlank()
 
     private fun currentMonth(): YearMonth = YearMonth.from(clock.instant().atZone(AccountingTime.zone))
     private fun monthOf(tx: UnifiedTransaction): YearMonth = YearMonth.from(tx.occurredAt.atZone(AccountingTime.zone))
@@ -103,11 +103,10 @@ class CategorizationEngine(
         if (store == null || job?.isActive == true) return
         job = scope.launch {
             var previousConfig: AiConfig? = null
-            var previousEnabled = false
             var previousRows: List<Pair<String, java.time.Instant>>? = null
             combine(rows, snapshot, pump) { r, s, _ -> r to s }.collect { (rows, snapshot) ->
                 val config = snapshot.aiConfig
-                if (config != previousConfig || snapshot.analysisEnabled != previousEnabled) {
+                if (config != previousConfig) {
                     cancelBatches()
                     clearBackoff()
                     if (config != previousConfig) {
@@ -115,7 +114,6 @@ class CategorizationEngine(
                     }
                     clearMerchants()
                     previousConfig = config
-                    previousEnabled = snapshot.analysisEnabled
                 }
                 val signature = rows.map { it.key to it.occurredAt }
                 if (signature != previousRows) {
@@ -258,8 +256,9 @@ class CategorizationEngine(
                     categorize?.invoke(config, input, batch) ?: AiCategorization.classify(config, input, batch, rows.value)
                 }
                 ensureActive()
-                val valid = AiCategorization.categories(snapshot.value)
-                fun answered(key: String) = suggestions[key]?.category?.let { it in valid } == true
+                val latest = snapshot.value
+                val byKey = batch.associate { it.transaction.key to it.transaction }
+                fun answered(key: String) = byKey[key]?.let { AiCategorization.isValidFor(latest, it, suggestions[key]?.category) } == true
 
                 val replacing = keys.filterTo(mutableSetOf()) { it in replaceManual }
                 if (replacing.isNotEmpty()) withContext(ioDispatcher) {
@@ -339,15 +338,14 @@ class CategorizationEngine(
     private fun noteCommitted(key: String, suggestion: CategorySuggestion) {
         if (key !in run) return
         runCommitted.add(key)
-        if (suggestion.confidence == CategoryConfidence.LOW || suggestion.category == CategoryConstants.UNCATEGORIZED) runReview.add(key)
+        if (suggestion.confidence == CategoryConfidence.LOW) runReview.add(key)
     }
 
     private fun noteMerchantAnswer(tx: UnifiedTransaction, suggestion: CategorySuggestion) {
         val merchant = MerchantMemory.merchantKey(tx) ?: return
         if (probing[merchant] != tx.key) return
         probing.remove(merchant)
-        val copyable = suggestion.merchantConsistent && suggestion.percent > TRUSTED_ABOVE_PERCENT &&
-            suggestion.category != CategoryConstants.UNCATEGORIZED
+        val copyable = suggestion.merchantConsistent && suggestion.percent > TRUSTED_ABOVE_PERCENT
         if (copyable) merchantAnswers[merchant] = suggestion else perPayment.add(merchant)
     }
 
@@ -437,7 +435,7 @@ class CategorizationEngine(
         val thisMonth = rows.value.filter { AiCategorization.isEligible(it, snapshot) && monthOf(it) == month }.distinctBy { it.key }
         // Count what the user sees: grouped rows resolve their category from member records, not their own key.
         val labeled = thisMonth.count { tx ->
-            (snapshot.categories[tx.key] ?: tx.category).let { !it.isNullOrBlank() && it != CategoryConstants.UNCATEGORIZED }
+            (snapshot.categories[tx.key] ?: tx.category).let { !it.isNullOrBlank() }
         }
         val plan = lastPlan
         val review = plan?.review ?: rows.value.count { AiCategorization.isEligible(it, snapshot) && needsReview(it, snapshot) }

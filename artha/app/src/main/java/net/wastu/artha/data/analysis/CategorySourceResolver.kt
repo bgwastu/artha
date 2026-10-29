@@ -65,7 +65,7 @@ fun categoryStatus(
     snapshot: AnalysisSnapshot,
     fingerprint: () -> String? = { AiCategorization.fingerprint(tx, snapshot) },
 ): CategoryStatus {
-    if (!BudgetAnalyzer.isSpending(tx)) return CategoryStatus.NOT_SPENDING
+    if (!tx.isExpense) return CategoryStatus.NOT_SPENDING
     if (tx.classificationIsManual || tx.key in snapshot.manualCategories) return CategoryStatus.MANUAL
     val record = snapshot.aiRecords[tx.key]
     if (record?.failure != null) return CategoryStatus.FAILED
@@ -81,8 +81,7 @@ fun categoryStatus(
     if (fromMerchant) return CategoryStatus.MERCHANT
     // Changed evidence goes back to the model before an old answer is judged.
     if (ownReason != null && record?.fingerprint != fingerprint()) return CategoryStatus.STALE
-    val category = if (ownReason != null) snapshot.categories[tx.key] else tx.category
-    return if (category == CategoryConstants.UNCATEGORIZED) CategoryStatus.REVIEW else CategoryStatus.AI
+    return CategoryStatus.AI
 }
 
 fun needsReview(tx: UnifiedTransaction, snapshot: AnalysisSnapshot): Boolean =
@@ -116,7 +115,7 @@ fun categorySource(tx: UnifiedTransaction, snapshot: AnalysisSnapshot): Category
         CategoryStatus.NEW, CategoryStatus.STALE -> {
             val config = snapshot.aiConfig
             val configured = config.baseUrl.isNotBlank() && config.model.isNotBlank() && config.apiKey.isNotBlank()
-            if (snapshot.analysisEnabled && configured) CategorySource.PENDING else CategorySource.NONE
+            if (configured) CategorySource.PENDING else CategorySource.NONE
         }
         CategoryStatus.NOT_SPENDING -> CategorySource.NONE
     }

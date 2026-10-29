@@ -88,6 +88,13 @@ class MerchantMemoryTest {
     }
 
     @Test
+    fun taxOnInterestIsAlwaysATaxWithoutPeers() {
+        val tax = payment("tax", description = "Tax on Interest", rawPayload = """{"code":"TXD99"}""")
+        val suggestion = MerchantMemory.remembered(tax, listOf(tax), AnalysisSnapshot())
+        assertEquals("Taxes & Admin", suggestion?.category)
+    }
+
+    @Test
     fun rememberedLatestManualPickWins() {
         val p1 = payment("p1", description = "Kopi Kenangan - Mall A", manual = true)
         val p2 = payment("p2", description = "Kopi Kenangan - Mall B", manual = true)

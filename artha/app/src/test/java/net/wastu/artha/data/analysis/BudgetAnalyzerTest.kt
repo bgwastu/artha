@@ -35,8 +35,8 @@ class BudgetAnalyzerTest {
             rawPayload = """{"isPocketTransfer":true}""",
         )
 
-        assertFalse(BudgetAnalyzer.isSpending(termDeposit))
-        assertFalse(BudgetAnalyzer.isSpending(pocketTransfer))
+        assertFalse(termDeposit.isExpense)
+        assertFalse(pocketTransfer.isExpense)
     }
 
     @Test
@@ -50,7 +50,7 @@ class BudgetAnalyzerTest {
             description = "LinkedIn Premium (Reversed)",
             rawPayload = """{"isReversal":true}""",
         )
-        assertFalse(BudgetAnalyzer.isSpending(reversed))
+        assertFalse(reversed.isExpense)
     }
 
     @Test
@@ -81,11 +81,36 @@ class BudgetAnalyzerTest {
             allTransactions = listOf(sepDining, octDining),
         )
 
-        assertEquals(50_000_00L, result.totalPersonalSpendingMinor)
+        assertEquals(50_000_00L, result.totalMinor)
         assertEquals(100_000_00L, result.previousMonthTotalMinor)
         assertEquals(-50.0f, result.totalDeltaPercent!!, 0.1f)
         assertEquals(1, result.categories.size)
         assertEquals("Dining Out", result.categories.first().category)
         assertEquals(50_000_00L, result.categories.first().amountMinor)
+    }
+
+    private fun tx(id: String, direction: Direction, amount: Long, override: net.wastu.artha.core.model.TransactionType? = null, category: String? = null) =
+        UnifiedTransaction(
+            provider = Provider.JAGO, providerTransactionId = id, direction = direction, money = Money(amount),
+            occurredAt = Instant.parse("2026-10-10T05:00:00Z"), description = id, rawPayload = "{}",
+            typeOverride = override, category = category,
+        )
+
+    @Test
+    fun expensesAndIncomeAreAnalysedSeparatelyAndTransfersNeverCount() {
+        val month = YearMonth.of(2026, 10)
+        val rows = listOf(
+            tx("coffee", Direction.DEBIT, 50_000_00L, category = "Dining Out"),
+            tx("salary", Direction.CREDIT, 10_000_000_00L, category = "Salary"),
+            tx("uncategorised", Direction.CREDIT, 1_000_00L),
+            tx("move", Direction.DEBIT, 99_000_000_00L, override = net.wastu.artha.core.model.TransactionType.TRANSFER),
+            tx("refund-as-income", Direction.DEBIT, 7_000_00L, override = net.wastu.artha.core.model.TransactionType.INCOME),
+        )
+        val expenses = BudgetAnalyzer.analyzeMonth(month, rows)
+        assertEquals(50_000_00L, expenses.totalMinor)
+        val income = BudgetAnalyzer.analyzeMonth(month, rows, net.wastu.artha.core.model.TransactionType.INCOME)
+        assertEquals(10_008_000_00L, income.totalMinor)
+        assertEquals(listOf<String?>("Salary", null), income.categories.map { it.category })
+        assertEquals(8_000_00L, income.categories.last().amountMinor)
     }
 }

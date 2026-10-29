@@ -43,7 +43,7 @@ class CategorySourceResolverTest {
     @Test
     fun manualSourceWhenFlagSetOrKeyInSnapshot() {
         val txDirectManual = spending(manual = true)
-        val snapshot = AnalysisSnapshot(analysisEnabled = true, aiConfig = configuredAi)
+        val snapshot = AnalysisSnapshot(aiConfig = configuredAi)
         assertEquals(CategorySource.MANUAL, categorySource(txDirectManual, snapshot))
 
         val txSnapshotManual = spending("manualKey")
@@ -55,7 +55,6 @@ class CategorySourceResolverTest {
     fun aiSourceWhenReasonPrefixed() {
         val tx = spending("tx_ai")
         val snapshot = AnalysisSnapshot(
-            analysisEnabled = true,
             aiConfig = configuredAi,
             reasons = mapOf(tx.key to "AI suggestion: Morning espresso run"),
         )
@@ -74,7 +73,7 @@ class CategorySourceResolverTest {
     @Test
     fun pendingSourceWhenSpendingAnalysisEnabledAndConfigured() {
         val tx = spending("tx_pending")
-        val snapshot = AnalysisSnapshot(analysisEnabled = true, aiConfig = configuredAi)
+        val snapshot = AnalysisSnapshot(aiConfig = configuredAi)
         assertEquals(CategorySource.PENDING, categorySource(tx, snapshot))
     }
 
@@ -82,24 +81,20 @@ class CategorySourceResolverTest {
     fun noneSourceWhenNotPendingNorAiNorManual() {
         val tx = spending("tx_none")
 
-        // Analysis disabled
-        val disabledSnapshot = AnalysisSnapshot(analysisEnabled = false, aiConfig = configuredAi)
-        assertEquals(CategorySource.NONE, categorySource(tx, disabledSnapshot))
+        val disabledSnapshot = AnalysisSnapshot(aiConfig = configuredAi)
 
         // AI unconfigured (missing apiKey)
         val unconfiguredSnapshot = AnalysisSnapshot(
-            analysisEnabled = true,
             aiConfig = configuredAi.copy(apiKey = ""),
         )
         assertEquals(CategorySource.NONE, categorySource(tx, unconfiguredSnapshot))
 
         // Non-spending (income) even if analysis enabled and AI configured
         val incomeTx = income()
-        assertEquals(CategorySource.NONE, categorySource(incomeTx, disabledSnapshot.copy(analysisEnabled = true)))
+        assertEquals(CategorySource.NONE, categorySource(incomeTx, disabledSnapshot))
 
         // Non-AI reason without configuration
         val snapshotWithOtherReason = AnalysisSnapshot(
-            analysisEnabled = false,
             reasons = mapOf(tx.key to "Rule matched"),
         )
         assertEquals(CategorySource.NONE, categorySource(tx, snapshotWithOtherReason))
@@ -156,7 +151,6 @@ class CategorySourceResolverTest {
     fun categorySourcePrecedence() {
         val tx = spending("tx_prec")
         val baseSnapshot = AnalysisSnapshot(
-            analysisEnabled = true,
             aiConfig = configuredAi,
             reasons = mapOf(tx.key to "AI suggestion: Groceries"),
             aiRecords = aiRecords(confidence = mapOf(tx.key to CategoryConfidence.HIGH)),
@@ -219,8 +213,6 @@ class CategorySourceResolverTest {
         assertEquals(CategoryStatus.REVIEW, status(labeled.copy(aiRecords = mapOf(tx.key to AiRecord("fp", 90, null, false)))))
         assertEquals(CategoryStatus.AI, status(labeled.copy(aiRecords = mapOf(tx.key to AiRecord("fp", 91, null, false)))))
         assertEquals(CategoryStatus.FAILED, status(labeled.copy(aiRecords = mapOf(tx.key to AiRecord("fp", 90, "Timed out", false)))))
-        // The model answering Uncategorized is a question for the user, not a label.
-        assertEquals(CategoryStatus.REVIEW, status(labeled.copy(categories = mapOf(tx.key to CategoryConstants.UNCATEGORIZED))))
         assertEquals(CategoryStatus.MANUAL, status(labeled.copy(manualCategories = setOf(tx.key))))
         assertEquals(CategoryStatus.NOT_SPENDING, categoryStatus(income(), labeled) { "fp" })
     }

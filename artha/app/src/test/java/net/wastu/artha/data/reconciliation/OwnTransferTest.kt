@@ -25,7 +25,7 @@ class OwnTransferTest {
             """{"origin":"jago-local-hive","provider":"JAGO","code":"$code","counterpart":"$counterpart"}""")
 
     private fun spending(rows: List<UnifiedTransaction>, key: String) =
-        BudgetAnalyzer.isSpending(LedgerReconciler.reconcileLedger(rows).first { it.key == key })
+        LedgerReconciler.reconcileLedger(rows).first { it.key == key }.isExpense
 
     @Test fun gopaySavingsSweepIsNeverSpending() {
         val sweep = gopay("s1", "AUTO_SWEEP_WITHDRAWAL", 201_000_00, description = "Transfer ke GoPay Tabungan")

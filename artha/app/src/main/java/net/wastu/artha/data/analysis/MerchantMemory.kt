@@ -76,7 +76,15 @@ object MerchantMemory {
 
     /** Spending payments by merchant key. Build once per pass: merchantKey parses each payload. */
     fun index(rows: List<UnifiedTransaction>): Map<String, List<UnifiedTransaction>> =
-        rows.filter(BudgetAnalyzer::isSpending).groupBy { merchantKey(it) ?: "" } - ""
+        rows.filter(UnifiedTransaction::isExpense).groupBy { merchantKey(it) ?: "" } - ""
+
+    /** Withholding tax on interest is always a tax; no need to ask the model. */
+    private fun builtIn(tx: UnifiedTransaction, snapshot: AnalysisSnapshot): CategorySuggestion? {
+        val code = runCatching { org.json.JSONObject(tx.rawPayload).optString("code") }.getOrDefault("")
+        if (code != "TXD99") return null
+        val category = AiCategorization.categories(snapshot, tx.type).firstOrNull { it.startsWith("Taxes") } ?: return null
+        return CategorySuggestion(category, MERCHANT_REASON_PREFIX + "Tax on interest", merchantConsistent = true)
+    }
 
     fun remembered(
         tx: UnifiedTransaction,
@@ -84,7 +92,8 @@ object MerchantMemory {
         snapshot: AnalysisSnapshot,
         byMerchant: Map<String, List<UnifiedTransaction>> = index(rows),
     ): CategorySuggestion? {
-        if (!BudgetAnalyzer.isSpending(tx)) return null
+        if (!tx.isExpense) return null
+        builtIn(tx, snapshot)?.let { return it }
         val key = merchantKey(tx) ?: return null
         val display = displayMerchant(tx) ?: return null
 
@@ -98,7 +107,7 @@ object MerchantMemory {
                 snapshot.updatedAt["cat:${it.key}"] ?: it.occurredAt.toEpochMilli()
             }
             val category = latest?.let { snapshot.categories[it.key] ?: it.category }
-                ?.takeIf { it.isNotBlank() && it != CategoryConstants.UNCATEGORIZED && it != CategoryConstants.INVESTMENTS_TRANSFERS && it in AiCategorization.categories(snapshot) }
+                ?.takeIf { it.isNotBlank() && it in AiCategorization.categories(snapshot, tx.type) }
             if (category != null) {
                 return CategorySuggestion(
                     category = category,
@@ -119,7 +128,7 @@ object MerchantMemory {
 
         val aiCategories = aiPeers.mapNotNull { peer ->
             (snapshot.categories[peer.key] ?: peer.category)?.takeIf {
-                it.isNotBlank() && it != CategoryConstants.UNCATEGORIZED && it != CategoryConstants.INVESTMENTS_TRANSFERS && it in AiCategorization.categories(snapshot)
+                it.isNotBlank() && it in AiCategorization.categories(snapshot, tx.type)
             }
         }
 

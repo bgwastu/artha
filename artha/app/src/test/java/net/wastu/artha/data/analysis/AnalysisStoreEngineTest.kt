@@ -83,7 +83,7 @@ class AnalysisStoreEngineTest {
             tx.key to CategorySuggestion("Groceries", "Same merchant: Same as earlier Circle K payments", percentOf(CategoryConfidence.HIGH), merchantConsistent = true)
         )
 
-        val count = store.commitMerchantSuggestions(suggestions, input)
+        val count = store.commitMerchantSuggestions(suggestions, input, listOf(tx))
         assertEquals(1, count)
 
         val snap = store.snapshot.value
@@ -91,6 +91,27 @@ class AnalysisStoreEngineTest {
         assertEquals("Same merchant: Same as earlier Circle K payments", snap.reasons[tx.key])
         assertEquals(CategoryConfidence.HIGH, snap.aiConfidence[tx.key])
         assertNull(snap.categoryFailures[tx.key])
+    }
+
+    @Test
+    fun typeOverridesAndIncomeCategoriesPersistAndClearedLabelsStayCleared() {
+        val prefs = TestPrefs()
+        val store = AnalysisStore(prefs.context)
+        val tx = payment("tx_t")
+        store.setTypeOverride(tx.key, net.wastu.artha.core.model.TransactionType.TRANSFER)
+        store.addCustomCategory("Freelance", net.wastu.artha.core.model.TransactionType.INCOME)
+        store.setClassification(tx.key, "Groceries", "picked")
+        store.clearClassification(tx.key)
+
+        val reloaded = AnalysisStore(prefs.context).snapshot.value
+        assertEquals("TRANSFER", reloaded.typeOverrides[tx.key])
+        assertTrue("Freelance" in reloaded.incomeCategories)
+        assertFalse("Freelance" in reloaded.customCategories)
+        assertNull(reloaded.categories[tx.key])
+        assertFalse(tx.key in reloaded.manualCategories)
+
+        store.setTypeOverride(tx.key, null)
+        assertNull(store.snapshot.value.typeOverrides[tx.key])
     }
 
     @Test
@@ -146,71 +167,6 @@ class AnalysisStoreEngineTest {
     }
 
     @Test
-    fun migrateAiCategoryFingerprintsUpdatesOldFingerprintsWithoutRelabeling() {
-        val prefs = TestPrefs()
-        val store = AnalysisStore(prefs.context)
-        val tx = payment("tx_mig", "PLN")
-
-        // Simulate old version: payment has AI reason and an old-scheme fingerprint
-        val oldFingerprint = "old-v2-fingerprint-12345"
-        prefs.putString("categories", JSONObject(mapOf(tx.key to "Utilities & Bills")).toString())
-        prefs.putString("reasons", JSONObject(mapOf(tx.key to "AI suggestion: PLN bill")).toString())
-        prefs.putString("ai_category_fingerprints", JSONObject(mapOf(tx.key to oldFingerprint)).toString())
-
-        val reopened = AnalysisStore(prefs.context)
-        assertEquals(oldFingerprint, reopened.snapshot.value.aiCategoryFingerprints[tx.key])
-
-        // Before migration, fingerprint mismatch would cause needsLabel = true
-        val candidateOld = CategoryCandidate(tx, AiCategorization.fingerprint(tx, reopened.snapshot.value))
-        assertTrue(AiCategorization.needsLabel(candidateOld, reopened.snapshot.value))
-
-        // Migrate
-        val migratedCount = reopened.migrateAiCategoryFingerprints(listOf(tx))
-        assertEquals(1, migratedCount)
-
-        val newFingerprint = AiCategorization.fingerprint(tx, reopened.snapshot.value)
-        assertEquals(newFingerprint, reopened.snapshot.value.aiCategoryFingerprints[tx.key])
-
-        // After migration, payment is current and does NOT need a label
-        val candidateNew = CategoryCandidate(tx, newFingerprint)
-        assertFalse(AiCategorization.needsLabel(candidateNew, reopened.snapshot.value))
-        val (total, pending) = AiCategorization.pending(listOf(tx), reopened.snapshot.value)
-        assertEquals(1, total)
-        assertEquals(0, pending.size)
-
-        // Calling migration again is a no-op
-        assertEquals(0, reopened.migrateAiCategoryFingerprints(listOf(tx)))
-    }
-
-    @Test
-    fun migrateMetadataDoesNotOverwriteReconciledFingerprintsWithRawRows() {
-        val prefs = TestPrefs()
-        val store = AnalysisStore(prefs.context)
-        val raw = payment("tx_rep", "Indomaret").copy(rawPayload = "{}")
-        val reconciled = raw.copy(
-            rawPayload = """{"groupedTransactions":[{"provider":"JAGO","providerTransactionId":"sub1","amount":1000}]}"""
-        )
-
-        val input = store.snapshot.value
-        val fpReconciled = AiCategorization.fingerprint(reconciled, input)
-        val candidates = listOf(CategoryCandidate(reconciled, fpReconciled))
-        val suggestions = mapOf(
-            reconciled.key to CategorySuggestion("Groceries", "AI suggestion: Food", percentOf(CategoryConfidence.HIGH))
-        )
-
-        store.commitCategorySuggestions(candidates, suggestions, input)
-
-        val (_, pendingBefore) = AiCategorization.pending(listOf(reconciled), store.snapshot.value)
-        assertEquals(0, pendingBefore.size)
-
-        // Raw ledger emission calls migrateMetadata with raw rows
-        store.migrateMetadata(listOf(raw))
-
-        val (_, pendingAfter) = AiCategorization.pending(listOf(reconciled), store.snapshot.value)
-        assertEquals(0, pendingAfter.size)
-    }
-
-    @Test
     fun commitMerchantSuggestionsStoresFingerprintsForReconciledRows() {
         val prefs = TestPrefs()
         val store = AnalysisStore(prefs.context)
@@ -239,60 +195,6 @@ class AnalysisStoreEngineTest {
 
         val (_, pending) = AiCategorization.pending(listOf(tx), reopened.snapshot.value)
         assertEquals(0, pending.size)
-    }
-
-    @Test
-    fun migrateAiCategoryFingerprintsIsOneShotKeyedByVersion() {
-        val prefs = TestPrefs()
-        val store = AnalysisStore(prefs.context)
-        val tx = payment("tx_oneshot", "PLN")
-
-        val oldFingerprint = "old-scheme-fp"
-        prefs.putString("categories", JSONObject(mapOf(tx.key to "Utilities & Bills")).toString())
-        prefs.putString("reasons", JSONObject(mapOf(tx.key to "AI suggestion: PLN bill")).toString())
-        prefs.putString("ai_category_fingerprints", JSONObject(mapOf(tx.key to oldFingerprint)).toString())
-
-        val reopened = AnalysisStore(prefs.context)
-        // First run on reconciled rows migrates the old fingerprint and marks version
-        val count = reopened.migrateAiCategoryFingerprints(listOf(tx))
-        assertEquals(1, count)
-        val newFp = AiCategorization.fingerprint(tx, reopened.snapshot.value)
-        assertEquals(newFp, reopened.snapshot.value.aiCategoryFingerprints[tx.key])
-        assertEquals("1", prefs.getString("ai_fingerprint_version", null))
-
-        // Subsequent runs are no-ops because version is current
-        assertEquals(0, reopened.migrateAiCategoryFingerprints(listOf(tx)))
-
-        // Even with a raw row or changed transaction, it will not overwrite because migration already ran
-        val modifiedTx = tx.copy(rawPayload = """{"different":true}""")
-        assertEquals(0, reopened.migrateAiCategoryFingerprints(listOf(modifiedTx)))
-        assertEquals(newFp, reopened.snapshot.value.aiCategoryFingerprints[tx.key])
-    }
-
-    @Test
-    fun migrateAiCategoryFingerprintsWithEmptyRowsDoesNotSetVersion() {
-        val prefs = TestPrefs()
-        val store = AnalysisStore(prefs.context)
-
-        assertEquals(0, store.migrateAiCategoryFingerprints(emptyList()))
-        assertNull(prefs.getString("ai_fingerprint_version", null))
-    }
-
-    @Test
-    fun legacyAiMapsFoldIntoOneRecordPerPaymentOnce() {
-        val tx = payment("tx_fold")
-        val prefs = TestPrefs(mapOf(
-            "ai_category_fingerprints" to JSONObject(mapOf(tx.key to "fp")).toString(),
-            "ai_confidence" to JSONObject(mapOf(tx.key to "LOW")).toString(),
-            "ai_category_failures" to JSONObject(mapOf("other" to "Timed out")).toString(),
-            "ai_merchant_consistent" to org.json.JSONArray(listOf(tx.key)).toString(),
-        ))
-        val store = AnalysisStore(prefs.context)
-
-        assertEquals(AiRecord("fp", 50, null, true), store.snapshot.value.aiRecords[tx.key])
-        assertEquals("Timed out", store.snapshot.value.categoryFailures["other"])
-        assertNull(prefs.getString("ai_confidence", null))
-        assertEquals(store.snapshot.value.aiRecords, AnalysisStore(prefs.context).snapshot.value.aiRecords)
     }
 
     private class TestPrefs(initial: Map<String, String> = emptyMap()) {

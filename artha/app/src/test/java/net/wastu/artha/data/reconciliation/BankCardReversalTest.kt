@@ -21,7 +21,7 @@ class BankCardReversalTest {
         val credit = payment("credit", true, "shared-reference", "Example subscription")
         val result = LedgerReconciler.reconcileLedger(listOf(debit, credit)).single()
         assertTrue(result.isReversal)
-        assertFalse(BudgetAnalyzer.isSpending(result))
+        assertFalse(result.isExpense)
         assertEquals(debit.money, result.money)
         assertEquals(debit.key, result.key)
         assertEquals(2, JSONObject(result.rawPayload).getJSONArray("groupedTransactions").length())
@@ -44,7 +44,7 @@ class BankCardReversalTest {
             val credit = withCode(payment("credit", true, "shared-reference", "Example subscription"), "$code-R")
             val row = LedgerReconciler.reconcileLedger(listOf(debit, credit)).single()
             assertTrue(row.isReversal)
-            assertFalse(BudgetAnalyzer.isSpending(row))
+            assertFalse(row.isExpense)
             assertEquals(debit.money, row.money)
         }
     }

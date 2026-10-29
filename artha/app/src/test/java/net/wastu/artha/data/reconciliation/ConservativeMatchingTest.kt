@@ -22,7 +22,7 @@ class ConservativeMatchingTest {
         val payment = tx(Provider.JAGO, "jago:p", "Pharmacy", amount = 8_500_000)
         val rows = LedgerReconciler.reconcileLedger(listOf(order, payment))
         val result = BudgetAnalyzer.analyzeMonth(YearMonth.of(2026, 10), rows)
-        assertEquals(8_500_000, result.totalPersonalSpendingMinor)
+        assertEquals(8_500_000, result.totalMinor)
         assertFalse(rows.first { it.key == order.key }.isConfirmed)
     }
 
@@ -34,7 +34,7 @@ class ConservativeMatchingTest {
         assertEquals(payment.occurredAt, row.occurredAt)
         assertEquals("Keep", row.userNote)
         assertEquals("Groceries", row.category)
-        assertEquals(7_500_000, BudgetAnalyzer.analyzeMonth(YearMonth.of(2026, 9), listOf(row)).totalPersonalSpendingMinor)
+        assertEquals(7_500_000, BudgetAnalyzer.analyzeMonth(YearMonth.of(2026, 9), listOf(row)).totalMinor)
     }
 
     @Test fun repeatedAmountsResolveOneToOneAndCurrenciesAreNotGuessed() {
@@ -71,7 +71,7 @@ class ConservativeMatchingTest {
         val topup = tx(Provider.JAGO, "jago:p", "GoPay", payload = """{"code":"OTD10","counterpart":"GoPay"}""").copy(category = "Dining Out")
         val gojek = tx(Provider.GOJEK, "gopay:o", "Order", payload = "{}")
         val row = LedgerReconciler.reconcileLedger(listOf(topup, gojek)).single { it.provider == Provider.JAGO }
-        assertFalse(BudgetAnalyzer.isSpending(row))
+        assertFalse(row.isExpense)
     }
 
     @Test fun legacyWalletDirectionGuessesCannotInflateConfirmedSpending() {
@@ -79,7 +79,7 @@ class ConservativeMatchingTest {
         val guessedDebit = missing.copy(providerTransactionId = "grab:credit", rawPayload = """{"origin":"grab-wallet-api","item":{"direction":"CREDIT"}}""")
         val rows = LedgerReconciler.reconcileLedger(listOf(missing, guessedDebit))
         assertTrue(rows.none { it.isConfirmed })
-        assertEquals(0L, BudgetAnalyzer.analyzeMonth(YearMonth.of(2026, 10), rows).totalPersonalSpendingMinor)
+        assertEquals(0L, BudgetAnalyzer.analyzeMonth(YearMonth.of(2026, 10), rows).totalMinor)
         assertEquals(2, rows.size)
         assertEquals(Direction.DEBIT, guessedDebit.direction) // Raw facts remain immutable.
         val verified = missing.copy(rawPayload = """{"origin":"grab-wallet-api","item":{"status":"COMPLETED","currency":"IDR","txType":"BOOKING_CHARGE","coreTxType":"BookingCharge","amount":75000,"timestamp":1790917200}}""")

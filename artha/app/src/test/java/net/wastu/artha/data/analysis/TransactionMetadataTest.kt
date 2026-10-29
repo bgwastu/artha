@@ -18,29 +18,12 @@ class TransactionMetadataTest {
         assertNull(TransactionMetadata.enrich(c, snapshot).userNote)
     }
 
-    @Test fun uniqueLegacyNotesMigrateAndAmbiguousEntriesAreRetainedUnassigned() {
-        val a = tx(Provider.JAGO, "jago:12")
-        val b = tx(Provider.SHOPEE, "shopee:12")
-        val c = tx(Provider.JAGO, "jago:112")
-        val snapshot = AnalysisSnapshot(userNotes = mapOf("12" to "Ambiguous", "112" to "Unique"), categories = mapOf("112" to "Dining Out"))
-        val migrated = TransactionMetadata.migrate(snapshot, listOf(a, b, c))
-        assertEquals("Ambiguous", migrated.userNotes["12"])
-        assertNull(TransactionMetadata.enrich(a, migrated).userNote)
-        assertNull(TransactionMetadata.enrich(b, migrated).userNote)
-        assertEquals("Unique", migrated.userNotes[c.key])
-        assertTrue(c.key in migrated.manualCategories)
-        assertEquals(migrated, TransactionMetadata.migrate(migrated, listOf(a, b, c)))
-    }
-
     @Test fun automaticClassificationPreservesManualChoice() {
         val tx = tx(Provider.JAGO, "12")
         val snapshot = AnalysisSnapshot(categories = mapOf(tx.key to "Groceries"), manualCategories = setOf(tx.key))
         assertEquals(snapshot, TransactionMetadata.applyAutomatic(snapshot, mapOf(tx.key to ("Dining Out" to "AI")), 100))
     }
 
-    @Test fun editableCategoryCannotExcludeAnActualPaymentFromSpending() {
-        assertTrue(BudgetAnalyzer.isSpending(tx(Provider.JAGO, "12").copy(category = CategoryConstants.INVESTMENTS_TRANSFERS)))
-    }
 
     @Test fun resetTombstonesBeatOldCloudClassificationsAndTimestampTiesConverge() {
         val deleted = AnalysisSnapshot(updatedAt = mapOf("cat:12" to 20))

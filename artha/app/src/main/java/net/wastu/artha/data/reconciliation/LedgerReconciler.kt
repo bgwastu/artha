@@ -3,7 +3,6 @@ package net.wastu.artha.data.reconciliation
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
-import net.wastu.artha.data.analysis.CategoryConstants
 import java.time.Duration
 import java.util.Locale
 import org.json.JSONArray
@@ -18,8 +17,9 @@ object LedgerReconciler {
         val order = payload.optString("orderNumber").ifBlank { payload.optString("orderId") }.ifBlank { payload.optString("order_id") }
         val origin = payload.optString("origin")
         val merchant = payload.optString("counterpart").ifBlank { tx.description }.trim().lowercase(Locale.ROOT)
-        val internal = code in setOf("SAD01", "SAD02", "SAC01", "SAC02", "TDD02", "TDC02", "TDC03", "TDC08", "TDC12") ||
-            payload.optJSONObject("fields")?.optString("f22") == "INTERNAL"
+        val internal = code !in net.wastu.artha.core.model.TransactionClassifier.INTEREST_CODES &&
+            (code in setOf("SAD01", "SAD02", "SAC01", "SAC02", "TDD02", "TDC02", "TDC03", "TDC08", "TDC12") ||
+                payload.optJSONObject("fields")?.optString("f22") == "INTERNAL")
         val refund = tx.isReversal || payload.optBoolean("verifiedRefund") || payload.optString("serviceTier").endsWith("REFUND") || code.endsWith("-R", true) || code == "GPC02" ||
             tx.description.contains("refund", true) || tx.description.contains("reversal", true)
         private val legacyGrabCharge = payload.optJSONObject("item")?.let { item ->
@@ -278,7 +278,7 @@ object LedgerReconciler {
                 val to = c.pocket?.name ?: "Pocket"
                 val payload = evidence(d).payload.put("isPocketTransfer", true)
                     .put("groupedTransactions", JSONArray().put(buildGroupEntry(d, "From $from")).put(buildGroupEntry(c, "To $to")))
-                d.copy(description = "Pocket Transfer: $from to $to", category = CategoryConstants.INVESTMENTS_TRANSFERS, rawPayload = payload.toString())
+                d.copy(description = "Pocket Transfer: $from to $to", category = null, rawPayload = payload.toString())
             })
         val keys = internal.map { it.tx.key }.toSet()
         return paired + transactions.filter { it.key !in keys }
@@ -450,7 +450,6 @@ object LedgerReconciler {
             category = when {
                 secondary.classificationIsManual -> secondary.category
                 primary.classificationIsManual -> primary.category
-                secondary.category == CategoryConstants.UNCATEGORIZED -> primary.category ?: secondary.category
                 else -> secondary.category ?: primary.category
             },
             aiReasoning = secondary.aiReasoning ?: primary.aiReasoning,

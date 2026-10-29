@@ -50,14 +50,12 @@ class AnalysisSyncMergerTest {
         val freshInstall = AnalysisSnapshot()
         val remote = AnalysisSnapshot(
             categories = mapOf("tx-1" to "Dining Out"),
-            monthlyNotes = mapOf("2026-10" to "Vacation"),
             customCategories = listOf("Tech", "Fitness"),
-            updatedAt = mapOf("cat:tx-1" to 500L, "monthNote:2026-10" to 500L, "customCat:Tech" to 500L),
+            updatedAt = mapOf("cat:tx-1" to 500L, "customCat:Tech" to 500L),
         )
 
         val merged = AnalysisSyncMerger.mergeAnalysis(freshInstall, remote)
         assertEquals("Dining Out", merged.categories["tx-1"])
-        assertEquals("Vacation", merged.monthlyNotes["2026-10"])
         assertTrue(merged.customCategories.contains("Tech"))
     }
 

@@ -49,8 +49,16 @@ data class UnifiedTransaction(
     val isConfirmed: Boolean = true,
     val canonicalKey: String? = null,
     val classificationIsManual: Boolean = false,
+    /** User's choice of type; null means follow [TransactionClassifier]. */
+    val typeOverride: TransactionType? = null,
 ) {
     val key: String get() = canonicalKey ?: "${provider.name}:$providerTransactionId"
+
+    val type: TransactionType by lazy { typeOverride ?: TransactionClassifier.classify(this) }
+
+    /** Counts toward expense totals: Artha only sums IDR. */
+    val isExpense: Boolean get() = type == TransactionType.EXPENSE && money.currencyCode == "IDR"
+    val isIncome: Boolean get() = type == TransactionType.INCOME && money.currencyCode == "IDR"
 
     /** Reconciled reversals carry the flag; older ledger rows only carry the description marker. */
     val isReversedRecord: Boolean get() = isReversal || description.contains("(Reversed)", ignoreCase = true)

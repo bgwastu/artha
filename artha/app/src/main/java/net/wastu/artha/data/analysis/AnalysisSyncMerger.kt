@@ -39,24 +39,6 @@ object AnalysisSyncMerger {
             prefix = "note:",
         )
 
-        // 3. Monthly Notes (keyed by "monthNote:$month")
-        val mergedMonthlyNotes = mergeLwwStringMap(
-            localMap = local.monthlyNotes,
-            remoteMap = remote.monthlyNotes,
-            localTimes = local.updatedAt,
-            remoteTimes = remote.updatedAt,
-            prefix = "monthNote:",
-        )
-
-        // 4. Monthly Summaries (keyed by "monthSummary:$month")
-        val mergedMonthlySummaries = mergeLwwStringMap(
-            localMap = local.monthlySummaries,
-            remoteMap = remote.monthlySummaries,
-            localTimes = local.updatedAt,
-            remoteTimes = remote.updatedAt,
-            prefix = "monthSummary:",
-        )
-
         // 5. Knowledge Base
         val localKnowledgeTime = local.updatedAt["knowledge"] ?: if (local.knowledge.isNotBlank()) 1L else 0L
         val remoteKnowledgeTime = remote.updatedAt["knowledge"] ?: if (remote.knowledge.isNotBlank()) 1L else 0L
@@ -72,15 +54,17 @@ object AnalysisSyncMerger {
         for (cat in (local.deletedCategories.keys + remote.deletedCategories.keys)) {
             mergedDeletedCategories[cat] = maxOf(local.deletedCategories[cat] ?: 0L, remote.deletedCategories[cat] ?: 0L)
         }
-        val candidateCategories = (local.customCategories + remote.customCategories).distinct()
-        val mergedCustomCategories = candidateCategories.filter { cat ->
-            val addedTime = maxOf(
-                local.updatedAt["customCat:$cat"] ?: if (cat in local.customCategories) 1L else 0L,
-                remote.updatedAt["customCat:$cat"] ?: if (cat in remote.customCategories) 1L else 0L,
-            )
-            val deletedTime = mergedDeletedCategories[cat] ?: 0L
-            addedTime >= deletedTime
-        }.ifEmpty { INITIAL_DEFAULT_CATEGORIES }
+        fun mergeList(localList: List<String>, remoteList: List<String>, timePrefix: String, deletedPrefix: String, fallback: List<String>) =
+            (localList + remoteList).distinct().filter { cat ->
+                val addedTime = maxOf(
+                    local.updatedAt["$timePrefix$cat"] ?: if (cat in localList) 1L else 0L,
+                    remote.updatedAt["$timePrefix$cat"] ?: if (cat in remoteList) 1L else 0L,
+                )
+                addedTime >= (mergedDeletedCategories["$deletedPrefix$cat"] ?: 0L)
+            }.ifEmpty { fallback }
+        val mergedCustomCategories = mergeList(local.customCategories, remote.customCategories, "customCat:", "", INITIAL_DEFAULT_CATEGORIES)
+        val mergedIncomeCategories = mergeList(local.incomeCategories, remote.incomeCategories, "incomeCat:", "income:", INITIAL_INCOME_CATEGORIES)
+        val mergedTypeOverrides = mergeLwwStringMap(local.typeOverrides, remote.typeOverrides, local.updatedAt, remote.updatedAt, "type:")
 
         // 8. Category Icons (keyed by "icon:$cat")
         val mergedIcons = mergeLwwStringMap(
@@ -89,15 +73,7 @@ object AnalysisSyncMerger {
             localTimes = local.updatedAt,
             remoteTimes = remote.updatedAt,
             prefix = "icon:",
-        ).filterKeys { it in mergedCustomCategories }
-
-        val mergedFingerprints = mergeLwwStringMap(
-            localMap = local.analysisFingerprints,
-            remoteMap = remote.analysisFingerprints,
-            localTimes = local.updatedAt,
-            remoteTimes = remote.updatedAt,
-            prefix = "monthSummary:",
-        )
+        ).filterKeys { it in mergedCustomCategories || it in mergedIncomeCategories }
 
         return AnalysisSnapshot(
             userNotes = mergedUserNotes,
@@ -105,13 +81,12 @@ object AnalysisSyncMerger {
             reasons = mergedReasons,
             knowledge = mergedKnowledge,
             aiConfig = mergedAiConfig,
-            monthlySummaries = mergedMonthlySummaries,
             customCategories = mergedCustomCategories,
+            incomeCategories = mergedIncomeCategories,
+            typeOverrides = mergedTypeOverrides,
             categoryIcons = mergedIcons,
-            monthlyNotes = mergedMonthlyNotes,
             updatedAt = mergedUpdatedAt,
             deletedCategories = mergedDeletedCategories,
-            analysisFingerprints = mergedFingerprints,
             manualCategories = (local.manualCategories + remote.manualCategories).filter { it in mergedCategories }.toSet(),
         )
     }

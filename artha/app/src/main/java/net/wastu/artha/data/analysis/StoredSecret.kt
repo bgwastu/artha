@@ -11,6 +11,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** commit() can fail after updating its in-process cache; restore the affected keys too. */
+@android.annotation.SuppressLint("ApplySharedPref", "UseKtx") // commit() is deliberate: the caller needs to know whether the write landed.
 internal fun checkedPreferenceEdit(prefs: SharedPreferences, keys: List<String>, message: String,
     changes: SharedPreferences.Editor.() -> Unit) {
     val before = keys.distinct().associateWith { prefs.getString(it, null) }

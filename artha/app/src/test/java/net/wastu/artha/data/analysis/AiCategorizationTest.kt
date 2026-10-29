@@ -20,8 +20,8 @@ class AiCategorizationTest {
     private val batch get() = AiCategorization.nextBatch(listOf(payment), snapshot)
 
     @Test fun decorationAndSummaryChangesDoNotRestartCategoryRequests() {
-        val changed = snapshot.copy(categoryIcons = mapOf("Groceries" to "leaf"), monthlySummaries = mapOf("2026-10" to "Summary"),
-            monthlyNotes = mapOf("2026-10" to "Note"), analysisFingerprints = mapOf("2026-10" to "fingerprint"), updatedAt = mapOf("icon:Groceries" to 10))
+        val changed = snapshot.copy(categoryIcons = mapOf("Groceries" to "leaf"),
+            updatedAt = mapOf("icon:Groceries" to 10))
         assertEquals(AiCategorization.requestSnapshot(snapshot), AiCategorization.requestSnapshot(changed))
         assertNotEquals(AiCategorization.requestSnapshot(snapshot), AiCategorization.requestSnapshot(changed.copy(userNotes = mapOf(payment.key to "Context"))))
         assertNotEquals(AiCategorization.requestSnapshot(snapshot), AiCategorization.requestSnapshot(changed.copy(manualCategories = setOf(payment.key))))
@@ -29,11 +29,11 @@ class AiCategorizationTest {
 
     @Test fun noProviderKeywordOrPersonalNoteInventsACategory() {
         for (tx in listOf(payment, payment.copy(provider = Provider.SHOPEE), payment.copy(rawPayload = """{"serviceTier":"GoFood","pickupLocation":"here"}"""))) {
-            assertEquals("Uncategorized", SpendingProjector().project(listOf(tx), snapshot).transactions.single().category)
-            assertEquals("Uncategorized", TransactionMetadata.enrich(tx, snapshot.copy(userNotes = mapOf(tx.key to "groceries"))).category)
+            assertNull(SpendingProjector().project(listOf(tx), snapshot).transactions.single().category)
+            assertNull(TransactionMetadata.enrich(tx, snapshot.copy(userNotes = mapOf(tx.key to "groceries"))).category)
         }
         val oldRules = snapshot.copy(categories = mapOf(payment.key to "Dining Out"), reasons = mapOf(payment.key to "Local provider and merchant rule; you can choose a different category."))
-        assertEquals("Uncategorized", SpendingProjector().project(listOf(payment), oldRules).transactions.single().category)
+        assertNull(SpendingProjector().project(listOf(payment), oldRules).transactions.single().category)
         assertEquals("Dining Out", SpendingProjector().project(listOf(payment), oldRules.copy(manualCategories = setOf(payment.key))).transactions.single().category)
         assertEquals("Dining Out", oldRules.categories[payment.key])
     }
@@ -59,7 +59,7 @@ class AiCategorizationTest {
             """{"classifications":null}""",
         )) {
             val failure = runCatching {
-                AiCategorization.parse(raw, batch, AiCategorization.categories(snapshot))
+                AiCategorization.parse(raw, batch, AiCategorization.categories(snapshot, TransactionType.EXPENSE))
             }
             assertTrue("Expected failure for: $raw", failure.isFailure)
             assertTrue(failure.exceptionOrNull() is InvalidCategoryResponseException)
@@ -69,41 +69,41 @@ class AiCategorizationTest {
     @Test
     fun perItemParsingToleratesUnknownDuplicateMissingAndMalformedItems() {
         // Empty classifications returns empty map
-        assertEquals(emptyMap<String, CategorySuggestion>(), AiCategorization.parse("""{"classifications":[]}""", batch, AiCategorization.categories(snapshot)))
+        assertEquals(emptyMap<String, CategorySuggestion>(), AiCategorization.parse("""{"classifications":[]}""", batch, AiCategorization.categories(snapshot, TransactionType.EXPENSE)))
 
         // Unknown id is skipped
-        assertEquals(emptyMap<String, CategorySuggestion>(), AiCategorization.parse("""{"classifications":[{"id":"unknown","category":"Groceries"}]}""", batch, AiCategorization.categories(snapshot)))
+        assertEquals(emptyMap<String, CategorySuggestion>(), AiCategorization.parse("""{"classifications":[{"id":"unknown","category":"Groceries"}]}""", batch, AiCategorization.categories(snapshot, TransactionType.EXPENSE)))
 
         // Unknown category is dropped
-        assertEquals(emptyMap<String, CategorySuggestion>(), AiCategorization.parse("""{"classifications":[{"id":"p0","category":"Imaginary"}]}""", batch, AiCategorization.categories(snapshot)))
+        assertEquals(emptyMap<String, CategorySuggestion>(), AiCategorization.parse("""{"classifications":[{"id":"p0","category":"Imaginary"}]}""", batch, AiCategorization.categories(snapshot, TransactionType.EXPENSE)))
 
         // Investments & Transfers is dropped (case-insensitive)
-        assertEquals(emptyMap<String, CategorySuggestion>(), AiCategorization.parse("""{"classifications":[{"id":"p0","category":"Investments & Transfers"}]}""", batch, AiCategorization.categories(snapshot)))
-        assertEquals(emptyMap<String, CategorySuggestion>(), AiCategorization.parse("""{"classifications":[{"id":"p0","category":"investments & transfers"}]}""", batch, AiCategorization.categories(snapshot)))
+        assertEquals(emptyMap<String, CategorySuggestion>(), AiCategorization.parse("""{"classifications":[{"id":"p0","category":"Investments & Transfers"}]}""", batch, AiCategorization.categories(snapshot, TransactionType.EXPENSE)))
+        assertEquals(emptyMap<String, CategorySuggestion>(), AiCategorization.parse("""{"classifications":[{"id":"p0","category":"investments & transfers"}]}""", batch, AiCategorization.categories(snapshot, TransactionType.EXPENSE)))
 
         // Duplicate id: first wins
         val duplicateRaw = """{"classifications":[{"id":"p0","category":"Groceries","reason":"First pick"},{"id":"p0","category":"Transport","reason":"Second pick"}]}"""
-        val duplicateResult = AiCategorization.parse(duplicateRaw, batch, AiCategorization.categories(snapshot))
+        val duplicateResult = AiCategorization.parse(duplicateRaw, batch, AiCategorization.categories(snapshot, TransactionType.EXPENSE))
         assertEquals(1, duplicateResult.size)
         assertEquals("Groceries", duplicateResult.getValue(payment.key).category)
         assertEquals("AI suggestion: First pick", duplicateResult.getValue(payment.key).reason)
 
         // Case-insensitive and trimmed category matching
         val caseRaw = """{"classifications":[{"id":"p0","category":"  groceries  "}]}"""
-        val caseResult = AiCategorization.parse(caseRaw, batch, AiCategorization.categories(snapshot))
+        val caseResult = AiCategorization.parse(caseRaw, batch, AiCategorization.categories(snapshot, TransactionType.EXPENSE))
         assertEquals("Groceries", caseResult.getValue(payment.key).category)
 
         // Truncate over-long reason to 240 chars
         val longReason = "A".repeat(300)
         val longReasonRaw = """{"classifications":[{"id":"p0","category":"Groceries","reason":"$longReason"}]}"""
-        val longReasonResult = AiCategorization.parse(longReasonRaw, batch, AiCategorization.categories(snapshot))
+        val longReasonResult = AiCategorization.parse(longReasonRaw, batch, AiCategorization.categories(snapshot, TransactionType.EXPENSE))
         assertEquals(AI_REASON_PREFIX + "A".repeat(240), longReasonResult.getValue(payment.key).reason)
 
         // Missing candidate is simply absent from map
         val p2 = payment.copy(providerTransactionId = "second")
         val twoBatch = batch + CategoryCandidate(p2, AiCategorization.fingerprint(p2, snapshot))
         val partialRaw = """{"classifications":[{"id":"p0","category":"Groceries"}]}"""
-        val partialResult = AiCategorization.parse(partialRaw, twoBatch, AiCategorization.categories(snapshot))
+        val partialResult = AiCategorization.parse(partialRaw, twoBatch, AiCategorization.categories(snapshot, TransactionType.EXPENSE))
         assertEquals(1, partialResult.size)
         assertTrue(partialResult.containsKey(payment.key))
         assertFalse(partialResult.containsKey(p2.key))
@@ -114,7 +114,7 @@ class AiCategorizationTest {
             {"classifications":[{"id":"p0","category":"Groceries","reason":"Clean"}]}
             ```
         """.trimIndent()
-        val fencedResult = AiCategorization.parse(fenced, batch, AiCategorization.categories(snapshot))
+        val fencedResult = AiCategorization.parse(fenced, batch, AiCategorization.categories(snapshot, TransactionType.EXPENSE))
         assertEquals("Groceries", fencedResult.getValue(payment.key).category)
 
         // Fenced with preamble
@@ -124,7 +124,7 @@ class AiCategorizationTest {
             {"classifications":[{"id":"p0","category":"Groceries","reason":"Preamble"}]}
             ```
         """.trimIndent()
-        val preambleResult = AiCategorization.parse(preambleFenced, batch, AiCategorization.categories(snapshot))
+        val preambleResult = AiCategorization.parse(preambleFenced, batch, AiCategorization.categories(snapshot, TransactionType.EXPENSE))
         assertEquals("Groceries", preambleResult.getValue(payment.key).category)
     }
 
@@ -312,7 +312,7 @@ class AiCategorizationTest {
 
     @Test fun aiMaySuggestLabelsButCannotChangePaymentFacts() {
         val original = payment.copy()
-        val result = AiCategorization.parse("""{"classifications":[{"id":"p0","category":"Groceries","reason":"Food shop","amountMinor":1,"date":"2099","isConfirmed":false}]}""", batch, AiCategorization.categories(snapshot))
+        val result = AiCategorization.parse("""{"classifications":[{"id":"p0","category":"Groceries","reason":"Food shop","amountMinor":1,"date":"2099","isConfirmed":false}]}""", batch, AiCategorization.categories(snapshot, TransactionType.EXPENSE))
         assertEquals(CategorySuggestion("Groceries", "AI suggestion: Food shop", percentOf(CategoryConfidence.LOW)), result[payment.key])
         assertEquals(original, payment)
     }
@@ -320,7 +320,7 @@ class AiCategorizationTest {
     @Test
     fun parseReplyConfidenceAndMerchantConsistent() {
         val raw = """{"classifications":[{"id":"p0","category":"Groceries","reason":"Fresh food","confidence":"high","merchantConsistent":true}]}"""
-        val result = AiCategorization.parse(raw, batch, AiCategorization.categories(snapshot))
+        val result = AiCategorization.parse(raw, batch, AiCategorization.categories(snapshot, TransactionType.EXPENSE))
         val sug = result.getValue(payment.key)
         assertEquals("Groceries", sug.category)
         assertEquals("AI suggestion: Fresh food", sug.reason)
@@ -329,14 +329,14 @@ class AiCategorizationTest {
 
         // Missing confidence is treated as unsure (LOW, so it gets reviewed), missing merchantConsistent defaults to false
         val minimal = """{"classifications":[{"id":"p0","category":"Groceries","reason":"Food"}]}"""
-        val minResult = AiCategorization.parse(minimal, batch, AiCategorization.categories(snapshot))
+        val minResult = AiCategorization.parse(minimal, batch, AiCategorization.categories(snapshot, TransactionType.EXPENSE))
         val minSug = minResult.getValue(payment.key)
         assertEquals(CategoryConfidence.LOW, minSug.confidence)
         assertFalse(minSug.merchantConsistent)
 
         // Unknown confidence is unsure too
         val unknownConf = """{"classifications":[{"id":"p0","category":"Groceries","reason":"Food","confidence":"uncertain","merchantConsistent":false}]}"""
-        val unkResult = AiCategorization.parse(unknownConf, batch, AiCategorization.categories(snapshot))
+        val unkResult = AiCategorization.parse(unknownConf, batch, AiCategorization.categories(snapshot, TransactionType.EXPENSE))
         assertEquals(CategoryConfidence.LOW, unkResult.getValue(payment.key).confidence)
 
         // Only picks above 90% are trusted; 90 itself goes to review.
@@ -348,7 +348,7 @@ class AiCategorizationTest {
 
         // Low confidence
         val lowConf = """{"classifications":[{"id":"p0","category":"Groceries","reason":"Food","confidence":"low"}]}"""
-        val lowResult = AiCategorization.parse(lowConf, batch, AiCategorization.categories(snapshot))
+        val lowResult = AiCategorization.parse(lowConf, batch, AiCategorization.categories(snapshot, TransactionType.EXPENSE))
         assertEquals(CategoryConfidence.LOW, lowResult.getValue(payment.key).confidence)
     }
 
@@ -456,7 +456,7 @@ class AiCategorizationTest {
     fun monthPendingDoesNotResendPaymentsTheModelAnsweredUncategorized() {
         val answered = payment
         val snap = snapshot.copy(
-            categories = mapOf(answered.key to CategoryConstants.UNCATEGORIZED),
+            categories = emptyMap(),
             reasons = mapOf(answered.key to AI_REASON_PREFIX + "No evidence"),
             aiRecords = aiRecords(fingerprints = mapOf(answered.key to AiCategorization.fingerprint(answered, snapshot)), confidence = mapOf(answered.key to CategoryConfidence.HIGH)),
         )

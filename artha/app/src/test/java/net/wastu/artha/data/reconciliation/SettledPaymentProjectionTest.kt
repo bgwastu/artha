@@ -23,7 +23,7 @@ class SettledPaymentProjectionTest {
             .put("paymentEvidence", "settled-wallet-history").put("paymentStatus", "COMPLETED")
             .put("paymentDirection", "DEBIT").put("paymentAmountMinor", 7_500_000)
             .put("paymentCurrency", "IDR").put("paymentTimestamp", date.minusSeconds(30).toString()).toString())
-    private fun total(rows: List<UnifiedTransaction>) = BudgetAnalyzer.analyzeMonth(YearMonth.of(2026, 10), rows).totalPersonalSpendingMinor
+    private fun total(rows: List<UnifiedTransaction>) = BudgetAnalyzer.analyzeMonth(YearMonth.of(2026, 10), rows).totalMinor
 
     @Test fun verifiedMarketplaceAndFoodPaymentsCountWithoutBankEvidence() {
         for (origin in listOf("shopee-order-api", "shopeefood-order-api")) {

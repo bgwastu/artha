@@ -1,5 +1,6 @@
 package net.wastu.artha.data.analysis
 
+import net.wastu.artha.core.model.TransactionType
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
@@ -21,21 +22,24 @@ data class AnalysisSnapshot(
     val reasons: Map<String, String> = emptyMap(),
     val knowledge: String = "",
     val aiConfig: AiConfig = AiConfig(),
-    val monthlySummaries: Map<String, String> = emptyMap(),
+    /** Expense categories. */
     val customCategories: List<String> = INITIAL_DEFAULT_CATEGORIES,
+    val incomeCategories: List<String> = INITIAL_INCOME_CATEGORIES,
+    /** Transaction key to [TransactionType] name, for payments the user reclassified. */
+    val typeOverrides: Map<String, String> = emptyMap(),
     val categoryIcons: Map<String, String> = emptyMap(),
-    val monthlyNotes: Map<String, String> = emptyMap(),
     val updatedAt: Map<String, Long> = emptyMap(),
     val deletedCategories: Map<String, Long> = emptyMap(),
-    val analysisFingerprints: Map<String, String> = emptyMap(),
     val manualCategories: Set<String> = emptySet(),
-    val analysisEnabled: Boolean = false,
     val autoCategorize: Boolean = true,
     /** What the AI knows about each payment. Local cache, not backup content. */
     val aiRecords: Map<String, AiRecord> = emptyMap(),
 ) {
     val aiCategoryFingerprints: Map<String, String> by lazy { aiRecords.mapNotNull { (k, r) -> r.fingerprint?.let { k to it } }.toMap() }
     val aiConfidence: Map<String, CategoryConfidence> by lazy { aiRecords.mapNotNull { (k, r) -> r.confidence?.let { k to CategoryConfidence.of(it) } }.toMap() }
+    fun categoriesFor(type: TransactionType): List<String> =
+        if (type == TransactionType.INCOME) incomeCategories else customCategories
+
     val categoryFailures: Map<String, String> by lazy { aiRecords.mapNotNull { (k, r) -> r.failure?.let { k to it } }.toMap() }
     val aiMerchantConsistent: Set<String> by lazy { aiRecords.filterValues { it.merchantConsistent }.keys }
 }
@@ -78,84 +82,50 @@ val INITIAL_DEFAULT_CATEGORIES = listOf(
     "Personal Care",
     "Travel & Lodging",
     "Taxes & Admin",
-    "Investments & Transfers",
 )
 
-val LEGACY_DEFAULT_CATEGORIES = setOf(
-    "Dining Out",
-    "Groceries",
-    "Transport",
-    "Tech & Subscriptions",
-    "Shopping & Hardware",
-    "Clothing & Apparel",
-    "Travel & Lodging",
-    "Utilities & Bills",
-    "Health & Fitness",
-    "Personal Care",
-    "Family & Social",
-    "Cash",
-    "Taxes & Fees",
+const val INTEREST_INCOME_CATEGORY = "Interest & Returns"
+
+val INITIAL_INCOME_CATEGORIES = listOf(
+    "Salary",
     "Business",
-    "Investments & Transfers",
-    "Uncategorized",
+    INTEREST_INCOME_CATEGORY,
+    "Gifts",
+    "Reimbursements",
+    "Other Income",
 )
+
 class AnalysisStore(context: Context) {
     companion object {
-        /** defaults shared with the pi.dev CLIProxyAPI gateway (see ~/.pi/agent/cliproxyapi.json). */
-        const val DEFAULT_AI_BASE_URL = "https://ai.wastu.net"
-        const val DEFAULT_AI_MODEL = "gemini-3.8-flash-high"
-        const val AI_FINGERPRINT_VERSION = 1
-        private const val PREF_AI_FINGERPRINT_VERSION = "ai_fingerprint_version"
         private const val AI_RECORDS = "ai_records"
-        private val LEGACY_AI_KEYS = listOf("ai_category_fingerprints", "ai_confidence", "ai_category_failures", "ai_merchant_consistent")
-        /** Older builds saved only a level; map it to a percent inside that level's band. */
-        internal fun legacyConfidencePercent(level: String): Int = when (level.uppercase()) {
-            "HIGH" -> 95
-            "LOW" -> 50
-            else -> 77
-        }
     }
-    private fun getFingerprintVersion(): Int =
-        prefs.getString(PREF_AI_FINGERPRINT_VERSION, null)?.toIntOrNull() ?: 0
     private val appContext = context.applicationContext
     private val prefs: SharedPreferences = context.getSharedPreferences("artha_analysis_store", Context.MODE_PRIVATE)
 
     private val secret = StoredSecret(prefs, "artha_ai_config_key", "ai_api_key")
     private val _snapshot = MutableStateFlow(loadSnapshot())
     val snapshot: StateFlow<AnalysisSnapshot> = _snapshot.asStateFlow()
-    init {
-        // Monthly AI analysis was removed; its run cache is not user data.
-        if (prefs.contains("analysis_failures")) prefs.edit { remove("analysis_failures") }
-    }
 
     private fun loadSnapshot(): AnalysisSnapshot {
         val notesJson = prefs.getString("user_notes", "{}") ?: "{}"
         val categoriesJson = prefs.getString("categories", "{}") ?: "{}"
         val reasonsJson = prefs.getString("reasons", "{}") ?: "{}"
-        val summariesJson = prefs.getString("monthly_summaries", "{}") ?: "{}"
         val knowledge = prefs.getString("knowledge", "") ?: ""
-        val baseUrl = prefs.getString("ai_base_url", "")?.takeUnless { it.isBlank() } ?: DEFAULT_AI_BASE_URL
+        val baseUrl = prefs.getString("ai_base_url", "") ?: ""
         val apiKey = secret.read()
-        val model = prefs.getString("ai_model", "")?.takeUnless { it.isBlank() } ?: DEFAULT_AI_MODEL
+        val model = prefs.getString("ai_model", "") ?: ""
         val customCategoriesJson = prefs.getString("custom_categories", null)
         val customCategories = if (customCategoriesJson == null) {
             val seeded = JSONArray(INITIAL_DEFAULT_CATEGORIES).toString()
             prefs.edit { putString("custom_categories", seeded) }
             INITIAL_DEFAULT_CATEGORIES
         } else {
-            val loaded = parseList(customCategoriesJson)
-            if (loaded.toSet() == LEGACY_DEFAULT_CATEGORIES) {
-                prefs.edit { putString("custom_categories", JSONArray(INITIAL_DEFAULT_CATEGORIES).toString()) }
-                INITIAL_DEFAULT_CATEGORIES
-            } else {
-                loaded.ifEmpty { INITIAL_DEFAULT_CATEGORIES }
-            }
+            parseList(customCategoriesJson).ifEmpty { INITIAL_DEFAULT_CATEGORIES }
         }
+        val incomeCategories = prefs.getString("income_categories", null)?.let(::parseList) ?: INITIAL_INCOME_CATEGORIES
         val categoryIconsJson = prefs.getString("custom_category_icons", "{}") ?: "{}"
-        val monthlyNotesJson = prefs.getString("monthly_notes", "{}") ?: "{}"
         val updatedAtJson = prefs.getString("updated_at_map", "{}") ?: "{}"
         val deletedCatsJson = prefs.getString("deleted_categories_map", "{}") ?: "{}"
-        val fingerprintsJson = prefs.getString("analysis_fingerprints", "{}") ?: "{}"
         val autoCategorize = prefs.getBoolean("auto_categorize", true)
 
         return AnalysisSnapshot(
@@ -164,15 +134,13 @@ class AnalysisStore(context: Context) {
             reasons = parseMap(reasonsJson),
             knowledge = knowledge,
             aiConfig = AiConfig(baseUrl, apiKey, model),
-            monthlySummaries = parseMap(summariesJson),
             customCategories = customCategories,
+            incomeCategories = incomeCategories,
+            typeOverrides = parseMap(prefs.getString("type_overrides", "{}") ?: "{}"),
             categoryIcons = parseMap(categoryIconsJson),
-            monthlyNotes = parseMap(monthlyNotesJson),
             updatedAt = parseLongMap(updatedAtJson),
             deletedCategories = parseLongMap(deletedCatsJson),
-            analysisFingerprints = parseMap(fingerprintsJson),
             manualCategories = parseList(prefs.getString("manual_categories", "[]") ?: "[]").toSet(),
-            analysisEnabled = prefs.getBoolean("analysis_enabled", true),
             autoCategorize = autoCategorize,
             aiRecords = loadAiRecords(),
         )
@@ -184,27 +152,7 @@ class AnalysisStore(context: Context) {
             val obj = runCatching { JSONObject(json) }.getOrNull() ?: return emptyMap()
             return obj.keys().asSequence().mapNotNull { key -> obj.optJSONObject(key)?.let { key to AiRecord.fromJson(it) } }.toMap()
         }
-        if (LEGACY_AI_KEYS.none(prefs::contains)) return emptyMap()
-        val fingerprints = parseMap(prefs.getString("ai_category_fingerprints", "{}") ?: "{}")
-        val confidence = parseMap(prefs.getString("ai_confidence", "{}") ?: "{}")
-        val failures = parseMap(prefs.getString("ai_category_failures", "{}") ?: "{}")
-        val consistent = parseList(prefs.getString("ai_merchant_consistent", "[]") ?: "[]").toSet()
-        val records = (fingerprints.keys + confidence.keys + failures.keys + consistent).associateWith { key ->
-            AiRecord(
-                fingerprint = fingerprints[key],
-                confidence = confidence[key]?.let(::legacyConfidencePercent),
-                failure = failures[key],
-                merchantConsistent = key in consistent,
-            )
-        }
-        // A failed write leaves the old maps in place, so the fold simply runs again next launch.
-        runCatching {
-            checkedPreferenceEdit(prefs, LEGACY_AI_KEYS + AI_RECORDS, "Could not migrate AI records") {
-                putString(AI_RECORDS, aiRecordsJson(records))
-                for (old in LEGACY_AI_KEYS) remove(old)
-            }
-        }
-        return records
+        return emptyMap()
     }
 
     private fun aiRecordsJson(records: Map<String, AiRecord>): String =
@@ -217,13 +165,6 @@ class AnalysisStore(context: Context) {
             extra()
             putString(AI_RECORDS, aiRecordsJson(clean))
         }
-    }
-
-    @Synchronized
-    fun setAnalysisEnabled(enabled: Boolean) {
-        prefs.edit { putBoolean("analysis_enabled", enabled) }
-        _snapshot.value = _snapshot.value.copy(analysisEnabled = enabled)
-        runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
     }
 
     @Synchronized
@@ -297,10 +238,10 @@ class AnalysisStore(context: Context) {
         if (!sameRequestSettings(current, input)) return emptySet()
         val valid = candidates.filter { candidate ->
             val key = candidate.transaction.key
-            BudgetAnalyzer.isSpending(candidate.transaction) &&
+            (candidate.transaction.isExpense || candidate.transaction.isIncome) &&
                 AiCategorization.fingerprint(candidate.transaction, current) == candidate.fingerprint &&
                 !candidate.transaction.classificationIsManual && untouchedSince(current, input, key) &&
-                suggestions[key]?.category in AiCategorization.categories(current)
+                AiCategorization.isValidFor(current, candidate.transaction, suggestions[key]?.category)
         }
         if (valid.isEmpty()) return emptySet()
         saveLabels(current, valid.associate { it.transaction.key to it.fingerprint }, suggestions, fromModel = true, "AI categories could not be saved")
@@ -313,9 +254,9 @@ class AnalysisStore(context: Context) {
         if (!sameRequestSettings(current, input)) return 0
         val valid = candidates.filter { candidate ->
             val key = candidate.transaction.key
-            BudgetAnalyzer.isSpending(candidate.transaction) &&
+            (candidate.transaction.isExpense || candidate.transaction.isIncome) &&
                 !candidate.transaction.classificationIsManual && untouchedSince(current, input, key) &&
-                suggestions[key]?.category in AiCategorization.categories(current)
+                AiCategorization.isValidFor(current, candidate.transaction, suggestions[key]?.category)
         }
         if (valid.isEmpty()) return 0
         saveLabels(current, valid.associate { it.transaction.key to it.fingerprint }, suggestions, fromModel = false, "Merchant categories could not be saved")
@@ -330,18 +271,19 @@ class AnalysisStore(context: Context) {
     ): Int {
         val current = _snapshot.value
         if (!sameRequestSettings(current, input)) return 0
+        val rowsByKey = rows.associateBy { it.key }
         val validKeys = suggestions.keys.filter { key ->
-            untouchedSince(current, input, key) && suggestions[key]?.category in AiCategorization.categories(current)
+            val tx = rowsByKey[key]
+            untouchedSince(current, input, key) && tx != null && AiCategorization.isValidFor(current, tx, suggestions[key]?.category)
         }
         if (validKeys.isEmpty()) return 0
-        val rowsByKey = rows.associateBy { it.key }
         val fingerprints = validKeys.associateWith { key -> rowsByKey[key]?.let { AiCategorization.fingerprint(it, current) } }
         saveLabels(current, fingerprints, suggestions, fromModel = false, "Merchant categories could not be saved")
         return validKeys.size
     }
 
     private fun sameRequestSettings(current: AnalysisSnapshot, input: AnalysisSnapshot): Boolean =
-        current.aiConfig == input.aiConfig && current.knowledge == input.knowledge && current.customCategories == input.customCategories
+        current.aiConfig == input.aiConfig && current.knowledge == input.knowledge && current.customCategories == input.customCategories && current.incomeCategories == input.incomeCategories
 
     /** The user did not pick a category or edit the note while the request ran. */
     private fun untouchedSince(current: AnalysisSnapshot, input: AnalysisSnapshot, key: String): Boolean =
@@ -434,49 +376,74 @@ class AnalysisStore(context: Context) {
         _snapshot.value = _snapshot.value.copy(aiConfig = normalized, updatedAt = currentUpdated)
     }
 
+    private fun categoryPrefs(type: TransactionType) =
+        if (type == TransactionType.INCOME) Triple("income_categories", "incomeCat:", "income:") else Triple("custom_categories", "customCat:", "")
+
     @Synchronized
-    fun addCustomCategory(category: String) {
+    fun addCustomCategory(category: String, type: TransactionType = TransactionType.EXPENSE) {
         val trimmed = category.trim()
         require(trimmed.isNotBlank()) { "Enter a category name" }
-        require(_snapshot.value.customCategories.none { it.equals(trimmed, ignoreCase = true) }) { "Category already exists" }
-        run {
-            val now = System.currentTimeMillis()
-            val currentUpdated = _snapshot.value.updatedAt.toMutableMap()
-            val currentDeleted = _snapshot.value.deletedCategories.toMutableMap()
-            currentUpdated["customCat:$trimmed"] = now
-            currentDeleted.remove(trimmed)
-            val newCats = _snapshot.value.customCategories + trimmed
-            checkedPreferenceEdit(prefs, listOf("custom_categories", "updated_at_map", "deleted_categories_map"), "Category could not be added") {
-                putString("custom_categories", JSONArray(newCats).toString())
-                putString("updated_at_map", JSONObject(currentUpdated as Map<*, *>).toString())
-                putString("deleted_categories_map", JSONObject(currentDeleted as Map<*, *>).toString())
-            }
-            _snapshot.value = _snapshot.value.copy(
-                customCategories = newCats,
-                updatedAt = currentUpdated,
-                deletedCategories = currentDeleted,
-            )
+        val current = _snapshot.value
+        require(current.categoriesFor(type).none { it.equals(trimmed, ignoreCase = true) }) { "Category already exists" }
+        val (prefKey, timePrefix, deletedPrefix) = categoryPrefs(type)
+        val updated = current.updatedAt + ("$timePrefix$trimmed" to System.currentTimeMillis())
+        val deleted = current.deletedCategories - "$deletedPrefix$trimmed"
+        val list = current.categoriesFor(type) + trimmed
+        checkedPreferenceEdit(prefs, listOf(prefKey, "updated_at_map", "deleted_categories_map"), "Category could not be added") {
+            putString(prefKey, JSONArray(list).toString())
+            putString("updated_at_map", JSONObject(updated as Map<*, *>).toString())
+            putString("deleted_categories_map", JSONObject(deleted as Map<*, *>).toString())
         }
+        _snapshot.value = if (type == TransactionType.INCOME) current.copy(incomeCategories = list, updatedAt = updated, deletedCategories = deleted)
+        else current.copy(customCategories = list, updatedAt = updated, deletedCategories = deleted)
     }
 
     @Synchronized
-    fun removeCustomCategory(category: String) {
-        val now = System.currentTimeMillis()
-        val currentIcons = _snapshot.value.categoryIcons.toMutableMap()
-        val currentDeleted = _snapshot.value.deletedCategories.toMutableMap()
-        currentIcons.remove(category)
-        currentDeleted[category] = now
-        val newCats = _snapshot.value.customCategories.filter { it != category }
+    fun removeCustomCategory(category: String, type: TransactionType = TransactionType.EXPENSE) {
+        val current = _snapshot.value
+        val (prefKey, _, deletedPrefix) = categoryPrefs(type)
+        val icons = current.categoryIcons - category
+        val deleted = current.deletedCategories + ("$deletedPrefix$category" to System.currentTimeMillis())
+        val list = current.categoriesFor(type).filter { it != category }
         prefs.edit {
-            putString("custom_category_icons", JSONObject(currentIcons as Map<*, *>).toString())
-            putString("custom_categories", JSONArray(newCats).toString())
-            putString("deleted_categories_map", JSONObject(currentDeleted as Map<*, *>).toString())
+            putString("custom_category_icons", JSONObject(icons as Map<*, *>).toString())
+            putString(prefKey, JSONArray(list).toString())
+            putString("deleted_categories_map", JSONObject(deleted as Map<*, *>).toString())
         }
-        _snapshot.value = _snapshot.value.copy(
-            customCategories = newCats,
-            categoryIcons = currentIcons,
-            deletedCategories = currentDeleted,
-        )
+        _snapshot.value = if (type == TransactionType.INCOME) current.copy(incomeCategories = list, categoryIcons = icons, deletedCategories = deleted)
+        else current.copy(customCategories = list, categoryIcons = icons, deletedCategories = deleted)
+    }
+
+    /** Reclassifies a payment as transfer, expense or income; null returns it to the source-derived type. */
+    @Synchronized
+    fun setTypeOverride(key: String, type: TransactionType?) {
+        val current = _snapshot.value
+        val overrides = if (type == null) current.typeOverrides - key else current.typeOverrides + (key to type.name)
+        val updated = current.updatedAt + ("type:$key" to System.currentTimeMillis())
+        checkedPreferenceEdit(prefs, listOf("type_overrides", "updated_at_map"), "Type could not be saved") {
+            putString("type_overrides", JSONObject(overrides as Map<*, *>).toString())
+            putString("updated_at_map", JSONObject(updated as Map<*, *>).toString())
+        }
+        _snapshot.value = current.copy(typeOverrides = overrides, updatedAt = updated)
+    }
+
+    /** Removes a payment's category and its manual flag; the tombstone lets sync propagate the removal. */
+    @Synchronized
+    fun clearClassification(key: String) {
+        val current = _snapshot.value
+        if (key !in current.categories && key !in current.manualCategories) return
+        val categories = current.categories - key
+        val reasons = current.reasons - key
+        val manual = current.manualCategories - key
+        val updated = current.updatedAt + ("cat:$key" to System.currentTimeMillis())
+        checkedPreferenceEdit(prefs, listOf("categories", "reasons", "manual_categories", "updated_at_map"), "Category could not be saved") {
+            putString("categories", JSONObject(categories as Map<*, *>).toString())
+            putString("reasons", JSONObject(reasons as Map<*, *>).toString())
+            putString("manual_categories", JSONArray(manual.toList()).toString())
+            putString("updated_at_map", JSONObject(updated as Map<*, *>).toString())
+        }
+        _snapshot.value = current.copy(categories = categories, reasons = reasons, manualCategories = manual, updatedAt = updated)
+        runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
     }
 
     @Synchronized
@@ -503,11 +470,13 @@ class AnalysisStore(context: Context) {
             putString("custom_category_icons", "{}")
             putString("deleted_categories_map", "{}")
             putString("custom_categories", JSONArray(INITIAL_DEFAULT_CATEGORIES).toString())
+            putString("income_categories", JSONArray(INITIAL_INCOME_CATEGORIES).toString())
         }
         _snapshot.value = _snapshot.value.copy(
             categoryIcons = emptyMap(),
             deletedCategories = emptyMap(),
             customCategories = INITIAL_DEFAULT_CATEGORIES,
+            incomeCategories = INITIAL_INCOME_CATEGORIES,
         )
     }
 
@@ -526,13 +495,12 @@ class AnalysisStore(context: Context) {
             putString("knowledge", merged.knowledge)
             putString("ai_base_url", merged.aiConfig.baseUrl)
             putString("ai_model", merged.aiConfig.model)
-            putString("monthly_summaries", JSONObject(merged.monthlySummaries as Map<*, *>).toString())
             putString("custom_categories", JSONArray(merged.customCategories).toString())
+            putString("income_categories", JSONArray(merged.incomeCategories).toString())
+            putString("type_overrides", JSONObject(merged.typeOverrides as Map<*, *>).toString())
             putString("custom_category_icons", JSONObject(merged.categoryIcons as Map<*, *>).toString())
-            putString("monthly_notes", JSONObject(merged.monthlyNotes as Map<*, *>).toString())
             putString("updated_at_map", JSONObject(merged.updatedAt as Map<*, *>).toString())
             putString("deleted_categories_map", JSONObject(merged.deletedCategories as Map<*, *>).toString())
-            putString("analysis_fingerprints", JSONObject(merged.analysisFingerprints as Map<*, *>).toString())
             putString("manual_categories", JSONArray(merged.manualCategories.toList()).toString())
         }
         _snapshot.value = merged
@@ -546,18 +514,18 @@ class AnalysisStore(context: Context) {
             val importedNotes = jsonObjectToMap(analysis.optJSONObject("userNotes"))
             val importedCategories = jsonObjectToMap(analysis.optJSONObject("categories"))
             val importedReasons = jsonObjectToMap(analysis.optJSONObject("reasons"))
-            val importedMonthlyNotes = jsonObjectToMap(analysis.optJSONObject("monthlyNotes"))
-            val importedSummaries = jsonObjectToMap(analysis.optJSONObject("monthlySummaries"))
             val importedIcons = jsonObjectToMap(analysis.optJSONObject("categoryIcons"))
             val importedManual = jsonArrayToList(analysis.optJSONArray("manualCategories")).toSet()
             val importedCustom = jsonArrayToList(analysis.optJSONArray("customCategories"))
+            val importedIncome = jsonArrayToList(analysis.optJSONArray("incomeCategories"))
+            val importedTypes = jsonObjectToMap(analysis.optJSONObject("typeOverrides"))
             val knowledge = analysis.optString("knowledge")
             next = next.copy(
                 knowledge = knowledge.ifBlank { next.knowledge },
                 customCategories = (importedCustom + next.customCategories).distinctBy { it.lowercase() },
+                incomeCategories = (importedIncome + next.incomeCategories).distinctBy { it.lowercase() },
+                typeOverrides = next.typeOverrides + importedTypes,
                 categoryIcons = next.categoryIcons + importedIcons,
-                monthlyNotes = next.monthlyNotes + importedMonthlyNotes,
-                monthlySummaries = next.monthlySummaries + importedSummaries,
                 userNotes = next.userNotes + importedNotes,
                 categories = next.categories + importedCategories,
                 reasons = next.reasons + importedReasons,
@@ -586,9 +554,9 @@ class AnalysisStore(context: Context) {
         prefs.edit {
             putString("knowledge", next.knowledge)
             putString("custom_categories", JSONArray(next.customCategories).toString())
+            putString("income_categories", JSONArray(next.incomeCategories).toString())
+            putString("type_overrides", JSONObject(next.typeOverrides as Map<*, *>).toString())
             putString("custom_category_icons", JSONObject(next.categoryIcons as Map<*, *>).toString())
-            putString("monthly_notes", JSONObject(next.monthlyNotes as Map<*, *>).toString())
-            putString("monthly_summaries", JSONObject(next.monthlySummaries as Map<*, *>).toString())
             putString("user_notes", JSONObject(next.userNotes as Map<*, *>).toString())
             putString("categories", JSONObject(next.categories as Map<*, *>).toString())
             putString("reasons", JSONObject(next.reasons as Map<*, *>).toString())
@@ -597,40 +565,6 @@ class AnalysisStore(context: Context) {
         }
         _snapshot.value = next
         runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
-    }
-
-    @Synchronized
-    fun migrateMetadata(transactions: List<net.wastu.artha.core.model.UnifiedTransaction>) {
-        val migrated = TransactionMetadata.migrate(_snapshot.value, transactions)
-        if (migrated != _snapshot.value) applyMergedSnapshot(migrated)
-    }
-
-    /** One-shot repair against reconciled rows: earlier builds re-hashed raw rows, leaving labels looking stale. */
-    @Synchronized
-    fun migrateAiCategoryFingerprints(rows: List<net.wastu.artha.core.model.UnifiedTransaction>): Int {
-        if (getFingerprintVersion() >= AI_FINGERPRINT_VERSION) return 0
-        if (rows.isEmpty()) return 0
-        val current = _snapshot.value
-        val updates = mutableMapOf<String, String>()
-        for (tx in rows) {
-            val key = tx.key
-            val hasLabel = current.reasons[key]?.startsWith(AI_REASON_PREFIX) == true ||
-                current.reasons[key]?.startsWith(MERCHANT_REASON_PREFIX) == true
-            if (hasLabel) {
-                val newFp = AiCategorization.fingerprint(tx, current)
-                if (current.aiCategoryFingerprints[key] != newFp) {
-                    updates[key] = newFp
-                }
-            }
-        }
-        val records = current.aiRecords + updates.mapValues { (key, fp) -> (current.aiRecords[key] ?: AiRecord()).copy(fingerprint = fp) }
-        saveAiRecords(records, "Fingerprints could not be migrated", listOf(PREF_AI_FINGERPRINT_VERSION)) {
-            putString(PREF_AI_FINGERPRINT_VERSION, AI_FINGERPRINT_VERSION.toString())
-        }
-        if (updates.isNotEmpty()) {
-            _snapshot.value = current.copy(aiRecords = records)
-        }
-        return updates.size
     }
 
     private fun jsonObjectToMap(obj: JSONObject?): Map<String, String> {

@@ -5,7 +5,6 @@ import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.Pocket
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
-import net.wastu.artha.data.analysis.CategoryConstants
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -70,7 +69,7 @@ class LedgerReconcilerTest {
         assertEquals(1, result.size)
         val fused = result.first()
         assertEquals("Pocket Transfer: Business Pocket to Main Pocket", fused.description)
-        assertEquals(CategoryConstants.INVESTMENTS_TRANSFERS, fused.category)
+        assertEquals(net.wastu.artha.core.model.TransactionType.TRANSFER, fused.type)
         assertTrue(fused.rawPayload.contains("isPocketTransfer"))
     }
 
