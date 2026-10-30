@@ -88,6 +88,7 @@ class GojekScreenSync(
 
     suspend fun run(gojekImportEnabled: Boolean): Result = withContext(Dispatchers.IO) {
         if (!gojekImportEnabled) return@withContext skipped(Result.SKIPPED, "gojek import disabled")
+        if (android.os.Build.VERSION.SDK_INT < 33) return@withContext skipped(Result.ROOT_UNAVAILABLE, "screen walk needs Android 13")
         if (shouldAbort() || !isInteractive()) return@withContext skipped(Result.SKIPPED_SCREEN_OFF, "display is off")
         val installed = sh("pm path com.gojek.app 2>/dev/null")
             ?: return@withContext skipped(Result.ROOT_UNAVAILABLE, "no root shell")

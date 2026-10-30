@@ -1,6 +1,7 @@
 package net.wastu.artha.walk;
 
 import android.accessibilityservice.AccessibilityServiceInfo;
+import android.annotation.SuppressLint;
 import android.app.UiAutomation;
 import android.content.Context;
 import android.graphics.PixelFormat;
@@ -13,6 +14,7 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
 import android.util.SparseArray;
+import androidx.annotation.RequiresApi;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityWindowInfo;
 import java.io.BufferedReader;
@@ -32,7 +34,12 @@ import java.util.concurrent.TimeUnit;
  * Commands arrive one per line on stdin; every reply is one line starting with {@code ok} or
  * {@code err}. Dumps use the {@code uiautomator dump} XML shape. EOF or the watchdog releases the
  * display, which destroys whatever Gojek showed on it.
+ *
+ * <p>It runs as root outside any app, where the hidden display and UiAutomation APIs are the
+ * whole point, and its display flags only exist from Android 13.
  */
+@RequiresApi(33)
+@SuppressLint({"PrivateApi", "DiscouragedPrivateApi", "SoonBlockedPrivateApi", "WrongConstant"})
 public final class GojekScreenHelper {
     private static final int WIDTH = 1080;
     private static final int HEIGHT = 2340;
