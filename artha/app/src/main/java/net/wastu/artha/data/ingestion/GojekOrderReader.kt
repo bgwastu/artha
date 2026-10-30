@@ -20,7 +20,7 @@ import net.wastu.artha.data.providers.AccountStatus
 import org.json.JSONObject
 
 /** Read-only native source snapshots and GETs; no handmade exports or session refresh. */
-internal class GojekOrderReader(private val files: RootFileReader, private val capture: ArthaCaptureReader = ArthaCaptureReader { files.copyFilteredToSandbox("/data/data/com.gojek.app/files/artha_gojek_capture.jsonl", ArthaCaptureReader.HISTORY_MARKER) }) {
+internal class GojekOrderReader(private val files: RootFileReader, private val screen: GojekScreenStore = GojekScreenStore(files.context.filesDir)) {
     suspend fun transactions(): List<UnifiedTransaction> = withContext(Dispatchers.IO) {
         val rows = ImportRows()
         val details = linkedMapOf<String, JSONObject>()
@@ -74,8 +74,7 @@ internal class GojekOrderReader(private val files: RootFileReader, private val c
         if (loginStale && !cachedPayments) {
             throw ProviderReadException(AccountStatus.NEEDS_LOGIN, GOJEK_NEEDS_LOGIN_MESSAGE)
         }
-        // No app launch ever happens: imports rely on the hook capture (which grows whenever
-        // the user browses GoPay history) plus the warmed OkHttp cache.
+        // Imports never launch Gojek: the screen walk stores what it read, plus the warmed OkHttp cache.
 
         val started = System.nanoTime()
         var historyComplete = false
@@ -94,17 +93,13 @@ internal class GojekOrderReader(private val files: RootFileReader, private val c
                 rows.issue(GOJEK_NEEDS_LOGIN_MESSAGE)
             }
         }
-        // The capture (Gojek-hook) rows are an authoritative fallback when the live/cached
-        // history route is unavailable; reading them first lets the import summary know
-        // whether the capture filled the gap (source status stays clean when it did).
-        val captureRows = try { capture.read() }
+        // Rows the screen walk read from GoPay's own history screens. They carry the same
+        // `gopay:<ID transaksi>` identity as the API rows, so rows the ledger already has are ignored.
+        val screenRows = try { screen.transactions() }
         catch (cancelled: CancellationException) { throw cancelled }
-        catch (t: Throwable) { android.util.Log.w("ArthaCapture", "capture read failed", t); null }
-        val captureContributed = captureRows != null && captureRows.transactions.isNotEmpty()
-        if (captureRows != null) {
-            for (row in captureRows.transactions) rows.transactions += row
-            for (note in captureRows.notes) android.util.Log.i("ArthaCapture", note)
-        }
+        catch (t: Exception) { android.util.Log.w("ArthaScreen", "screen store read failed", t); emptyList() }
+        val screenContributed = screenRows.isNotEmpty()
+        for (row in screenRows) if (rows.transactions.none { it.key == row.key }) rows.transactions += row
         if (liveHeaders != null) {
             val headers = liveHeaders
             try {
@@ -130,7 +125,7 @@ internal class GojekOrderReader(private val files: RootFileReader, private val c
                     // The gateway rejects unsigned requests for every gopayapi host; further live
                     // calls would each repeat the same rejections within the 60s import window.
                     gatewayEnforced = true
-                    if (!captureContributed) rows.issue("GoPay live history refresh unavailable; capture kept")
+                    if (!screenContributed) rows.issue("GoPay live history refresh unavailable; screen history kept")
                 } else {
                     rows.issue(e)
                 }
@@ -161,7 +156,7 @@ internal class GojekOrderReader(private val files: RootFileReader, private val c
             catch (e: ProviderReadException) { rows.issue(e) }
             catch (_: Exception) { rows.issue("One GoPay detail could not be matched to its settled payment") }
         }
-        if (cachedPayments && !historyComplete && !captureContributed) {
+        if (cachedPayments && !historyComplete && !screenContributed) {
             rows.issue("Cached GoPay history covers only pages previously opened in Gojek")
         }
         // A clean failure with no rows still throws ProviderReadException to the caller.

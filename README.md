@@ -23,7 +23,7 @@ Artha helps people in Indonesia understand their spending on rooted Android phon
 
 ## Build
 
-Use JDK 21: `./gradlew -p artha testDebugUnitTest assembleDebug`. Reading provider data needs root. The Gojek hook needs an Xposed framework.
+Use JDK 21: `./gradlew -p artha testDebugUnitTest assembleDebug`. Reading provider data needs root.
 
 For demos, `./gradlew -p artha assembleDemo` builds "Artha Demo" (`net.wastu.artha.demo`). It installs beside the real app with its own empty data, rebuilds itself each day with a year of invented transactions ending today, and never syncs, so your real ledger is not touched.
 

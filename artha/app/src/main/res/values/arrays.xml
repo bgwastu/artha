@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <array name="xposedscope">
-        <item>com.gojek.app</item>
-        <item>com.gojek.gopay</item>
-        <item>com.shopee.id</item>
-    </array>
-</resources>

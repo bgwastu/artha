@@ -62,7 +62,7 @@ object LedgerReconciler {
             tx.provider == Provider.SHOPEE && tx.direction == Direction.CREDIT && origin == "shopee-refund-api" && settled &&
                 payload.optString("paymentEvidence") == "settled-provider-refund" && payload.optLong("sourceRefundStatus") == 5L &&
                 payload.optBoolean("verifiedRefund") || tx.provider == Provider.GOJEK && origin == "gopay-order-history" &&
-            (settled && payload.optString("paymentEvidence") == "settled-wallet-history" || legacyGoPay) ||
+            (settled && payload.optString("paymentEvidence") in setOf("settled-wallet-history", "gopay-screen") || legacyGoPay) ||
             tx.provider == Provider.GRAB && origin == "grab-wallet-api" &&
             (settled && payload.optString("paymentEvidence") == "settled-charge-history" || legacyGrabCharge && tx.direction == Direction.DEBIT)
         val funding = payload.optBoolean("isWalletFunding") || payload.optBoolean("isPocketTransfer") || internal ||

@@ -38,38 +38,6 @@ class RootFileReader(internal val context: Context) {
         ?: throw ProviderReadException(AccountStatus.ERROR, "Provider file missing. Open its app to populate local history.")
 
     /**
-     * Greps a large provider-owned capture file into Artha's own sandbox so callers can stream
-     * it line by line without loading megabytes of base64 into memory. Only the selected lines
-     * are copied; the sandbox copy is overwritten on each call.
-     */
-    suspend fun copyFilteredToSandbox(sourcePath: String, marker: String): File? = withContext(Dispatchers.IO) {
-        validate(sourcePath)
-        coroutineContext.ensureActive()
-        val destination = File(context.filesDir, "sandbox-capture.jsonl")
-        val temporary = File(context.filesDir, "sandbox-capture.tmp")
-        Shell.Builder.create().setContext(context).setTimeout(30).build("su", "-M", "-c", "/system/bin/sh").use { shell ->
-            if (!shell.isRoot) return@withContext null
-            val output = mutableListOf<String>()
-            val result = shell.newJob().to(output, mutableListOf()).add(
-                // Both the live capture and its rotated .1 file may hold newer/older pages; grep
-                // across both so the dedupe at parse time sees the complete page set.
-                // Truncate first: a copy interrupted by the shell timeout must not leave lines behind.
-                "if [ -f '$sourcePath' ]; then : > '$temporary'; " +
-                    "for src in '$sourcePath' '$sourcePath.1'; do " +
-                    "grep -F '$marker' \"\$src\" >> '$temporary' 2>/dev/null; done; " +
-                    "chown ${Process.myUid()}:${Process.myUid()} '$temporary'; " +
-                    "chmod 600 '$temporary'; mv '$temporary' '$destination'; " +
-                    "stat -c %s '$destination'; else echo MISSING; fi"
-            ).exec()
-            if (!result.isSuccess) return@withContext null
-            when (output.lastOrNull()?.trim()) {
-                null, "", "MISSING" -> null
-                else -> { check(destination.exists()) { "Capture snapshot unavailable" }; destination }
-            }
-        }
-    }
-
-    /**
      * Copies one validated provider file into Artha's private sandbox as root, so callers read it
      * once without base64 copies or content re-reads. The returned file belongs to the caller: it
      * must be deleted after use. Null when the source file does not exist.

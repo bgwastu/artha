@@ -51,7 +51,8 @@ class ArthaViewModel(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val spendingState: StateFlow<SpendingState>? = null,
     private val retrySpending: (() -> Unit)? = null,
-    private val gojekFlashRefresh: (() -> Unit)? = null,
+    /** Walks GoPay's history screens, imports, and returns the message to show. */
+    private val gojekFlashRefresh: (suspend () -> String)? = null,
     /** Test seam; null sends batches to the configured model with the saved rows as userExamples. */
     private val categorize: (suspend (AiConfig, AnalysisSnapshot, List<CategoryCandidate>) -> Map<String, CategorySuggestion>)? = null,
     private val fromMemoryAction: (List<UnifiedTransaction>, AnalysisSnapshot) -> Map<String, CategorySuggestion> = AiCategorization::fromMemory,
@@ -304,10 +305,9 @@ class ArthaViewModel(
 
     fun refresh() { importHistory(null) }
     fun syncProvider(provider: Provider) { importHistory(provider) }
-    /** Gojek needs its visible history walked first; the host decides how (root UI automation). */
-    /** Manual GOJEK refresh: invisible flash + import now; when the screen is on it defers to the next idle window. */
-    fun requestGojekRefresh() { (gojekFlashRefresh ?: { syncProvider(Provider.GOJEK) }).invoke() }
-    private fun importHistory(provider: Provider?, automatic: Boolean = false) {
+    /** Gojek needs its history screens walked first; the progress and feedback match any other source sync. */
+    fun requestGojekRefresh() { importHistory(Provider.GOJEK, walk = gojekFlashRefresh) }
+    private fun importHistory(provider: Provider?, automatic: Boolean = false, walk: (suspend () -> String)? = null) {
         if (automatic && preferences != null && importEnabled.value.none { preferences.isStale(it, clock.millis()) }) return
         val previous = ingestionJob?.takeIf { it.isActive }
         if (previous != null && (automatic || !_automaticImportActive.value)) {
@@ -327,6 +327,10 @@ class ArthaViewModel(
                 _rootGate.value = if (granted) RootGateState.GRANTED else RootGateState.DENIED
                 if (!granted) {
                     if (!automatic) _importFeedback.value = ImportFeedback(++importSequence, provider, "Root access unavailable. Allow root, then try again", true)
+                    return@launch
+                }
+                if (walk != null && !net.wastu.artha.BuildConfig.DEMO) {
+                    _importFeedback.value = ImportFeedback(++importSequence, provider, walk())
                     return@launch
                 }
                 val result = if (net.wastu.artha.BuildConfig.DEMO) simulateDemoSync(provider)

@@ -22,13 +22,6 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Artha">
-        <!-- Xposed-module declaration so Vector/LSPosed can load ArthaHookMain
-             inside whitelisted targets (Gojek now, Shopee later). -->
-        <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription"
-            android:value="Artha transaction capture: reads GoPay/Gojek (and later Shopee) history responses for Artha's ledger" />
-        <meta-data android:name="xposedminversion" android:value="82" />
-        <meta-data android:name="xposedscope" android:resource="@array/xposedscope" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

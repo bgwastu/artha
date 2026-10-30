@@ -1,19 +1,23 @@
 package net.wastu.artha.data.sync
 
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import net.wastu.artha.core.model.Provider
+import net.wastu.artha.core.model.UnifiedTransaction
+import net.wastu.artha.data.ingestion.GojekScreenStore
 import net.wastu.artha.data.ingestion.RootFileReader
 import net.wastu.artha.data.providers.ProviderPreferences
 
 /**
- * When a GoPay flash may launch Gojek, how long to wait after the previous successful
- * launch, and which outcomes count as that launch. Skips and aborts do not block the next try.
+ * How long to wait after the previous completed GoPay walk, and which outcomes count as one.
+ * Skips and aborts do not block the next try.
  */
 internal object GojekFlashPolicy {
     const val COOLDOWN_MILLIS = 15 * 60_000L
-    const val SLEEP_CONFIRM_MILLIS = 2_000L
 
     fun cooldownActive(result: String?, lastMillis: Long?, now: Long): Boolean {
         if (result != "FLASHED" && result != "QUIET") return false
@@ -22,36 +26,37 @@ internal object GojekFlashPolicy {
         return now - at < COOLDOWN_MILLIS
     }
 
-    fun recordsAsLastRun(result: GojekFlashSync.Result): Boolean =
-        result == GojekFlashSync.Result.FLASHED || result == GojekFlashSync.Result.QUIET
+    fun recordsAsLastRun(result: GojekScreenSync.Result): Boolean =
+        result == GojekScreenSync.Result.FLASHED || result == GojekScreenSync.Result.QUIET
 }
 
 /**
- * One in-flight Gojek launch shared by screen-off, the periodic job, and manual refresh.
+ * One in-flight GoPay walk shared by the periodic job and manual refresh.
  */
 class GojekFlashController(
     private val reader: RootFileReader,
     private val preferences: ProviderPreferences,
     private val isInteractive: () -> Boolean,
+    private val ledgerPayments: suspend () -> List<UnifiedTransaction>,
 ) {
     private val running = AtomicBoolean(false)
     private val abort = AtomicBoolean(false)
 
     fun abortIfRunning() { abort.set(true) }
 
-    suspend fun run(gojekImportEnabled: Boolean, ignoreCooldown: Boolean = false): GojekFlashSync.Result {
+    suspend fun run(gojekImportEnabled: Boolean, ignoreCooldown: Boolean = false): GojekScreenSync.Result {
         if (!running.compareAndSet(false, true)) {
-            android.util.Log.i("ArthaFlash", "BUSY: already running")
-            return GojekFlashSync.Result.BUSY
+            android.util.Log.i("ArthaScreen", "BUSY: already running")
+            return GojekScreenSync.Result.BUSY
         }
         abort.set(false)
         try {
             val last = preferences.gojekFlash.value
             if (!ignoreCooldown && GojekFlashPolicy.cooldownActive(last.result, last.millis, System.currentTimeMillis())) {
-                android.util.Log.i("ArthaFlash", "SKIPPED_COOLDOWN")
-                return GojekFlashSync.Result.SKIPPED_COOLDOWN
+                android.util.Log.i("ArthaScreen", "SKIPPED_COOLDOWN")
+                return GojekScreenSync.Result.SKIPPED_COOLDOWN
             }
-            val result = GojekFlashSync(reader, isInteractive, abort::get).run(gojekImportEnabled)
+            val result = GojekScreenSync(reader, isInteractive, abort::get, ledgerPayments).run(gojekImportEnabled)
             if (GojekFlashPolicy.recordsAsLastRun(result)) {
                 preferences.recordGojekFlash(result.name)
             }
@@ -63,90 +68,79 @@ class GojekFlashController(
 }
 
 /**
- * Invisible GoPay history refresh for background imports.
+ * Reads new GoPay payments from Gojek's own history screens, invisibly.
  *
- * Launches Gojek's own history screen through its `gojek://gopay/history` deep link while the
- * display is sleeping: the activity runs behind the keyguard, fetches page one with Gojek's own
- * signed requests, and the in-process capture hook records the responses. Cleanup force-stops
- * Gojek after a short fsync window so a lockscreen or a fast screen-on cannot leave it in front.
- * [isInteractive] is [android.os.PowerManager.isInteractive] — cheaper than dumpsys, and it
- * matches what the user actually sees.
+ * A root helper opens an always-unlocked virtual display with its own focus, Gojek's history
+ * deep link runs there, and [GojekScreenWalk] reads the list and the detail of each payment the
+ * ledger lacks into [GojekScreenStore]. Android pauses that display while the phone sleeps, so
+ * the walk only runs while the screen is on; the user's own screen and focus stay untouched.
  */
-class GojekFlashSync(
+class GojekScreenSync(
     private val reader: RootFileReader,
     private val isInteractive: () -> Boolean,
     private val shouldAbort: () -> Boolean,
+    private val ledgerPayments: suspend () -> List<UnifiedTransaction>,
 ) {
 
     enum class Result {
-        FLASHED, QUIET, ABORTED, SKIPPED_SCREEN_ON, ROOT_UNAVAILABLE, SKIPPED, SKIPPED_COOLDOWN, BUSY,
+        FLASHED, QUIET, ABORTED, SKIPPED_SCREEN_OFF, SKIPPED_GOJEK_IN_USE, ROOT_UNAVAILABLE, SKIPPED, SKIPPED_COOLDOWN, BUSY,
     }
 
-    /**
-     * Returns the trigger outcome for logging; a missing capture is not an error because the
-     * next import reports provider state from the same data the walk would gather.
-     */
     suspend fun run(gojekImportEnabled: Boolean): Result = withContext(Dispatchers.IO) {
         if (!gojekImportEnabled) return@withContext skipped(Result.SKIPPED, "gojek import disabled")
-        if (shouldAbort() || isInteractive()) {
-            return@withContext skipped(Result.SKIPPED_SCREEN_ON, "display is interactive")
-        }
+        if (shouldAbort() || !isInteractive()) return@withContext skipped(Result.SKIPPED_SCREEN_OFF, "display is off")
         val installed = sh("pm path com.gojek.app 2>/dev/null")
             ?: return@withContext skipped(Result.ROOT_UNAVAILABLE, "no root shell")
-        if (installed.none { it.startsWith("package:") }) {
-            return@withContext skipped(Result.SKIPPED, "gojek not installed")
-        }
+        if (installed.none { it.startsWith("package:") }) return@withContext skipped(Result.SKIPPED, "gojek not installed")
+        if (gojekResumed()) return@withContext skipped(Result.SKIPPED_GOJEK_IN_USE, "gojek is on screen")
 
-        val before = latestMarkerTimestamp()
-        log("launch: newest captured marker ts=$before")
-        sh("am start --activity-exclude-from-recents -a android.intent.action.VIEW -d '$DEEP_LINK' com.gojek.app >/dev/null 2>&1")
-
-        var grew = false
-        var woken = false
-        for (round in 0 until POLL_ROUNDS) {
-            if (shouldAbort() || isInteractive()) { woken = true; break }
-            delay(POLL_INTERVAL_MILLIS)
-            if (latestMarkerTimestamp() > before) { grew = true; break }
-        }
-        if (grew && !woken) {
-            var remaining = BURST_SETTLE_MILLIS
-            while (remaining > 0) {
-                if (shouldAbort() || isInteractive()) { woken = true; break }
-                delay(BURST_SLICE_MILLIS)
-                remaining -= BURST_SLICE_MILLIS
+        val store = GojekScreenStore(reader.context.filesDir)
+        val zone = ZoneId.systemDefault()
+        val known = ledgerPayments().filter { it.provider == Provider.GOJEK && it.providerTransactionId.startsWith("gopay:") } +
+            store.transactions()
+        // A fresh Gojek process starts on the walk's display instead of moving a background task there.
+        sh("am force-stop com.gojek.app")
+        val session = RootScreenSession.start(reader.context.applicationInfo.sourceDir)
+            ?: return@withContext skipped(Result.ROOT_UNAVAILABLE, "screen helper did not start")
+        val outcome = try {
+            if (!session.open()) return@withContext skipped(Result.ABORTED, "virtual display unavailable")
+            if (!session.launch(DEEP_LINK)) return@withContext skipped(Result.ABORTED, "history deep link failed")
+            GojekScreenWalk(
+                screen = session,
+                known = known,
+                skipped = store.skipped(),
+                backfill = store.backfillPending,
+                zone = zone,
+                today = LocalDate.now(zone),
+                shouldAbort = { shouldAbort() || !isInteractive() },
+                onPayment = store::append,
+                onSkip = store::skip,
+            ).run()
+        } finally {
+            // Cleanup must finish even when the caller is cancelled.
+            withContext(NonCancellable) {
+                session.close()
+                // Leave Gojek alone if the user opened it meanwhile; otherwise retire the walk's process.
+                if (!gojekResumed()) sh("am force-stop com.gojek.app")
             }
-        } else if (!grew && !woken) {
-            log("quiet: no order-history rows arrived during the settle window")
         }
-        closeGojek()
+        log("walk: $outcome")
+        when (outcome.stop) {
+            GojekScreenWalk.Stop.DETAIL_BUDGET -> store.backfillPending = true
+            GojekScreenWalk.Stop.CAUGHT_UP, GojekScreenWalk.Stop.END_OF_LIST -> store.backfillPending = false
+            else -> Unit
+        }
         when {
-            grew -> {
-                log("flashed: newest marker ts=${latestMarkerTimestamp()}")
-                Result.FLASHED
-            }
-            woken -> skipped(Result.ABORTED, "display woke before capture settled")
-            else -> {
-                log("done: quiet")
-                Result.QUIET
-            }
+            outcome.stored > 0 -> Result.FLASHED
+            outcome.stop == GojekScreenWalk.Stop.ABORTED || outcome.stop == GojekScreenWalk.Stop.LIST_UNREADABLE -> Result.ABORTED
+            else -> Result.QUIET
         }
     }
 
-    /** Force-stop is the close path: HOME does not retire a keyguard-hidden Gojek, and it
-     * steals the foreground if the user already woke the phone. */
-    private suspend fun closeGojek() {
-        delay(HOOK_FLUSH_MILLIS)
-        sh("am force-stop com.gojek.app >/dev/null 2>&1")
-        log("cleanup: force-stopped Gojek")
-    }
-
-    /**
-     * Newest hook-captured page-one timestamp. Rotation only evicts old rows, so a ts increase
-     * stays a reliable growth signal while row counts are not (a rotate rewrites `.1`).
-     */
-    private suspend fun latestMarkerTimestamp(): Long =
-        sh("grep -h '$MARKER' /data/data/com.gojek.app/files/artha_gojek_capture.jsonl.1 /data/data/com.gojek.app/files/artha_gojek_capture.jsonl 2>/dev/null | tail -1 | head -c 96 | grep -o '\"ts\":[0-9]*'")
-            ?.firstOrNull()?.filter(Char::isDigit)?.toLongOrNull() ?: 0L
+    /** True when a Gojek activity is resumed on the user's display, which means they have it open. */
+    private suspend fun gojekResumed(): Boolean =
+        sh("dumpsys activity activities | awk '/^Display #/ { d = \$2 } /ResumedActivity/ && /com\\.gojek\\.app/ && d == \"#0\" { n++ } END { print n + 0 }'")
+            ?.firstOrNull()?.trim()?.toIntOrNull()?.let { it > 0 } ?: false
 
     private suspend fun sh(command: String): List<String>? = reader.executeCommandWithOutput(command)
 
@@ -155,14 +149,7 @@ class GojekFlashSync(
     private fun skipped(result: Result, why: String): Result = log("$result: $why").let { result }
 
     private companion object {
-        const val TAG = "ArthaFlash"
+        const val TAG = "ArthaScreen"
         const val DEEP_LINK = "gojek://gopay/history"
-        const val MARKER = "customer.gopayapi.com/v3/users/order-history"
-
-        const val POLL_ROUNDS = 6
-        const val POLL_INTERVAL_MILLIS = 1_000L
-        const val BURST_SETTLE_MILLIS = 2_500L
-        const val BURST_SLICE_MILLIS = 500L
-        const val HOOK_FLUSH_MILLIS = 400L
     }
 }

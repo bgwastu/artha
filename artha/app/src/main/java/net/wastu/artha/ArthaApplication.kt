@@ -15,8 +15,7 @@ import net.wastu.artha.core.model.Provider
 import net.wastu.artha.data.analysis.SpendingState
 import net.wastu.artha.data.sync.BackgroundSyncScheduler
 import net.wastu.artha.data.sync.GojekFlashController
-import net.wastu.artha.data.sync.GojekFlashSync
-import net.wastu.artha.data.sync.SleepFlashListener
+import net.wastu.artha.data.sync.GojekScreenSync
 import net.wastu.artha.ui.widget.AnalysisWidgetProvider
 import net.wastu.artha.ui.widget.TransactionsWidgetProvider
 
@@ -47,6 +46,7 @@ class ArthaApplication : Application() {
             net.wastu.artha.data.ingestion.RootFileReader(this),
             providerPreferences,
             { getSystemService(PowerManager::class.java)?.isInteractive == true },
+            { ledger.loadTransactions() },
         )
     }
 
@@ -73,45 +73,30 @@ class ArthaApplication : Application() {
         }
 
     /**
-     * Manual GOJEK refresh: refreshes GoPay invisibly via the deep-link flash and imports right
-     * away. When the screen is awake the flash refuses to launch, so the refresh answers with
-     * the next idle window instead of opening Gojek visibly.
+     * Manual GOJEK refresh: reads new payments from GoPay's history screens on an invisible
+     * display, imports right away, and returns the message to show. The caller owns the progress UI.
      */
-    fun syncGojekFlashNow(onResult: (String) -> Unit) {
-        applicationScope.launch {
-            if (BuildConfig.DEMO) {
-                onResult("GoPay up to date")
-                return@launch
+    suspend fun refreshGojekNow(): String {
+        if (BuildConfig.DEMO) return "GoPay up to date"
+        return try {
+            val goesEnabled = providerPreferences.importEnabled.value.contains(Provider.GOJEK)
+            when (gojekFlash.run(goesEnabled, ignoreCooldown = true)) {
+                GojekScreenSync.Result.FLASHED ->
+                    joinThenSummary(syncInBackground(Provider.GOJEK, force = true)) ?: "GoPay refreshed"
+                GojekScreenSync.Result.QUIET, GojekScreenSync.Result.ABORTED ->
+                    joinThenSummary(syncInBackground(Provider.GOJEK, force = true))?.takeIf { it.isNotBlank() } ?: "GoPay up to date"
+                GojekScreenSync.Result.SKIPPED_SCREEN_OFF -> "Turn the screen on, then try again"
+                GojekScreenSync.Result.SKIPPED_GOJEK_IN_USE -> "Close Gojek, then try again"
+                GojekScreenSync.Result.SKIPPED -> "Gojek import is disabled. Enable it in provider details"
+                GojekScreenSync.Result.ROOT_UNAVAILABLE -> "Root access unavailable. Allow root, then try again"
+                GojekScreenSync.Result.BUSY -> "A GoPay refresh is already running"
+                GojekScreenSync.Result.SKIPPED_COOLDOWN -> "GoPay already refreshed recently"
             }
-            try {
-                if (!rootAccess.verify()) {
-                    onResult("Root access unavailable. Allow root, then try again")
-                    return@launch
-                }
-                val goesEnabled = providerPreferences.importEnabled.value.contains(Provider.GOJEK)
-                val flash = gojekFlash.run(goesEnabled, ignoreCooldown = true)
-                onResult(when (flash) {
-                    GojekFlashSync.Result.FLASHED ->
-                        joinThenSummary(syncInBackground(Provider.GOJEK, force = true)) ?: "GoPay refreshed"
-                    GojekFlashSync.Result.QUIET, GojekFlashSync.Result.ABORTED ->
-                        (joinThenSummary(syncInBackground(Provider.GOJEK, force = true)) ?: "").let { if (it.isBlank()) "GoPay up to date" else it }
-                    GojekFlashSync.Result.SKIPPED_SCREEN_ON ->
-                        "GoPay syncs automatically in the background; the next refresh happens after the screen turns off"
-                    GojekFlashSync.Result.SKIPPED ->
-                        "Gojek import is disabled. Enable it in provider details"
-                    GojekFlashSync.Result.ROOT_UNAVAILABLE ->
-                        "Root access unavailable. Allow root, then try again"
-                    GojekFlashSync.Result.BUSY ->
-                        "A GoPay refresh is already running"
-                    GojekFlashSync.Result.SKIPPED_COOLDOWN ->
-                        "GoPay already refreshed recently"
-                })
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                android.util.Log.w("Artha", "GoPay refresh failed", e)
-                onResult("GoPay refresh failed. Try again")
-            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("Artha", "GoPay refresh failed", e)
+            "GoPay refresh failed. Try again"
         }
     }
     private suspend fun joinThenSummary(job: kotlinx.coroutines.Job): String? {
@@ -145,7 +130,6 @@ class ArthaApplication : Application() {
             applicationScope.launch { seedDemoLedger() }
         } else {
             BackgroundSyncScheduler.schedule(this)
-            SleepFlashListener(this).register()
         }
         applicationScope.launch {
             spending.state

@@ -141,6 +141,23 @@ class ArthaViewModelTest {
         assertEquals(false, model.refreshing.value)
     }
 
+    @Test
+    fun gojekRefreshShowsProgressForTheWholeWalkAndReportsInline() = runTest(dispatcher) {
+        val walk = CompletableDeferred<String>()
+        val model = ArthaViewModel(RootAccess { true }, { ledger }, ingest = { emptyMap() }, computationDispatcher = dispatcher,
+            gojekFlashRefresh = { walk.await() })
+        model.enterForeground(); advanceUntilIdle()
+        model.requestGojekRefresh(); advanceUntilIdle()
+        assertEquals(true, model.refreshing.value)
+        assertEquals(net.wastu.artha.core.model.Provider.GOJEK, model.requestedImportProvider.value)
+        walk.complete("1 added, 240 already saved"); advanceUntilIdle()
+        assertEquals(false, model.refreshing.value)
+        assertEquals(null, model.requestedImportProvider.value)
+        assertEquals("1 added, 240 already saved", model.importFeedback.value?.message)
+        assertEquals(net.wastu.artha.core.model.Provider.GOJEK, model.importFeedback.value?.provider)
+        model.lock()
+    }
+
     @Test fun foregroundTriggersSyncEachOpen() = runTest(dispatcher) {
         var calls = 0
         val model = ArthaViewModel(RootAccess { true }, { ledger }, ingest = { calls++; emptyMap() }, computationDispatcher = dispatcher)
