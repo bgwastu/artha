@@ -84,7 +84,7 @@ class BridgeImporter(private val context: Context) {
             }
             save(transactions)
             writeAtomically(statusFile, BridgeSourceStatus.listToJson(statuses.values).toString())
-            Log.i(TAG, "Imported ${results.entries.joinToString { "${it.key}: ${it.value}" }}")
+            net.wastu.artha.bridge.daemon.BridgeLog.i(TAG, "Imported ${results.entries.joinToString { "${it.key}: ${it.value}" }}")
             results
         }
     }
@@ -95,6 +95,19 @@ class BridgeImporter(private val context: Context) {
     /** How each source's last import went, for Artha's Sources page. */
     fun sourceStatuses(): List<BridgeSourceStatus> =
         runCatching { BridgeSourceStatus.listFromJson(org.json.JSONArray(statusFile.readText())) }.getOrDefault(emptyList())
+
+    fun isPackageInstalled(packageName: String): Boolean =
+        runCatching { context.packageManager.getPackageInfo(packageName, 0) }.isSuccess
+
+    fun isProviderInstalled(provider: Provider): Boolean {
+        val pkg = when (provider) {
+            Provider.JAGO -> "com.jago.digitalBanking"
+            Provider.GOJEK -> "com.gojek.app"
+            Provider.SHOPEE -> "com.shopee.id"
+            Provider.GRAB -> "com.grabtaxi.passenger"
+        }
+        return isPackageInstalled(pkg)
+    }
 
     private fun save(transactions: List<UnifiedTransaction>) =
         writeAtomically(snapshot, BridgeTransactionSerializer.serializeList(transactions))

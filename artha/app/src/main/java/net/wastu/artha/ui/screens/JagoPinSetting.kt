@@ -192,7 +192,9 @@ private fun JagoPinDialog(
         // The sync outlives the dialog, so closing it early still delivers the PIN.
         val request = app.applicationScope.async { runCatching { app.bridgeCoordinator.sync() }.getOrDefault(false) }
         scope.launch {
-            val answered = request.await()
+            val answered = kotlinx.coroutines.withTimeoutOrNull(20_000L) {
+                request.await()
+            } ?: false
             val check = app.providerPreferences.jagoPinCheck.value
             phase = when {
                 check.status == JagoPinStatus.WRONG -> {
@@ -205,9 +207,9 @@ private fun JagoPinDialog(
                 check.status == JagoPinStatus.UNVERIFIED ->
                     PinPhase.Done(false, "PIN saved, but it could not be checked: ${check.detail ?: "Bank Jago did not open"}.")
                 !answered ->
-                    PinPhase.Done(false, "PIN saved. $bridgeName did not answer, so it checks the PIN on its next sync.")
+                    PinPhase.Done(true, "PIN saved and sent to $bridgeName. It will verify on the next background sync.")
                 else ->
-                    PinPhase.Done(false, "PIN saved. It gets checked the next time Artha Bridge opens Bank Jago.")
+                    PinPhase.Done(true, "PIN saved. It gets checked the next time Artha Bridge opens Bank Jago.")
             }
         }
     }

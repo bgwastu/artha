@@ -28,6 +28,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import net.wastu.artha.bridge.BuildConfig
 import net.wastu.artha.bridge.crypto.BridgeCrypto
 import net.wastu.artha.bridge.crypto.BridgeMessage
@@ -129,12 +132,16 @@ class BridgeDaemonService : Service() {
      * status messages name the request they answer, so Artha knows when to stop waiting.
      */
     private suspend fun answerRequest(requestedAt: Long) = answerLock.withLock {
-        updateNotification("Syncing")
-        // A status alone tells Artha the request is being worked on; the rows follow once fresh.
-        publishToRelays(answering = requestedAt, final = false, includeTransactions = false)
-        (application as BridgeApplication).runBackgroundSync()
-        publishToRelays(answering = requestedAt, final = true)
-        updateNotification("Ready")
+        _isSyncing.value = true
+        try {
+            updateNotification("Syncing")
+            publishToRelays(answering = requestedAt, final = false, includeTransactions = false)
+            (application as BridgeApplication).runBackgroundSync()
+            publishToRelays(answering = requestedAt, final = true)
+            updateNotification("Ready")
+        } finally {
+            _isSyncing.value = false
+        }
     }
 
     suspend fun publishToRelays(answering: Long? = null, final: Boolean = true, includeTransactions: Boolean = true) = publishLock.withLock {
@@ -149,6 +156,7 @@ class BridgeDaemonService : Service() {
             .put("version", BuildConfig.VERSION_NAME)
             .put("chunks", prefs.publishedChunks)
             .put("final", final)
+            .put("jagoPinConfigured", !prefs.getJagoPin().isNullOrBlank())
             .apply { answering?.let { put("answered", it) } }
             .apply { prefs.getPinCheck()?.let { put("jagoPin", it.toJson()) } }
             .put("sources", net.wastu.artha.core.bridge.BridgeSourceStatus.listToJson(app.importer.sourceStatuses()))
@@ -164,7 +172,7 @@ class BridgeDaemonService : Service() {
         if (!app.importer.hasSnapshot) app.importer.importAll()
         val txs = app.importer.load()
         val chunks = BridgeTransactionSerializer.pack(txs)
-        Log.i(TAG, "Publishing ${txs.size} transactions in ${chunks.size} chunks, largest ${chunks.maxOfOrNull { it.length } ?: 0} chars")
+        BridgeLog.i(TAG, "Publishing ${txs.size} transactions in ${chunks.size} chunks, largest ${chunks.maxOfOrNull { it.length } ?: 0} chars")
         // Slots replace earlier events of the same name; empties overwrite any left from a bigger publish.
         val slots = chunks + List((prefs.publishedChunks - chunks.size).coerceAtLeast(0)) { "[]" }
         // Every chunk gets its own timestamp, which Artha uses to tell chunks apart.
@@ -175,7 +183,7 @@ class BridgeDaemonService : Service() {
         val accepted = coroutineScope {
             relays.map { relay -> async { relayClient.publishAll(relay, channelId, events, key) } }.awaitAll()
         }
-        Log.i(TAG, "Published ${events.size} transaction slots; relays accepted ${accepted.joinToString { it.size.toString() }}")
+        BridgeLog.i(TAG, "Published ${events.size} transaction slots; relays accepted ${accepted.joinToString { it.size.toString() }}")
         prefs.publishedChunks = chunks.size
     }
 
@@ -219,7 +227,9 @@ class BridgeDaemonService : Service() {
             .filter { it.type == BridgeMessageType.SETTINGS }
             .distinctBy { it.timestamp to it.payload }
             .sortedBy { it.timestamp }
-        Log.i(TAG, "Fetched ${raws.size} relay events, ${messages.size} settings")
+        if (messages.isNotEmpty()) {
+            BridgeLog.i(TAG, "Received ${messages.size} settings from relays")
+        }
         var newest: Long? = null
         for (msg in messages) {
             val settings = runCatching { BridgeSettings.fromJson(msg.payload) }.getOrNull() ?: continue
@@ -280,6 +290,8 @@ class BridgeDaemonService : Service() {
     }
 
     companion object {
+        private val _isSyncing = MutableStateFlow(false)
+        val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
         const val ACTION_SYNC_NOW = "net.wastu.artha.bridge.action.SYNC_NOW"
         private const val CHANNEL_ID = "artha_bridge_daemon_channel"
         private const val NOTIFICATION_ID = 9876

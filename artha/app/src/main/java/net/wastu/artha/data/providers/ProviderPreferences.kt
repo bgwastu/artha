@@ -224,7 +224,14 @@ class ProviderPreferences(context: Context) {
     fun getJagoPinChangedAt(): Long =
         preferences.getLong("JAGO_pin_changed_ms", if (getJagoPin() != null) 1L else 0L)
 
-    private val _jagoPinSet = MutableStateFlow(!getJagoPin().isNullOrBlank())
+    fun isJagoPinSet(): Boolean =
+        !getJagoPin().isNullOrBlank() || preferences.getBoolean("JAGO_bridge_configured", false) || _jagoPinCheck.value.status == JagoPinStatus.VERIFIED
+
+    private val _jagoPinCheck = MutableStateFlow(loadJagoPinCheck())
+    /** What happened when Artha Bridge last typed the current PIN into Bank Jago. */
+    val jagoPinCheck = _jagoPinCheck.asStateFlow()
+
+    private val _jagoPinSet = MutableStateFlow(isJagoPinSet())
     /** Whether Bank Jago's background PIN is set; without it Jago only syncs when opened. */
     val jagoPinSet = _jagoPinSet.asStateFlow()
 
@@ -232,37 +239,56 @@ class ProviderPreferences(context: Context) {
         val next = pin?.trim()?.takeIf { it.isNotEmpty() }
         val changed = next != getJagoPin()
         preferences.edit {
-            if (next == null) remove("JAGO_pin") else putString("JAGO_pin", next)
+            if (next == null) {
+                remove("JAGO_pin")
+                remove("JAGO_bridge_configured")
+            } else {
+                putString("JAGO_pin", next)
+            }
             if (changed) {
                 remove("JAGO_pin_check")
                 putLong("JAGO_pin_changed_ms", System.currentTimeMillis())
             }
         }
-        _jagoPinSet.value = next != null
+        _jagoPinSet.value = isJagoPinSet()
         if (changed) _jagoPinCheck.value = JagoPinCheck()
     }
 
-    private val _jagoPinCheck = MutableStateFlow(loadJagoPinCheck())
-    /** What happened when Artha Bridge last typed the current PIN into Bank Jago. */
-    val jagoPinCheck = _jagoPinCheck.asStateFlow()
+    fun recordJagoPinConfigured(configured: Boolean) {
+        preferences.edit { putBoolean("JAGO_bridge_configured", configured) }
+        _jagoPinSet.value = isJagoPinSet()
+        if (configured && _jagoPinCheck.value.status == JagoPinStatus.UNCHECKED) {
+            _jagoPinCheck.value = JagoPinCheck(JagoPinStatus.VERIFIED, "PIN configured on Artha Bridge")
+        }
+    }
 
-    /** Records the bridge's result, if it is about the PIN saved here now. */
-    fun recordJagoPinCheck(fingerprint: String, result: String, detail: String) {
-        val pin = getJagoPin() ?: return
-        if (fingerprint != jagoPinFingerprint(pin)) return
+    /** Records the bridge's result, whether for the PIN stored here or reported configured by the bridge. */
+    fun recordJagoPinCheck(fingerprint: String, result: String, detail: String, configuredOnBridge: Boolean = true) {
         val status = when (result) {
             "ok" -> JagoPinStatus.VERIFIED
             "wrong" -> JagoPinStatus.WRONG
             else -> JagoPinStatus.UNVERIFIED
         }
-        preferences.edit { putString("JAGO_pin_check", "${status.name}|$detail") }
+        preferences.edit {
+            putString("JAGO_pin_check", "${status.name}|$detail")
+            putBoolean("JAGO_bridge_configured", configuredOnBridge || status == JagoPinStatus.VERIFIED)
+        }
         _jagoPinCheck.value = JagoPinCheck(status, detail)
+        _jagoPinSet.value = isJagoPinSet()
     }
 
     private fun loadJagoPinCheck(): JagoPinCheck {
-        val raw = preferences.getString("JAGO_pin_check", null) ?: return JagoPinCheck()
-        val status = runCatching { JagoPinStatus.valueOf(raw.substringBefore('|')) }.getOrNull() ?: return JagoPinCheck()
-        return JagoPinCheck(status, raw.substringAfter('|', "").ifBlank { null })
+        val raw = preferences.getString("JAGO_pin_check", null)
+        if (raw != null) {
+            val status = runCatching { JagoPinStatus.valueOf(raw.substringBefore('|')) }.getOrNull()
+            if (status != null) {
+                return JagoPinCheck(status, raw.substringAfter('|', "").ifBlank { null })
+            }
+        }
+        if (preferences.getBoolean("JAGO_bridge_configured", false)) {
+            return JagoPinCheck(JagoPinStatus.VERIFIED, "PIN configured on Artha Bridge")
+        }
+        return JagoPinCheck()
     }
 }
 

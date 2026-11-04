@@ -183,7 +183,6 @@ class BridgePreferences(context: Context) {
     fun getRelayUrls(): List<String> = listOf(
         "wss://relay.primal.net",
         "wss://nos.lol",
-        "wss://relay.damus.io"
     )
 
     fun getLastSyncMillis(): Long? = prefs.getLong("last_sync_ms", 0L).takeIf { it > 0L }

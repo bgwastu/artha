@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -191,10 +192,16 @@ private fun BridgeHeader(paired: Boolean, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val context = LocalContext.current
     val bridgePrefs = (context.applicationContext as? net.wastu.artha.ArthaApplication)?.bridgePreferences
-    val lastConnected = remember(paired) { bridgePrefs?.getBridgeLastSeenMillis() }
-    // Name the bridge phone once it has answered; until then, the product name.
-    val title = remember(paired) { bridgePrefs?.getBridgeDeviceName()?.takeIf { paired } } ?: "Artha Bridge"
-    val status = if (paired) bridgeLastConnectedLabel(lastConnected) else "Not connected · pair to start using Artha"
+    val app = context.applicationContext as? net.wastu.artha.ArthaApplication
+    val isSyncing by app?.bridgeCoordinator?.isSyncing?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
+    val lastConnected by bridgePrefs?.bridgeLastSeen?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val bridgeDeviceName by bridgePrefs?.bridgeDeviceName?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val title = (bridgeDeviceName?.takeIf { paired }) ?: "Artha Bridge"
+    val status = when {
+        !paired -> "Not connected · pair to start using Artha"
+        isSyncing -> "Syncing with bridge..."
+        else -> bridgeLastConnectedLabel(lastConnected)
+    }
     Surface(
         onClick = onClick,
         shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
@@ -208,12 +215,20 @@ private fun BridgeHeader(paired: Boolean, onClick: () -> Unit) {
                 modifier = Modifier.size(44.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Default.Devices,
-                        contentDescription = null,
-                        tint = if (paired) colors.onPrimaryContainer else colors.error,
-                        modifier = Modifier.size(22.dp),
-                    )
+                    if (isSyncing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            strokeWidth = 2.dp,
+                            color = colors.onPrimaryContainer,
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.Devices,
+                            contentDescription = null,
+                            tint = if (paired) colors.onPrimaryContainer else colors.error,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
                 }
             }
             Spacer(Modifier.width(14.dp))

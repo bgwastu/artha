@@ -17,6 +17,18 @@ class BridgePreferences(context: Context) {
     private val _isHelper = MutableStateFlow(prefs.getBoolean("is_helper_mode", false))
     val isHelper: StateFlow<Boolean> = _isHelper.asStateFlow()
 
+    private val _bridgeDeviceName = MutableStateFlow(getBridgeDeviceName())
+    val bridgeDeviceName: StateFlow<String?> = _bridgeDeviceName.asStateFlow()
+
+    private val _bridgeVersion = MutableStateFlow(getBridgeVersion())
+    val bridgeVersion: StateFlow<String?> = _bridgeVersion.asStateFlow()
+
+    private val _bridgeLastSeen = MutableStateFlow(getBridgeLastSeenMillis())
+    val bridgeLastSeen: StateFlow<Long?> = _bridgeLastSeen.asStateFlow()
+
+    private val _lastSync = MutableStateFlow(getLastSyncMillis())
+    val lastSync: StateFlow<Long?> = _lastSync.asStateFlow()
+
     fun hasPairing(): Boolean = prefs.getString("secret_key", null) != null
 
     fun getSecretKey(): ByteArray? {
@@ -44,6 +56,10 @@ class BridgePreferences(context: Context) {
         }
         _paired.value = true
         _isHelper.value = isHelper
+        _bridgeDeviceName.value = getBridgeDeviceName()
+        _bridgeVersion.value = getBridgeVersion()
+        _bridgeLastSeen.value = getBridgeLastSeenMillis()
+        _lastSync.value = getLastSyncMillis()
     }
 
     /**
@@ -70,21 +86,28 @@ class BridgePreferences(context: Context) {
     fun getBridgeDeviceName(): String? = prefs.getString("bridge_device_name", null)
 
     fun setBridgeDeviceName(name: String?) {
-        prefs.edit { if (name.isNullOrBlank()) remove("bridge_device_name") else putString("bridge_device_name", name) }
+        val clean = name?.trim()?.takeIf { it.isNotEmpty() }
+        prefs.edit { if (clean == null) remove("bridge_device_name") else putString("bridge_device_name", clean) }
+        _bridgeDeviceName.value = clean
     }
 
     /** App version reported by the bridge. */
     fun getBridgeVersion(): String? = prefs.getString("bridge_version", null)
 
     fun setBridgeVersion(version: String?) {
-        prefs.edit { if (version.isNullOrBlank()) remove("bridge_version") else putString("bridge_version", version) }
+        val clean = version?.trim()?.takeIf { it.isNotEmpty() }
+        prefs.edit { if (clean == null) remove("bridge_version") else putString("bridge_version", clean) }
+        _bridgeVersion.value = clean
     }
 
     /** When the bridge last published anything, as stamped by the bridge. */
     fun getBridgeLastSeenMillis(): Long? = prefs.getLong("bridge_last_seen_ms", 0L).takeIf { it > 0L }
 
     fun recordBridgeSeen(millis: Long) {
-        if (millis > (getBridgeLastSeenMillis() ?: 0L)) prefs.edit { putLong("bridge_last_seen_ms", millis) }
+        if (millis > (getBridgeLastSeenMillis() ?: 0L)) {
+            prefs.edit { putLong("bridge_last_seen_ms", millis) }
+            _bridgeLastSeen.value = millis
+        }
     }
 
     fun clearPairing() {
@@ -100,6 +123,10 @@ class BridgePreferences(context: Context) {
         }
         _paired.value = false
         _isHelper.value = false
+        _bridgeDeviceName.value = null
+        _bridgeVersion.value = null
+        _bridgeLastSeen.value = null
+        _lastSync.value = null
     }
 
     fun getRelayUrls(): List<String> {
@@ -122,13 +149,13 @@ class BridgePreferences(context: Context) {
 
     fun recordSync(now: Long = System.currentTimeMillis()) {
         prefs.edit { putLong("last_bridge_sync_ms", now) }
+        _lastSync.value = now
     }
 
     companion object {
         val DEFAULT_RELAYS = listOf(
             "wss://relay.primal.net",
             "wss://nos.lol",
-            "wss://relay.damus.io",
         )
     }
 }

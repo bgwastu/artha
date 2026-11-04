@@ -168,9 +168,9 @@ private fun PairedContent(
 ) {
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
-    val bridgeName = remember(refreshTick) { prefs.getBridgeDeviceName() }
-    val lastConnected = remember(refreshTick) { prefs.getBridgeLastSeenMillis() }
-    val bridgeVersion = remember(refreshTick) { prefs.getBridgeVersion() }
+    val bridgeName by prefs.bridgeDeviceName.collectAsStateWithLifecycle()
+    val lastConnected by prefs.bridgeLastSeen.collectAsStateWithLifecycle()
+    val bridgeVersion by prefs.bridgeVersion.collectAsStateWithLifecycle()
     var confirmUnpair by remember { mutableStateOf(false) }
 
     Surface(

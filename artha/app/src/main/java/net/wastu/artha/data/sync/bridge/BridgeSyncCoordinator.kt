@@ -9,6 +9,9 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.ingestion.IngestionCoordinator
@@ -28,15 +31,23 @@ class BridgeSyncCoordinator(
     private val relayClient: NostrRelayClient = NostrRelayClient(),
     private val onNewTransactions: suspend (List<UnifiedTransaction>) -> Unit = {},
 ) {
+    private val _isSyncing = MutableStateFlow(false)
+    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
+
     suspend fun sync(): Boolean = withContext(Dispatchers.IO) {
         val key = bridgePreferences.getSecretKey() ?: return@withContext false
         val channelId = bridgePreferences.getChannelId() ?: return@withContext false
         val relays = bridgePreferences.getRelayUrls()
 
-        if (bridgePreferences.isHelper.value) {
-            syncAsHelper(key, channelId, relays)
-        } else {
-            syncAsMain(key, channelId, relays)
+        _isSyncing.value = true
+        try {
+            if (bridgePreferences.isHelper.value) {
+                syncAsHelper(key, channelId, relays)
+            } else {
+                syncAsMain(key, channelId, relays)
+            }
+        } finally {
+            _isSyncing.value = false
         }
     }
 
@@ -160,10 +171,17 @@ class BridgeSyncCoordinator(
                         if (device.isNotBlank()) bridgePreferences.setBridgeDeviceName(device)
                         val version = json.optString("version")
                         if (version.isNotBlank()) bridgePreferences.setBridgeVersion(version)
-                        json.optJSONObject("jagoPin")?.let { check ->
+                        val pinConfigured = json.optBoolean("jagoPinConfigured", false)
+                        val checkObj = json.optJSONObject("jagoPin")
+                        if (checkObj != null) {
                             providerPreferences.recordJagoPinCheck(
-                                check.optString("fp"), check.optString("result"), check.optString("detail"),
+                                checkObj.optString("fp"),
+                                checkObj.optString("result"),
+                                checkObj.optString("detail"),
+                                configuredOnBridge = pinConfigured || checkObj.optString("result") == "ok",
                             )
+                        } else if (pinConfigured) {
+                            providerPreferences.recordJagoPinConfigured(true)
                         }
                         providerPreferences.applyBridgeStatuses(
                             net.wastu.artha.core.bridge.BridgeSourceStatus.listFromJson(json.optJSONArray("sources")))
