@@ -5,6 +5,7 @@ import net.wastu.artha.core.bridge.BridgeTransactionSerializer
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -143,10 +144,21 @@ class BridgeSyncCoordinator(
         skip: Set<Long>,
         onTransactionsAt: (Long) -> Unit,
     ): BridgeStatus? {
-        val raws = coroutineScope {
-            relays.map { relay ->
-                async { runCatching { relayClient.fetch(relay, channelId, key) }.getOrDefault(emptyList()) }
-            }.awaitAll().flatten()
+        val primary = relays.firstOrNull()
+        val others = relays.drop(1)
+
+        val primaryRaws = if (primary != null) {
+            runCatching { relayClient.fetch(primary, channelId, key, timeoutMs = 2500L) }.getOrDefault(emptyList())
+        } else emptyList()
+
+        val raws = if (primaryRaws.isNotEmpty()) {
+            primaryRaws
+        } else {
+            coroutineScope {
+                others.map { relay ->
+                    async { runCatching { relayClient.fetch(relay, channelId, key, timeoutMs = 4000L) }.getOrDefault(emptyList()) }
+                }.awaitAll().flatten()
+            }
         }
         val messages = raws.mapNotNull { raw ->
             runCatching { decryptRaw(raw, key)?.let(BridgeMessage::fromJson) }.getOrNull()
@@ -210,8 +222,21 @@ class BridgeSyncCoordinator(
         )
 
         val slot = "settings-${bridgePreferences.deviceId}"
-        relays.map { relay -> async { relayClient.publish(relay, channelId, encryptedJson, key, slot = slot) } }
-            .awaitAll().any { it }
+        val primary = relays.firstOrNull()
+        val others = relays.drop(1)
+
+        val primaryOk = if (primary != null) {
+            runCatching { relayClient.publish(primary, channelId, encryptedJson, key, slot = slot, timeoutMs = 2500L) }.getOrDefault(false)
+        } else false
+
+        if (others.isNotEmpty()) {
+            coroutineScope {
+                others.forEach { relay ->
+                    launch { runCatching { relayClient.publish(relay, channelId, encryptedJson, key, slot = slot, timeoutMs = 4000L) } }
+                }
+            }
+        }
+        primaryOk || others.isNotEmpty()
     }
 
     /** What the bridge needs from this device: the Jago PIN and who is asking. */
@@ -241,10 +266,10 @@ class BridgeSyncCoordinator(
     companion object {
         /** The bridge hears a request within seconds, but a Jago walk takes a while. */
         private const val TAG = "ArthaBridgeSync"
-        const val ANSWER_TIMEOUT_MS = 120_000L
-        private const val ANSWER_POLL_MS = 3_000L
-        private const val FINAL_POLL_MS = 5_000L
-        private const val FINAL_TIMEOUT_MS = 300_000L
+        const val ANSWER_TIMEOUT_MS = 30_000L
+        private const val ANSWER_POLL_MS = 1_000L
+        private const val FINAL_POLL_MS = 2_000L
+        private const val FINAL_TIMEOUT_MS = 60_000L
     }
 
     private fun applySettings(settings: BridgeSettings) {

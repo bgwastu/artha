@@ -135,9 +135,18 @@ class BridgeDaemonService : Service() {
         _isSyncing.value = true
         try {
             updateNotification("Syncing")
-            publishToRelays(answering = requestedAt, final = false, includeTransactions = false)
-            (application as BridgeApplication).runBackgroundSync()
-            publishToRelays(answering = requestedAt, final = true)
+            val app = application as BridgeApplication
+            val hasSnapshot = app.importer.hasSnapshot
+            publishToRelays(answering = requestedAt, final = false, includeTransactions = hasSnapshot)
+
+            val lastSync = app.preferences.getLastSyncMillis() ?: 0L
+            val isStale = (System.currentTimeMillis() - lastSync) > 3 * 60_000L
+            if (isStale || !hasSnapshot) {
+                app.runBackgroundSync()
+                publishToRelays(answering = requestedAt, final = true, includeTransactions = true)
+            } else {
+                publishToRelays(answering = requestedAt, final = true, includeTransactions = false)
+            }
             updateNotification("Ready")
         } finally {
             _isSyncing.value = false
@@ -209,10 +218,20 @@ class BridgeDaemonService : Service() {
         val prefs = app.preferences
         val key = prefs.getSecretKey() ?: return null
         val channelId = prefs.getChannelId() ?: return null
-        val raws = coroutineScope {
-            prefs.getRelayUrls().map { relay ->
-                async { runCatching { relayClient.fetch(relay, channelId, key) }.getOrDefault(emptyList()) }
-            }.awaitAll().flatten()
+        val relays = prefs.getRelayUrls()
+        val primary = relays.firstOrNull()
+        val others = relays.drop(1)
+        val primaryRaws = if (primary != null) {
+            runCatching { relayClient.fetch(primary, channelId, key, timeoutMs = 2500L) }.getOrDefault(emptyList())
+        } else emptyList()
+        val raws = if (primaryRaws.isNotEmpty()) {
+            primaryRaws
+        } else {
+            coroutineScope {
+                others.map { relay ->
+                    async { runCatching { relayClient.fetch(relay, channelId, key, timeoutMs = 4000L) }.getOrDefault(emptyList()) }
+                }.awaitAll().flatten()
+            }
         }
         val messages = raws
             .mapNotNull { raw ->
