@@ -181,6 +181,7 @@ class BridgePreferences(context: Context) {
         set(value) = prefs.edit { putLong("last_settings_ms", value) }
 
     fun getRelayUrls(): List<String> = listOf(
+        "wss://nostr-relay.wastu.workers.dev",
         "wss://relay.primal.net",
         "wss://nos.lol",
     )

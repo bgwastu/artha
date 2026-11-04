@@ -154,6 +154,7 @@ class BridgePreferences(context: Context) {
 
     companion object {
         val DEFAULT_RELAYS = listOf(
+            "wss://nostr-relay.wastu.workers.dev",
             "wss://relay.primal.net",
             "wss://nos.lol",
         )
