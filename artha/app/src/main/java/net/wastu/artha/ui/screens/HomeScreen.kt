@@ -17,8 +17,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.ShortNavigationBarItem
+import androidx.compose.material3.ShortNavigationBar
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.foundation.layout.Column
@@ -44,8 +49,6 @@ import net.wastu.artha.ui.ArthaViewModel
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
@@ -101,7 +104,11 @@ fun HomeScreen(
     val context = LocalContext.current
     val saveableStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     var transactionFilters by rememberSaveable(stateSaver = TransactionFiltersSaver) { mutableStateOf(TransactionFilters()) }
-    var destination by rememberSaveable(stateSaver = Destination.Saver) { mutableStateOf(Destination.TRANSACTIONS) }
+    var destination by rememberSaveable(stateSaver = Destination.Saver) {
+        val unpaired = !net.wastu.artha.BuildConfig.DEMO &&
+            (context.applicationContext as? net.wastu.artha.ArthaApplication)?.bridgePreferences?.hasPairing() == false
+        mutableStateOf(if (unpaired) Destination.SETTINGS else Destination.TRANSACTIONS)
+    }
     val pages = rememberSaveable(saver = PageStack.Saver) { PageStack() }
 
     var showSearch by rememberSaveable { mutableStateOf(false) }
@@ -138,8 +145,24 @@ fun HomeScreen(
             viewModel?.setTargetDestination(null)
         }
     }
+    // Artha is locked to Settings (Artha Bridge header) until a bridge is paired.
+    val bridgePrefs = (context.applicationContext as? net.wastu.artha.ArthaApplication)?.bridgePreferences
+    val bridgePaired by bridgePrefs?.paired?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(true) }
+    val bridgeReady = net.wastu.artha.BuildConfig.DEMO || bridgePaired
+    androidx.compose.runtime.LaunchedEffect(bridgeReady, destination) {
+        if (!bridgeReady) {
+            destination = Destination.SETTINGS
+            showSearch = false
+            showFilter = false
+            selectedKey = null
+            selectedFallback = null
+            while (pages.top != null && pages.top != Page.BRIDGE) pages.back()
+        }
+    }
+    fun destinationEnabled(item: Destination) = bridgeReady || item == Destination.SETTINGS
     BackHandler(
-        enabled = destination != Destination.TRANSACTIONS &&
+        enabled = bridgeReady &&
+            destination != Destination.TRANSACTIONS &&
             selectedKey == null &&
             pages.top == null &&
             !showSearch &&
@@ -185,28 +208,13 @@ fun HomeScreen(
                     actions = {
                         if (destination == Destination.TRANSACTIONS) {
                             IconButton(onClick = onRefresh, enabled = !refreshing || automaticImport) {
-                                val angle = if (refreshing) {
-                                    val transition = rememberInfiniteTransition(label = "Sync")
-                                    val rotation by transition.animateFloat(
-                                        initialValue = 0f,
-                                        targetValue = 360f,
-                                        animationSpec = infiniteRepeatable(
-                                            animation = tween(1000, easing = LinearEasing),
-                                            repeatMode = RepeatMode.Restart,
-                                        ),
-                                        label = "Sync rotation",
+                                if (refreshing) {
+                                    LoadingIndicator(
+                                        modifier = Modifier.size(28.dp).semantics { contentDescription = "Syncing" },
                                     )
-                                    rotation
                                 } else {
-                                    0f
+                                    Icon(Icons.Default.Sync, contentDescription = "Sync")
                                 }
-                                Icon(
-                                    Icons.Default.Sync,
-                                    contentDescription = if (refreshing) "Importing history" else "Import history",
-                                    modifier = if (refreshing) {
-                                        Modifier.graphicsLayer { rotationZ = angle }
-                                    } else Modifier,
-                                )
                             }
                             IconButton(onClick = { showFilter = true }) {
                                 Icon(Icons.Default.FilterList, contentDescription = "Filter")
@@ -220,10 +228,11 @@ fun HomeScreen(
             },
             bottomBar = {
                 if (!showRail) {
-                    NavigationBar {
+                    ShortNavigationBar {
                         Destination.entries.forEach { item ->
-                            NavigationBarItem(
+                            ShortNavigationBarItem(
                                 selected = destination == item,
+                                enabled = destinationEnabled(item),
                                 onClick = { destination = item },
                                 icon = { Icon(item.icon, contentDescription = null) },
                                 label = { Text(navigationLabel(item), maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -240,6 +249,7 @@ fun HomeScreen(
                             NavigationRailItem(
                                 modifier = Modifier.fillMaxWidth(),
                                 selected = destination == item,
+                                enabled = destinationEnabled(item),
                                 onClick = { destination = item },
                                 icon = { Icon(item.icon, contentDescription = null) },
                                 label = { Text(navigationLabel(item), maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -254,16 +264,10 @@ fun HomeScreen(
                             TextButton(onClick = onRetryLedger) { Text("Retry") }
                         }
                     }
-                    if (rootGate == net.wastu.artha.core.root.RootGateState.DENIED) {
-                        androidx.compose.material3.TextButton(onClick = onRefresh, modifier = Modifier.padding(horizontal = 16.dp)) {
-                            Text("Root unavailable. Retry imports.")
-                        }
-                    }
-                    if (refreshing) {
-                        LinearProgressIndicator(
-                            modifier = Modifier.fillMaxWidth().height(3.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    // The Transactions bar has its own spinner; one loader at a time.
+                    if (refreshing && destination != Destination.TRANSACTIONS) {
+                        LinearWavyProgressIndicator(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                         )
                     }
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
@@ -276,7 +280,6 @@ fun HomeScreen(
                                     enabledProviders = enabledProviders,
                                     onTransaction = { selectedKey = it.key; selectedFallback = it },
                                     onRetry = onRetryLedger,
-                                    onImportHistory = { pages.open(Page.SOURCES) },
                                     showFilter = showFilter,
                                     onDismissFilter = { showFilter = false },
                                     viewModel = viewModel,
@@ -301,7 +304,7 @@ fun HomeScreen(
                                     )
                                 }
                             }
-                            Destination.SETTINGS -> SettingsScreen(viewModel, onOpen = pages::open)
+                            Destination.SETTINGS -> SettingsScreen(viewModel, onOpen = pages::open, bridgeReady = bridgeReady)
                         }
                     }
                     }
@@ -340,6 +343,8 @@ fun HomeScreen(
                         month = viewModel.selectedMonth.collectAsStateWithLifecycle().value,
                         onOpenTransaction = { selectedKey = it.key; selectedFallback = it },
                     )
+                    Page.BRIDGE -> BridgeScreen(viewModel, onBack = pages::back)
+                    Page.UPDATES -> UpdatesScreen(onBack = pages::back)
                 }
             }
         }

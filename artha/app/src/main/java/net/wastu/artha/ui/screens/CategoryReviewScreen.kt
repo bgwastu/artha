@@ -1,5 +1,6 @@
 package net.wastu.artha.ui.screens
 
+import net.wastu.artha.ui.components.ConnectedChoiceRow
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -32,16 +33,16 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -53,9 +54,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ListItemDefaults
@@ -355,15 +353,13 @@ fun CategoryReviewScreen(
                         }
                     },
                 )
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                    ReviewMode.entries.forEachIndexed { index, entry ->
-                        SegmentedButton(
-                            selected = mode == entry,
-                            onClick = { mode = entry },
-                            shape = SegmentedButtonDefaults.itemShape(index, ReviewMode.entries.size),
-                        ) { Text(entry.label) }
-                    }
-                }
+                ConnectedChoiceRow(
+                    options = ReviewMode.entries,
+                    selected = mode,
+                    onSelect = { mode = it },
+                    label = { it.label },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
             }
         },
     ) { padding ->
@@ -409,7 +405,7 @@ private fun NeedsReviewPane(
     }
     val loaded = data
     if (loaded == null) {
-        CircularProgressIndicator(Modifier.padding(32.dp))
+        LoadingIndicator(Modifier.padding(32.dp).size(64.dp))
         return
     }
     val state = session ?: ReviewSession(loaded.order).also { session = it }
@@ -465,7 +461,7 @@ private fun NeedsReviewPane(
         Modifier.widthIn(max = 600.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        LinearProgressIndicator(progress = { if (state.total == 0) 0f else (state.cursor.toFloat() / state.total).coerceIn(0f, 1f) }, Modifier.fillMaxWidth())
+        LinearWavyProgressIndicator(progress = { if (state.total == 0) 0f else (state.cursor.toFloat() / state.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
         Text("${state.position} of ${state.total}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(Modifier.fillMaxWidth().clickable { onOpenTransaction(item.tx) }, verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -585,12 +581,13 @@ private fun WholeMonthPane(
     }
     LazyColumn(Modifier.widthIn(max = 600.dp).fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         item {
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                listOf(net.wastu.artha.core.model.TransactionType.EXPENSE to "Expenses", net.wastu.artha.core.model.TransactionType.INCOME to "Income")
-                    .forEachIndexed { index, (value, label) ->
-                        SegmentedButton(selected = type == value, onClick = { onType(value) }, shape = SegmentedButtonDefaults.itemShape(index, 2)) { Text(label) }
-                    }
-            }
+            ConnectedChoiceRow(
+                options = listOf(net.wastu.artha.core.model.TransactionType.EXPENSE, net.wastu.artha.core.model.TransactionType.INCOME),
+                selected = type,
+                onSelect = onType,
+                label = { if (it == net.wastu.artha.core.model.TransactionType.INCOME) "Income" else "Expenses" },
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
         }
         if (groups.isEmpty()) item {
             Text("Nothing in this month", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)

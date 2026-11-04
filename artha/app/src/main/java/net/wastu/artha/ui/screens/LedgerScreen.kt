@@ -1,5 +1,7 @@
 package net.wastu.artha.ui.screens
 
+import net.wastu.artha.core.model.iconRes
+import net.wastu.artha.ui.components.ShapeBadge
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
@@ -30,6 +32,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,7 +45,10 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.ModalBottomSheet
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.data.analysis.BudgetAnalyzer
@@ -295,7 +304,6 @@ fun LedgerScreen(
     enabledProviders: Set<Provider> = Provider.entries.toSet(),
     onTransaction: (UnifiedTransaction) -> Unit,
     onRetry: () -> Unit,
-    onImportHistory: (() -> Unit)? = null,
     showFilter: Boolean = false,
     onDismissFilter: () -> Unit = {},
     viewModel: ArthaViewModel? = null,
@@ -303,6 +311,7 @@ fun LedgerScreen(
     onFiltersChanged: (TransactionFilters) -> Unit = {},
 ) {
     val dateRange by viewModel?.dateRangeFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val refreshing by viewModel?.refreshing?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
     val category by viewModel?.categoryFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(CategoryProgress()) }
     val showCategory = true
@@ -346,7 +355,7 @@ fun LedgerScreen(
             onTransaction = onTransaction, resetKey = listOf(effectiveFilters, dateRange, category),
             activeFilters = active, onClearFilters = ::clearAll,
             emptyTitle = if (active.isNotEmpty()) "No matching transactions" else "No saved payments",
-            onImportHistory = if (active.isEmpty()) onImportHistory else null,
+            isPopulating = refreshing,
             showCategory = showCategory,
             categoryProgress = categoryProgress,
             periodSummary = periodSummary,
@@ -660,7 +669,7 @@ private fun TransactionList(
     onClearFilters: () -> Unit = {},
     emptyTitle: String? = null,
     resultCount: Int? = null,
-    onImportHistory: (() -> Unit)? = null,
+    isPopulating: Boolean = false,
     showCategory: Boolean = true,
     categoryProgress: CategoryProgress = CategoryProgress(),
     periodSummary: PeriodSummary? = null,
@@ -731,15 +740,69 @@ private fun TransactionList(
         } }
         if (transactions.isEmpty()) {
             item(key = "empty") {
-                Text(
-                    emptyTitle ?: if (highlightQuery.isBlank()) "No expenses" else "No matching transactions",
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 64.dp),
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.Center) {
-                    onImportHistory?.let { action -> TextButton(onClick = action) { Text("Import history") } }
+                if (isPopulating) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 64.dp, horizontal = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        LoadingIndicator(Modifier.size(64.dp))
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            text = "Syncing transactions",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "Checking connected accounts for new activity",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 56.dp, horizontal = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        ShapeBadge(
+                            icon = if (activeFilters.isNotEmpty()) Icons.Default.FilterList else Icons.Default.ReceiptLong,
+                            polygon = if (activeFilters.isNotEmpty()) MaterialShapes.Cookie6Sided else MaterialShapes.SoftBurst,
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            text = emptyTitle ?: if (activeFilters.isNotEmpty()) "No matching transactions" else "No transactions yet",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = if (activeFilters.isNotEmpty())
+                                "Try adjusting or clearing your filters to see more results."
+                            else
+                                "Your transactions will appear here once your bank accounts and e-wallets sync.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                        if (activeFilters.isNotEmpty()) {
+                            Spacer(Modifier.height(16.dp))
+                            FilledTonalButton(
+                                onClick = onClearFilters,
+                                shapes = ButtonDefaults.shapes(),
+                            ) {
+                                Text("Clear filters")
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1021,7 +1084,7 @@ fun TransactionRow(
                                 )
                             }
                         } else if (!transaction.category.isNullOrBlank()) {
-                            HighlightedText(transaction.category, highlightQuery, MaterialTheme.typography.bodySmall,
+                            HighlightedText(transaction.category.orEmpty(), highlightQuery, MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
                         }
                     }
@@ -1045,19 +1108,64 @@ fun LedgerFeedback(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         if (loading) {
-            CircularProgressIndicator(modifier = Modifier.size(36.dp))
-        }
-        title?.let {
-            Text(it, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-        }
-        onRetry?.let {
+            LoadingIndicator(Modifier.size(64.dp))
+            Spacer(Modifier.height(20.dp))
+            Text(
+                "Loading transactions",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Reading encrypted transactions from local storage",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        } else {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                modifier = Modifier.size(68.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.ErrorOutline,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(32.dp),
+                    )
+                }
+            }
             Spacer(Modifier.height(16.dp))
-            Button(onClick = it) { Text("Retry") }
+            title?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Something went wrong while accessing your local ledger.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            onRetry?.let {
+                Spacer(Modifier.height(20.dp))
+                Button(onClick = it, shape = RoundedCornerShape(14.dp)) {
+                    Text("Retry")
+                }
+            }
         }
     }
 }

@@ -59,6 +59,7 @@ class ArthaViewModel(
     private val scopeKeysAction: (RecategorizeScope, List<UnifiedTransaction>, AnalysisSnapshot) -> Set<String> = AiCategorization::scopeKeys,
     private val needsReviewAction: (UnifiedTransaction, AnalysisSnapshot) -> Boolean = ::needsReview,
     private val merchantKeyProvider: (UnifiedTransaction) -> String? = ::merchantKey,
+    private val hasBridgePairing: (() -> Boolean)? = null,
 ) : ViewModel() {
     private val _rootGate = MutableStateFlow(RootGateState.LOCKED)
     val rootGate = _rootGate.asStateFlow()
@@ -323,10 +324,13 @@ class ArthaViewModel(
             try {
                 previous?.join()
                 _rootGate.value = RootGateState.CHECKING
-                val granted = net.wastu.artha.BuildConfig.DEMO || try { rootAccess.verify() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { false }
+                val isBridgeApp = false
+                val hasPairing = hasBridgePairing?.invoke() == true
+                val rootGranted = try { rootAccess.verify() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { false }
+                val granted = net.wastu.artha.BuildConfig.DEMO || rootGranted
                 _rootGate.value = if (granted) RootGateState.GRANTED else RootGateState.DENIED
-                if (!granted) {
-                    if (!automatic) _importFeedback.value = ImportFeedback(++importSequence, provider, "Root access unavailable. Allow root, then try again", true)
+                if (!granted && !hasPairing) {
+                    if (!automatic) _importFeedback.value = ImportFeedback(++importSequence, provider, "Connect to Artha Bridge in Settings to sync", true)
                     return@launch
                 }
                 if (walk != null && !net.wastu.artha.BuildConfig.DEMO) {
@@ -334,12 +338,15 @@ class ArthaViewModel(
                     return@launch
                 }
                 val result = if (net.wastu.artha.BuildConfig.DEMO) simulateDemoSync(provider)
+                    else if (hasPairing && !isBridgeApp) ingest?.invoke().orEmpty()
                     else if (provider != null && syncSingle != null) mapOf(provider to syncSingle.invoke(provider))
                     else if (automatic && ingestStale != null) ingestStale.invoke() else ingest?.invoke().orEmpty()
                 _ingestionStatus.value = _ingestionStatus.value + result
                 if (!automatic) {
                     val failed = result.values.count { it.startsWith("Unavailable:") }
                     val message = when {
+                        hasPairing && !isBridgeApp -> "Synced with Artha Bridge"
+                        result.isEmpty() && !hasPairing && !isBridgeApp -> "Connect to Artha Bridge in Settings to sync"
                         result.isEmpty() -> "No sources enabled for import"
                         failed == result.size -> "Import failed. Open source details"
                         failed > 0 -> "Import finished. Some sources are unavailable"
@@ -349,6 +356,9 @@ class ArthaViewModel(
                     _importFeedback.value = ImportFeedback(++importSequence, provider, message, result.isEmpty() || failed == result.size)
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
+            catch (e: net.wastu.artha.data.sync.bridge.BridgeNoAnswerException) {
+                if (!automatic) _importFeedback.value = ImportFeedback(++importSequence, provider, "Artha Bridge did not answer. Check that it is online", true)
+            }
             catch (e: Exception) {
                 _ingestionStatus.value = _ingestionStatus.value + ((provider ?: Provider.JAGO) to (e.message ?: "Import unavailable"))
                 if (!automatic) _importFeedback.value = ImportFeedback(++importSequence, provider, "Import failed. Try again", true)

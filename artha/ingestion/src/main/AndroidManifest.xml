@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The readers call the providers' own servers with the session found on the phone. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The readers check the provider apps' versions, and the screen walks open them. -->
+    <queries>
+        <package android:name="com.jago.digitalBanking" />
+        <package android:name="com.gojek.app" />
+        <package android:name="com.shopee.id" />
+        <package android:name="com.grabtaxi.passenger" />
+    </queries>
+</manifest>

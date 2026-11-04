@@ -111,7 +111,7 @@ class ApiServerService : Service() {
             }
         }
 
-        startForeground(NOTIFICATION_ID, buildNotification("Creating link..."))
+        startForeground(NOTIFICATION_ID, buildNotification("Creating link"))
         ApiServerController.updateServiceRunning(true)
 
         try {
@@ -180,7 +180,7 @@ class ApiServerService : Service() {
     private fun updateNotification(state: TunnelState) {
         val statusText = when (state) {
             is TunnelState.Inactive -> "Server idle"
-            is TunnelState.Starting -> "Creating link..."
+            is TunnelState.Starting -> "Creating link"
             is TunnelState.Active -> state.url.removePrefix("https://")
             is TunnelState.Failed -> "Could not share: ${state.error}"
         }

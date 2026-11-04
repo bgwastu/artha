@@ -17,7 +17,7 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Button
@@ -82,7 +82,7 @@ fun RemoteAccessScreen(onBack: () -> Unit) {
                 },
                 modifier = Modifier.padding(top = 8.dp),
             )
-            if (state is TunnelState.Starting) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+            if (state is TunnelState.Starting) LinearWavyProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp))
             else HorizontalDivider(Modifier.padding(horizontal = 16.dp))
 
             when (state) {

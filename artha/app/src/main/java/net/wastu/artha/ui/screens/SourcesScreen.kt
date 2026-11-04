@@ -1,5 +1,7 @@
 package net.wastu.artha.ui.screens
 
+import net.wastu.artha.core.model.iconRes
+import net.wastu.artha.ui.components.shape
 import androidx.core.net.toUri
 import android.content.Intent
 import android.net.Uri
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -40,7 +43,7 @@ import androidx.compose.material.icons.filled.SettingsSuggest
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -69,8 +72,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import net.wastu.artha.data.attention.AttentionAction
+import net.wastu.artha.data.attention.NeedsAttention
+import net.wastu.artha.data.attention.forSource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -79,6 +86,8 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.Instant
 import java.time.ZoneId
@@ -120,6 +129,7 @@ fun SourcesScreen(
     val coverage by viewModel?.providerCoverage?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap<Provider, SourceCoverage>()) }
     val gojekFlash by viewModel?.gojekFlash?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<GojekFlashRecord?>(null) }
     val allTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyList()) }
+    val attention = rememberAttentionItems()
 
     val anyImportRunning = importBusy || importing != null || requestedProvider != null
     fun isImporting(provider: Provider) = importBusy && (importing == provider || requestedProvider == provider)
@@ -137,7 +147,7 @@ fun SourcesScreen(
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
                 actions = {
                     if (anyImportRunning) {
-                        CircularProgressIndicator(Modifier.padding(end = 16.dp).size(16.dp), strokeWidth = 2.dp)
+                        LoadingIndicator(Modifier.padding(end = 12.dp).size(28.dp).semantics { contentDescription = "Syncing" })
                     } else {
                         TextButton(onClick = { viewModel?.refresh() }, enabled = viewModel != null) { Text("Sync all") }
                     }
@@ -151,8 +161,12 @@ fun SourcesScreen(
                     val diagnostic = diagnostics[provider]
                     val isProviderImportEnabled = provider in importEnabled
                     val isProviderImporting = isImporting(provider)
-                    val isProblem = isSourceProblem(diagnostic, isProviderImportEnabled, isProviderImporting)
-                    val statusText = sourceRowStatus(provider, diagnostic, isProviderImportEnabled, isProviderImporting)
+                    val syncProblem = isSourceProblem(diagnostic, isProviderImportEnabled, isProviderImporting)
+                    val needsAttention = attention.forSource(provider).firstOrNull()
+                    val isProblem = syncProblem || needsAttention != null
+                    // A sync problem or a running import says more than a setting to fix.
+                    val statusText = needsAttention?.takeUnless { syncProblem || isProviderImporting }?.title
+                        ?: sourceRowStatus(provider, diagnostic, isProviderImportEnabled, isProviderImporting)
 
                     Surface(onClick = { selectedProvider = provider }) {
                         ListItem(
@@ -356,6 +370,13 @@ private fun SourcePageContent(
     val context = LocalContext.current
     val isProblem = isSourceProblem(diagnostic, importEnabled, importing)
     val status = diagnostic?.accountStatus
+    var pinDialogOpen by remember { mutableStateOf(false) }
+
+    AttentionCards(rememberAttentionItems().forSource(provider)) { action ->
+        when (action) {
+            AttentionAction.SET_JAGO_PIN -> pinDialogOpen = true
+        }
+    }
 
     // Status (first, no card)
     ListItem(
@@ -374,6 +395,14 @@ private fun SourcePageContent(
             Text(supportingText)
         },
     )
+    if (status == AccountStatus.PARTIAL && !isProblem && !diagnostic?.lastError.isNullOrBlank()) {
+        Text(
+            text = diagnostic!!.lastError!!,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 
     if (isProblem) {
         if (status == AccountStatus.ERROR && !diagnostic?.lastError.isNullOrBlank()) {
@@ -421,21 +450,24 @@ private fun SourcePageContent(
     // SettingsHeading "History"
     SettingsHeading("History")
 
-    val expenseCount = remember(allTransactions, provider, providerCounts) {
-        if (allTransactions.isNotEmpty()) {
+    val bridgeWindow = diagnostic?.lastImportWindow?.takeIf { diagnostic.fromBridge }
+    val expenseCount = remember(allTransactions, provider, providerCounts, bridgeWindow) {
+        if (bridgeWindow != null) {
+            bridgeWindow.paymentCount
+        } else if (allTransactions.isNotEmpty()) {
             countExpenses(allTransactions, provider)
         } else {
             providerCounts[provider] ?: 0
         }
     }
     ListItem(
-        headlineContent = { Text("Expenses") },
+        headlineContent = { Text(if (bridgeWindow != null) "Payments" else "Expenses") },
         trailingContent = { Text(expenseCount.toString()) },
     )
 
-    val coversText = remember(coverage) {
-        val early = coverage?.earliest
-        val late = coverage?.latest
+    val coversText = remember(coverage, bridgeWindow) {
+        val early = bridgeWindow?.earliestMillis?.let(Instant::ofEpochMilli) ?: coverage?.earliest
+        val late = bridgeWindow?.latestMillis?.let(Instant::ofEpochMilli) ?: coverage?.latest
         when {
             early != null && late != null -> {
                 val e = formatSavedDay(early)
@@ -489,6 +521,7 @@ private fun SourcePageContent(
         )
     }
 
+    if (provider == Provider.JAGO) JagoPinSetting(dialogOpen = pinDialogOpen, onDialogOpenChange = { pinDialogOpen = it })
     // SettingsHeading "Settings"
     SettingsHeading("Settings")
     SettingsSwitch(
@@ -533,16 +566,63 @@ internal fun SettingsLink(
     title: String,
     summary: String?,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onClick: () -> Unit,
+    enabled: Boolean = true,
+    attention: List<NeedsAttention> = emptyList(),
+    segment: net.wastu.artha.ui.components.Segment? = null,
+    onClick: (() -> Unit)?,
 ) {
-    Surface(onClick = onClick) {
-        ListItem(
-            headlineContent = { Text(title) },
-            supportingContent = summary?.let { { Text(it) } },
-            leadingContent = { Icon(icon, null) },
-            trailingContent = { Icon(Icons.Default.ChevronRight, null) },
-        )
-    }
+    val attentionText = attentionSummary(attention)
+    val grouped = segment != null
+    val shape = segment?.shape() ?: androidx.compose.ui.graphics.RectangleShape
+    val color = if (grouped) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surface
+    val outer = if (grouped) Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = net.wastu.artha.ui.components.SegmentGap) else Modifier
+    val body: @Composable () -> Unit = { ListItem(
+            headlineContent = {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+            },
+            supportingContent = when {
+                attentionText != null -> { { Text(attentionText, color = MaterialTheme.colorScheme.error) } }
+                summary != null -> { { Text(summary) } }
+                else -> null
+            },
+            leadingContent = {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = when {
+                        attentionText != null -> MaterialTheme.colorScheme.errorContainer
+                        grouped -> MaterialTheme.colorScheme.secondaryContainer
+                        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+                    },
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            icon,
+                            contentDescription = null,
+                            tint = when {
+                                attentionText != null -> MaterialTheme.colorScheme.onErrorContainer
+                                grouped -> MaterialTheme.colorScheme.onSecondaryContainer
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+            },
+            trailingContent = when {
+                attentionText != null -> { { AttentionIcon() } }
+                onClick != null -> { { Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) } }
+                else -> null
+            },
+            colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+            modifier = if (enabled) Modifier else Modifier.alpha(0.38f),
+        ) }
+    if (onClick != null) Surface(onClick = onClick, enabled = enabled, shape = shape, color = color, modifier = outer) { body() }
+    else Surface(shape = shape, color = color, modifier = outer) { body() }
 }
 
 @Composable
@@ -586,6 +666,8 @@ internal fun sourceRowStatus(
         AccountStatus.APP_NOT_INSTALLED -> "${provider.displayName} app not installed"
         AccountStatus.RATE_LIMITED -> "Limited by ${provider.displayName}. Try later"
         AccountStatus.ERROR -> "Last sync failed"
+        AccountStatus.PARTIAL -> diagnostic.lastSyncEpochMillis
+            ?.let { "Partly synced ${formatRelativeTime(it, now)}" } ?: "Partly synced"
         else -> {
             val lastSync = diagnostic?.lastSyncEpochMillis
             if (lastSync == null) {
@@ -611,6 +693,7 @@ internal fun sourceHeadline(
     diagnostic?.accountStatus == AccountStatus.APP_NOT_INSTALLED -> "${provider.displayName} app not installed"
     diagnostic?.accountStatus == AccountStatus.RATE_LIMITED -> "Limited by ${provider.displayName}"
     diagnostic?.accountStatus == AccountStatus.ERROR -> "Last sync failed"
+    diagnostic?.accountStatus == AccountStatus.PARTIAL -> "Partly synced"
     else -> "Up to date"
 }
 

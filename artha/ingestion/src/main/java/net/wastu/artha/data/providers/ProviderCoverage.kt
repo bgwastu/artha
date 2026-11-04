@@ -1,0 +1,11 @@
+package net.wastu.artha.data.providers
+
+import net.wastu.artha.core.model.Provider
+
+val Provider.historyCoverageHint: String
+    get() = when (this) {
+        Provider.JAGO -> "History saved in the Jago app"
+        Provider.SHOPEE -> "Marketplace, food, and digital product purchases"
+        Provider.GOJEK -> "Saved GoPay history. Cash and direct card payments are not supported"
+        Provider.GRAB -> "GrabPay/OVO payments and recent rides. Full food history, cash and refunds are not supported"
+    }

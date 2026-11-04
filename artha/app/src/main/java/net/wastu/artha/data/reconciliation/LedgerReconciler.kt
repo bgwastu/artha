@@ -81,7 +81,7 @@ object LedgerReconciler {
     private fun amount(e: Evidence) = AmountKey(e.tx.money.currencyCode, e.tx.money.amountMinor, e.tx.provider, e.tx.direction)
     private fun close(a: UnifiedTransaction, b: UnifiedTransaction, seconds: Long) = Duration.between(a.occurredAt, b.occurredAt).abs() <= Duration.ofSeconds(seconds)
     private fun compatibleAccount(a: UnifiedTransaction, b: UnifiedTransaction): Boolean =
-        (a.pocket == null || b.pocket == null || a.pocket.providerPocketId == b.pocket.providerPocketId) &&
+        (a.pocket == null || b.pocket == null || a.pocket?.providerPocketId == b.pocket?.providerPocketId) &&
         (a.cardLast4 == null || b.cardLast4 == null || a.cardLast4 == b.cardLast4)
 
     private fun within(sorted: List<Evidence>, time: java.time.Instant, seconds: Long): List<Evidence> {
@@ -271,7 +271,7 @@ object LedgerReconciler {
         val paired = pair(internal.filter { it.tx.direction == Direction.DEBIT }, internal.filter { it.tx.direction == Direction.CREDIT },
             windowSeconds = 60, candidate = { d, c ->
                 close(d.tx, c.tx, 60) && d.tx.pocket != null && c.tx.pocket != null &&
-                    d.tx.pocket.providerPocketId != c.tx.pocket.providerPocketId &&
+                    d.tx.pocket?.providerPocketId != c.tx.pocket?.providerPocketId &&
                     ((d.code.startsWith("SAD") && c.code.startsWith("SAC")) || d.reference.isNotBlank() && d.reference == c.reference)
             }, merge = { d, c ->
                 val from = d.pocket?.name ?: "Pocket"
@@ -432,8 +432,9 @@ object LedgerReconciler {
 
         val mergedPayload = JSONObject(pPayload.toString())
             .put("groupedTransactions", grouped)
-        if (mergedPayload.optString("pocketName").isBlank() && secondary.pocket != null) {
-            mergedPayload.put("pocketName", secondary.pocket.name)
+        val secondaryPocket = secondary.pocket
+        if (mergedPayload.optString("pocketName").isBlank() && secondaryPocket != null) {
+            mergedPayload.put("pocketName", secondaryPocket.name)
         }
         if (mergedPayload.optString("cardLast4").isBlank() && secondary.cardLast4 != null) {
             mergedPayload.put("cardLast4", secondary.cardLast4)

@@ -1,5 +1,6 @@
 package net.wastu.artha.ui.screens
 
+import net.wastu.artha.core.model.iconRes
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -113,8 +114,6 @@ import net.wastu.artha.ui.groupNetMinor
 import net.wastu.artha.ui.groupRecords
 import net.wastu.artha.ui.transactionTags
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.text.style.TextOverflow
@@ -424,7 +423,7 @@ private fun TransactionDetailsBody(
                     if (records.isNotEmpty()) GroupRecordsSection(records, record.occurredAt, linkedRecordsExplanation(record)) { state.recordIndex = it }
 
                     if (recordType != net.wastu.artha.core.model.TransactionType.TRANSFER) {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column(Modifier.padding(top = if (records.isNotEmpty()) SectionGap else 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             DetailEditRow(
                                 label = "Category", value = currentCategory,
                                 supportingContent = if (isBusy && busyLabel != null) {
@@ -497,7 +496,7 @@ private fun TransactionDetailsBody(
                                             }
                                         },
                                         enabled = !isBusy,
-                                        label = { Text(if (isBusy) "Categorizing..." else "Re-categorize") },
+                                        label = { Text(if (isBusy) "Categorizing" else "Re-categorize") },
                                         leadingIcon = {
                                             if (isBusy) {
                                                 CircularProgressIndicator(
@@ -667,12 +666,14 @@ private fun TransactionDetailsBody(
                         for (index in 0 until (items?.length() ?: 0)) {
                             val item = items?.optJSONObject(index) ?: continue
                             val name = item.detailText("name") ?: continue
-                            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(name, style = MaterialTheme.typography.bodyMedium)
-                                item.detailText("qty")?.let {
-                                    Text("Quantity: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(name, style = MaterialTheme.typography.bodyLarge)
+                                    item.detailText("qty")?.let {
+                                        Text("Qty $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
                                 }
-                                item.detailText("price")?.let { DetailRow("Item price", itemPriceText(it)) }
+                                item.detailText("price")?.let { Text(itemPriceText(it), style = MaterialTheme.typography.titleSmall) }
                             }
                         }
                         notes?.let {
@@ -702,10 +703,14 @@ private fun TransactionDetailsBody(
                     }
                 }
 
-                paymentLabel?.let { DetailRow("Payment method", it) }
-                if (showCounterpart) counterpart?.let { DetailRow("Counterpart", it) }
-                record.pocket?.let { DetailRow("Pocket", it.name) }
-                if (notes != null && !showOrder) DetailRow("Source note", notes)
+                // Set apart from the sections above, so these read as facts about the whole payment.
+                val hasFacts = paymentLabel != null || (showCounterpart && counterpart != null) || record.pocket != null || (notes != null && !showOrder)
+                if (hasFacts) Column(Modifier.padding(top = SectionGap), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    paymentLabel?.let { DetailRow("Payment method", it) }
+                    if (showCounterpart) counterpart?.let { DetailRow("Counterpart", it) }
+                    record.pocket?.let { DetailRow("Pocket", it.name) }
+                    if (notes != null && !showOrder) DetailRow("Source note", notes)
+                }
 
                 TextButton(onClick = { state.sourceExpanded = !state.sourceExpanded }) {
                     Text(if (state.sourceExpanded) "Hide source details" else "Source details")
@@ -768,48 +773,54 @@ private fun SourceHeader(provider: Provider, supporting: String) {
 @Composable
 private fun GroupRecordsSection(records: List<GroupRecord>, parentTime: Instant, explanation: String?, onOpen: (Int) -> Unit) {
     val parentDay = parentTime.atZone(AccountingTime.zone).toLocalDate()
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Records", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
-        explanation?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    Column(Modifier.fillMaxWidth().padding(top = SectionGap), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SectionHeading("Records", explanation)
         Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.large) {
             Column {
                 records.forEachIndexed { index, item ->
-                    if (index > 0) HorizontalDivider(Modifier.padding(start = 64.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                    ListItem(
-                        modifier = Modifier.clickable(onClickLabel = "Open record") { onOpen(index) },
-                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        overlineContent = { Text(item.role) },
-                        headlineContent = { Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                        supportingContent = {
-                            val at = item.transaction.occurredAt
-                            Text(if (at.atZone(AccountingTime.zone).toLocalDate() == parentDay) formatTime(at) else formatDate(at))
-                        },
-                        leadingContent = {
-                            Image(painterResource(item.transaction.provider.iconRes), item.transaction.provider.displayName,
-                                Modifier.size(32.dp).clip(MaterialTheme.shapes.small))
-                        },
-                        trailingContent = {
-                            Text(item.signedAmount, style = MaterialTheme.typography.labelLarge,
-                                color = if (item.transaction.direction == Direction.CREDIT) incomeColor() else MaterialTheme.colorScheme.onSurface)
-                        },
-                    )
+                    if (index > 0) HorizontalDivider(Modifier.padding(start = 68.dp, end = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    val at = item.transaction.occurredAt
+                    Row(
+                        Modifier.fillMaxWidth().clickable(onClickLabel = "Open record") { onOpen(index) }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        Image(painterResource(item.transaction.provider.iconRes), item.transaction.provider.displayName,
+                            Modifier.size(36.dp).clip(MaterialTheme.shapes.small))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(item.role, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(item.title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(if (at.atZone(AccountingTime.zone).toLocalDate() == parentDay) formatTime(at) else formatDate(at),
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Text(item.signedAmount, style = MaterialTheme.typography.titleSmall,
+                            color = if (item.transaction.direction == Direction.CREDIT) incomeColor() else MaterialTheme.colorScheme.onSurface)
+                    }
                 }
                 groupNetMinor(records)?.let { net ->
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                     val currency = records.first().transaction.money.currencyCode
                     val amount = formatMinorAmount(java.math.BigInteger.valueOf(kotlin.math.abs(net)), currency)
-                    ListItem(
-                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        headlineContent = { Text("Net", fontWeight = FontWeight.SemiBold) },
-                        trailingContent = {
-                            Text(when { net < 0 -> "+$amount"; else -> amount },
-                                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
-                                color = if (net < 0) incomeColor() else MaterialTheme.colorScheme.onSurface)
-                        },
-                    )
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Net", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        Text(if (net < 0) "+$amount" else amount, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                            color = if (net < 0) incomeColor() else MaterialTheme.colorScheme.onSurface)
+                    }
                 }
             }
         }
+    }
+}
+
+/** Space above a section, on top of the sheet's line spacing, so sections read as separate groups. */
+private val SectionGap = 14.dp
+
+@Composable
+private fun SectionHeading(title: String, supporting: String? = null) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+        supporting?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 
@@ -855,8 +866,8 @@ private fun GroupRecordDetails(item: GroupRecord, minHeight: androidx.compose.ui
 
 @Composable
 private fun DetailCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
+    Column(Modifier.fillMaxWidth().padding(top = SectionGap), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SectionHeading(title)
         content()
     }
 }

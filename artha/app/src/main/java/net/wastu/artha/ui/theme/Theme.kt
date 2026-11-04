@@ -3,7 +3,9 @@ package net.wastu.artha.ui.theme
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -16,61 +18,61 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 
 internal val LightColors = lightColorScheme(
-    primary = Color(0xFF276749),
-    surfaceTint = Color(0xFF276749),
+    primary = Color(0xFF006D40),
+    surfaceTint = Color(0xFF006D40),
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFD3EEDB),
-    onPrimaryContainer = Color(0xFF102D1F),
-    secondary = Color(0xFF506353),
-    secondaryContainer = Color(0xFFD3E8D4),
-    onSecondaryContainer = Color(0xFF112715),
-    tertiary = Color(0xFF3B6472),
-    tertiaryContainer = Color(0xFFC0EAF7),
-    onTertiaryContainer = Color(0xFF001F28),
-    background = Color(0xFFF7FAF5),
-    onBackground = Color(0xFF18211B),
-    surface = Color(0xFFF7FAF5),
-    surfaceVariant = Color(0xFFDFE5DD),
-    surfaceBright = Color(0xFFF7FAF5),
-    surfaceDim = Color(0xFFD7DDD4),
+    primaryContainer = Color(0xFF8CF8BA),
+    onPrimaryContainer = Color(0xFF002110),
+    secondary = Color(0xFF4F6354),
+    secondaryContainer = Color(0xFFD2E8D5),
+    onSecondaryContainer = Color(0xFF0C1F13),
+    tertiary = Color(0xFF3B6471),
+    tertiaryContainer = Color(0xFFBFE9F8),
+    onTertiaryContainer = Color(0xFF001F27),
+    background = Color(0xFFF6FAF3),
+    onBackground = Color(0xFF181D19),
+    surface = Color(0xFFF6FAF3),
+    surfaceVariant = Color(0xFFDCE5DD),
+    surfaceBright = Color(0xFFF6FAF3),
+    surfaceDim = Color(0xFFD7DED6),
     surfaceContainerLowest = Color(0xFFFFFFFF),
-    surfaceContainerHighest = Color(0xFFDFE5DD),
-    onSurface = Color(0xFF18211B),
-    onSurfaceVariant = Color(0xFF414A43),
-    surfaceContainer = Color(0xFFEBF0E9),
-    surfaceContainerLow = Color(0xFFF1F5EE),
-    surfaceContainerHigh = Color(0xFFE5EAE3),
-    outline = Color(0xFF717A72),
-    outlineVariant = Color(0xFFC1CAC1),
+    surfaceContainerHighest = Color(0xFFDCE5DD),
+    onSurface = Color(0xFF181D19),
+    onSurfaceVariant = Color(0xFF404943),
+    surfaceContainer = Color(0xFFEBEFE8),
+    surfaceContainerLow = Color(0xFFF0F5EE),
+    surfaceContainerHigh = Color(0xFFE5EAE2),
+    outline = Color(0xFF707973),
+    outlineVariant = Color(0xFFC0C9C1),
 )
 
 internal val DarkColors = darkColorScheme(
-    primary = Color(0xFF9BD5AE),
-    surfaceTint = Color(0xFF9BD5AE),
-    onPrimary = Color(0xFF00391D),
-    primaryContainer = Color(0xFF145132),
-    onPrimaryContainer = Color(0xFFB6F1C8),
-    secondary = Color(0xFFB7CCB8),
-    secondaryContainer = Color(0xFF394C3D),
-    onSecondaryContainer = Color(0xFFD3E8D4),
-    tertiary = Color(0xFFA0CDDB),
-    tertiaryContainer = Color(0xFF214C59),
-    onTertiaryContainer = Color(0xFFC0EAF7),
-    background = Color(0xFF101510),
-    onBackground = Color(0xFFDEE5DB),
-    surface = Color(0xFF101510),
-    surfaceVariant = Color(0xFF414A43),
-    surfaceBright = Color(0xFF353C35),
-    surfaceDim = Color(0xFF101510),
-    surfaceContainerLowest = Color(0xFF0B100B),
-    surfaceContainerHighest = Color(0xFF30372F),
-    onSurface = Color(0xFFDEE5DB),
-    onSurfaceVariant = Color(0xFFC1CAC1),
-    surfaceContainer = Color(0xFF1B211B),
-    surfaceContainerLow = Color(0xFF171D17),
-    surfaceContainerHigh = Color(0xFF252C25),
-    outline = Color(0xFF8B958B),
-    outlineVariant = Color(0xFF414A43),
+    primary = Color(0xFF6CDBA0),
+    surfaceTint = Color(0xFF6CDBA0),
+    onPrimary = Color(0xFF00391E),
+    primaryContainer = Color(0xFF00522E),
+    onPrimaryContainer = Color(0xFF8CF8BA),
+    secondary = Color(0xFFB6CCB9),
+    secondaryContainer = Color(0xFF374B3D),
+    onSecondaryContainer = Color(0xFFD2E8D5),
+    tertiary = Color(0xFFA3CDDC),
+    tertiaryContainer = Color(0xFF224C58),
+    onTertiaryContainer = Color(0xFFBFE9F8),
+    background = Color(0xFF0F1511),
+    onBackground = Color(0xFFDFE4DD),
+    surface = Color(0xFF0F1511),
+    surfaceVariant = Color(0xFF404943),
+    surfaceBright = Color(0xFF353B36),
+    surfaceDim = Color(0xFF0F1511),
+    surfaceContainerLowest = Color(0xFF0A0F0C),
+    surfaceContainerHighest = Color(0xFF2F3631),
+    onSurface = Color(0xFFDFE4DD),
+    onSurfaceVariant = Color(0xFFC0C9C1),
+    surfaceContainer = Color(0xFF1B211D),
+    surfaceContainerLow = Color(0xFF171D19),
+    surfaceContainerHigh = Color(0xFF252C27),
+    outline = Color(0xFF8A938C),
+    outlineVariant = Color(0xFF404943),
 )
 
 @Composable
@@ -86,7 +88,11 @@ fun ArthaTheme(
         darkTheme -> DarkColors
         else -> LightColors
     }
-    MaterialTheme(colorScheme = neutralSurfaces(accents, darkTheme), content = content)
+    MaterialExpressiveTheme(
+        colorScheme = neutralSurfaces(accents, darkTheme),
+        motionScheme = MotionScheme.expressive(),
+        content = content,
+    )
 }
 
 /** Keep page backgrounds calm while retaining wallpaper-derived action and selection accents. */

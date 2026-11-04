@@ -7,6 +7,8 @@ on:
       - 'artha/app/src/release/**'
       - 'artha/app/*.gradle*'
       - 'artha/app/proguard*.pro'
+      - 'artha/bridge/**'
+      - 'artha/ingestion/**'
       - 'artha/*.gradle*'
       - 'artha/gradle.properties'
       - 'artha/gradle/**'
@@ -60,20 +62,52 @@ jobs:
           python3 - <<'PY'
           import os, re, subprocess
           signer = os.path.join(os.environ['ANDROID_HOME'], 'build-tools', '36.0.0', 'apksigner')
-          output = subprocess.check_output([signer, 'verify', '--print-certs', 'artha/app/build/outputs/apk/release/app-release.apk'], text=True)
-          actual = re.search(r'certificate SHA-256 digest: (\w+)', output).group(1).lower()
           expected = re.sub(r'[:\s]', '', os.environ['ARTHA_ANDROID_CERTIFICATE_SHA256']).lower()
-          if not expected or actual != expected:
-              raise SystemExit('APK signing certificate does not match the release identity')
+          apks = [
+              'artha/app/build/outputs/apk/release/app-release.apk',
+              'artha/bridge/build/outputs/apk/release/bridge-release.apk'
+          ]
+          for apk in apks:
+              output = subprocess.check_output([signer, 'verify', '--print-certs', apk], text=True)
+              actual = re.search(r'certificate SHA-256 digest: (\w+)', output).group(1).lower()
+              if not expected or actual != expected:
+                  raise SystemExit(f'APK {apk} signing certificate does not match the release identity')
           PY
-      - name: Stage APK
+      - name: Stage APKs and update manifest
         env:
           VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.number }}
         run: |
           mkdir -p build/release
           cp artha/app/build/outputs/apk/release/app-release.apk "build/release/Artha-$VERSION_NAME.apk"
+          cp artha/bridge/build/outputs/apk/release/bridge-release.apk "build/release/Artha-Bridge-$VERSION_NAME.apk"
+          python3 - <<'PY'
+          import hashlib, json, os
+
+          version_name = os.environ['VERSION_NAME']
+          version_code = int(os.environ['VERSION_CODE'])
+
+          def get_info(path, filename):
+              size = os.path.getsize(path)
+              with open(path, 'rb') as f:
+                  sha256 = hashlib.sha256(f.read()).hexdigest().lower()
+              url = f"https://github.com/bgwastu/artha/releases/download/v{version_name}/{filename}"
+              return {"url": url, "sha256": sha256, "size": size}
+
+          manifest = {
+              "versionCode": version_code,
+              "versionName": version_name,
+              "apps": {
+                  "net.wastu.artha": get_info(f"build/release/Artha-{version_name}.apk", f"Artha-{version_name}.apk"),
+                  "net.wastu.artha.bridge": get_info(f"build/release/Artha-Bridge-{version_name}.apk", f"Artha-Bridge-{version_name}.apk")
+              }
+          }
+
+          with open("build/release/update.json", "w") as f:
+              json.dump(manifest, f, indent=2)
+          PY
           cd build/release
-          sha256sum "Artha-$VERSION_NAME.apk" > SHA256SUMS
+          sha256sum Artha-*.apk update.json > SHA256SUMS
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -232,7 +232,7 @@ class SourcesPresentationTest {
             )
         )
         assertEquals(
-            "Up to date",
+            "Partly synced",
             sourceHeadline(
                 Provider.GOJEK,
                 ProviderDiagnostic(accountStatus = AccountStatus.PARTIAL),

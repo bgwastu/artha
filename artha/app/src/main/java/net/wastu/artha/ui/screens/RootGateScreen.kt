@@ -13,8 +13,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -70,7 +70,7 @@ fun RootGateScreen(state: RootGateState, onRetry: () -> Unit) {
             )
             Spacer(Modifier.height(28.dp))
             if (checking) {
-                CircularProgressIndicator(modifier = Modifier.size(32.dp))
+                LoadingIndicator(modifier = Modifier.size(56.dp))
             } else {
                 Button(onClick = onRetry) {
                     Text("Retry Root Gate")

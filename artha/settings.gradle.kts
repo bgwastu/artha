@@ -18,4 +18,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Artha"
-include(":app")
+include(":app", ":bridge", ":ingestion")

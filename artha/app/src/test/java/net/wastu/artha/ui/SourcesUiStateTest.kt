@@ -104,4 +104,11 @@ class SourcesUiStateTest {
         private const val DAY_MILLIS = 24L * 60 * 60 * 1000
         private const val MS_NOW = 1_800_000_000_000L
     }
+
+    @Test
+    fun partialImportIsLabelledAsPartlySynced() {
+        val partial = ProviderDiagnostic(lastSyncEpochMillis = MS_NOW - 2 * 60_000, accountStatus = AccountStatus.PARTIAL, lastError = "1 refund unresolved")
+        assertEquals("Partly synced 2 min ago", sourceRowStatus(Provider.SHOPEE, partial, importEnabled = true, importing = false, now = MS_NOW))
+        assertEquals("Partly synced", sourceHeadline(Provider.SHOPEE, partial, importEnabled = true, importing = false))
+    }
 }

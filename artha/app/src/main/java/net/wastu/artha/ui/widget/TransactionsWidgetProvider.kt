@@ -1,5 +1,6 @@
 package net.wastu.artha.ui.widget
 
+import net.wastu.artha.core.model.iconRes
 import androidx.core.net.toUri
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager

@@ -1,6 +1,8 @@
 package net.wastu.artha.ui.screens
 
-import androidx.compose.material3.SegmentedButton
+import androidx.compose.material.icons.filled.PieChart
+import net.wastu.artha.ui.components.ConnectedChoiceRow
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.material.icons.filled.Category
@@ -78,7 +80,6 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -170,7 +171,7 @@ fun AnalysisScreen(
 
     if (ledgerState is net.wastu.artha.ui.LedgerState.Loading && savedTransactions.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(Modifier.semantics { contentDescription = "Loading saved spending" })
+            LoadingIndicator(Modifier.size(64.dp).semantics { contentDescription = "Loading saved spending" })
         }
         return
     }
@@ -203,16 +204,13 @@ fun AnalysisScreen(
             )
         }
         item(key = "type_toggle") {
-            val types = listOf(net.wastu.artha.core.model.TransactionType.EXPENSE to "Expenses", net.wastu.artha.core.model.TransactionType.INCOME to "Income")
-            androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                types.forEachIndexed { index, (type, label) ->
-                    SegmentedButton(
-                        selected = analysis.type == type,
-                        onClick = { viewModel.setAnalysisType(type) },
-                        shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(index, types.size),
-                    ) { Text(label) }
-                }
-            }
+            ConnectedChoiceRow(
+                options = listOf(net.wastu.artha.core.model.TransactionType.EXPENSE, net.wastu.artha.core.model.TransactionType.INCOME),
+                selected = analysis.type,
+                onSelect = viewModel::setAnalysisType,
+                label = { if (it == net.wastu.artha.core.model.TransactionType.INCOME) "Income" else "Expenses" },
+                modifier = Modifier.padding(vertical = 4.dp),
+            )
         }
         if (slices.isNotEmpty()) {
             item(key = "chart") {
@@ -318,12 +316,33 @@ fun AnalysisScreen(
         }
         if (slices.isEmpty()) {
             item(key = "empty_categories") {
-                Text(
-                    "No confirmed spending this month",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(vertical = 16.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                val income = analysis.type == net.wastu.artha.core.model.TransactionType.INCOME
+                Column(
+                    Modifier.fillMaxWidth().padding(vertical = 32.dp, horizontal = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    net.wastu.artha.ui.components.ShapeBadge(
+                        icon = Icons.Default.PieChart,
+                        polygon = androidx.compose.material3.MaterialShapes.Cookie12Sided,
+                        size = 80.dp,
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        iconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        if (income) "No income to break down" else "Nothing to break down yet",
+                        style = MaterialTheme.typography.titleMedium,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (income) "Categories appear here once income for this month is confirmed."
+                        else "Categories appear here once this month's spending is categorized.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
             }
         } else {
             items(slices.size, key = { slices[it].name }) { index ->

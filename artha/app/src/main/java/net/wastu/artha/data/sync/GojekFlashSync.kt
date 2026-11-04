@@ -140,7 +140,7 @@ class GojekScreenSync(
 
     /** True when a Gojek activity is resumed on the user's display, which means they have it open. */
     private suspend fun gojekResumed(): Boolean =
-        sh("dumpsys activity activities | awk '/^Display #/ { d = \$2 } /ResumedActivity/ && /com\\.gojek\\.app/ && d == \"#0\" { n++ } END { print n + 0 }'")
+        sh("dumpsys activity activities | awk '/^Display #/ { d = \$2 } /topResumedActivity=/ && /com\\.gojek\\.app/ && d == \"#0\" { n++ } END { print n + 0 }'")
             ?.firstOrNull()?.trim()?.toIntOrNull()?.let { it > 0 } ?: false
 
     private suspend fun sh(command: String): List<String>? = reader.executeCommandWithOutput(command)

@@ -6,15 +6,6 @@ import net.wastu.artha.core.model.Provider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-enum class AccountStatus {
-    UNKNOWN,
-    PARTIAL,
-    CONNECTED,
-    NEEDS_LOGIN,
-    APP_NOT_INSTALLED,
-    RATE_LIMITED,
-    ERROR,
-}
 
 data class ProviderDiagnostic(
     val lastSyncEpochMillis: Long? = null,
@@ -25,6 +16,8 @@ data class ProviderDiagnostic(
     val accountIdentifier: String? = null,
     val coverageHint: String? = null,
     val lastImportWindow: ProviderImportWindow? = null,
+    /** Set when Artha Bridge reported this state, so its counts are the whole history it read. */
+    val fromBridge: Boolean = false,
 )
 
 /** Observed payment dates in one import, never a guarantee of continuous history. */
@@ -98,6 +91,7 @@ class ProviderPreferences(context: Context) {
                         preferences.getLong("${p.name}_read_first_ms", Long.MIN_VALUE).takeUnless { it == Long.MIN_VALUE },
                         preferences.getLong("${p.name}_read_last_ms", Long.MIN_VALUE).takeUnless { it == Long.MIN_VALUE }) }.getOrNull()
                 },
+                fromBridge = preferences.getBoolean("${p.name}_from_bridge", false),
             )
         }
 
@@ -155,6 +149,45 @@ class ProviderPreferences(context: Context) {
             else putLong("${provider.name}_read_first_ms", importWindow.earliestMillis)
             if (importWindow?.latestMillis == null) remove("${provider.name}_read_last_ms")
             else putLong("${provider.name}_read_last_ms", importWindow.latestMillis)
+            remove("${provider.name}_from_bridge")
+        }
+        _diagnostics.value = current
+    }
+
+    /**
+     * Replaces each source's state with what Artha Bridge reported, as is: on a paired phone
+     * the bridge does the reading, so its times, counts and errors are the real ones.
+     */
+    @Synchronized
+    fun applyBridgeStatuses(statuses: List<net.wastu.artha.core.bridge.BridgeSourceStatus>) {
+        if (statuses.isEmpty()) return
+        val current = _diagnostics.value.toMutableMap()
+        preferences.edit {
+            for (s in statuses) {
+                val window = s.paymentCount?.let { count ->
+                    runCatching { ProviderImportWindow(count, s.earliestMillis, s.latestMillis) }.getOrNull()
+                }
+                current[s.provider] = ProviderDiagnostic(
+                    lastSyncEpochMillis = s.syncedAt, lastAttemptEpochMillis = s.attemptedAt,
+                    lastSyncSummary = s.summary, lastError = s.error, accountStatus = s.status,
+                    accountIdentifier = s.accountIdentifier, coverageHint = s.coverageHint, lastImportWindow = window,
+                    fromBridge = true,
+                )
+                val p = s.provider.name
+                fun putOrRemove(key: String, value: String?) { if (value == null) remove(key) else putString(key, value) }
+                fun putOrRemove(key: String, value: Long?) { if (value == null) remove(key) else putLong(key, value) }
+                putOrRemove("${p}_last_sync_ms", s.syncedAt)
+                putLong("${p}_last_attempt_ms", s.attemptedAt)
+                putOrRemove("${p}_last_summary", s.summary)
+                putOrRemove("${p}_last_error", s.error)
+                putString("${p}_status", s.status.name)
+                putOrRemove("${p}_identifier", s.accountIdentifier)
+                putOrRemove("${p}_coverage_hint", s.coverageHint)
+                putOrRemove("${p}_read_count", window?.paymentCount?.toLong())
+                putOrRemove("${p}_read_first_ms", window?.earliestMillis)
+                putOrRemove("${p}_read_last_ms", window?.latestMillis)
+                putBoolean("${p}_from_bridge", true)
+            }
         }
         _diagnostics.value = current
     }
@@ -185,4 +218,60 @@ class ProviderPreferences(context: Context) {
         _diagnostics.value = current
     }
 
+    fun getJagoPin(): String? = preferences.getString("JAGO_pin", null)
+
+    /** When the user last set or cleared the PIN here; 0 if never, so it never overrides another phone. */
+    fun getJagoPinChangedAt(): Long =
+        preferences.getLong("JAGO_pin_changed_ms", if (getJagoPin() != null) 1L else 0L)
+
+    private val _jagoPinSet = MutableStateFlow(!getJagoPin().isNullOrBlank())
+    /** Whether Bank Jago's background PIN is set; without it Jago only syncs when opened. */
+    val jagoPinSet = _jagoPinSet.asStateFlow()
+
+    fun setJagoPin(pin: String?) {
+        val next = pin?.trim()?.takeIf { it.isNotEmpty() }
+        val changed = next != getJagoPin()
+        preferences.edit {
+            if (next == null) remove("JAGO_pin") else putString("JAGO_pin", next)
+            if (changed) {
+                remove("JAGO_pin_check")
+                putLong("JAGO_pin_changed_ms", System.currentTimeMillis())
+            }
+        }
+        _jagoPinSet.value = next != null
+        if (changed) _jagoPinCheck.value = JagoPinCheck()
+    }
+
+    private val _jagoPinCheck = MutableStateFlow(loadJagoPinCheck())
+    /** What happened when Artha Bridge last typed the current PIN into Bank Jago. */
+    val jagoPinCheck = _jagoPinCheck.asStateFlow()
+
+    /** Records the bridge's result, if it is about the PIN saved here now. */
+    fun recordJagoPinCheck(fingerprint: String, result: String, detail: String) {
+        val pin = getJagoPin() ?: return
+        if (fingerprint != jagoPinFingerprint(pin)) return
+        val status = when (result) {
+            "ok" -> JagoPinStatus.VERIFIED
+            "wrong" -> JagoPinStatus.WRONG
+            else -> JagoPinStatus.UNVERIFIED
+        }
+        preferences.edit { putString("JAGO_pin_check", "${status.name}|$detail") }
+        _jagoPinCheck.value = JagoPinCheck(status, detail)
+    }
+
+    private fun loadJagoPinCheck(): JagoPinCheck {
+        val raw = preferences.getString("JAGO_pin_check", null) ?: return JagoPinCheck()
+        val status = runCatching { JagoPinStatus.valueOf(raw.substringBefore('|')) }.getOrNull() ?: return JagoPinCheck()
+        return JagoPinCheck(status, raw.substringAfter('|', "").ifBlank { null })
+    }
 }
+
+enum class JagoPinStatus { UNCHECKED, VERIFIED, WRONG, UNVERIFIED }
+
+data class JagoPinCheck(val status: JagoPinStatus = JagoPinStatus.UNCHECKED, val detail: String? = null)
+
+/** Matches Artha Bridge's fingerprint, so its status names a PIN without carrying it. */
+fun jagoPinFingerprint(pin: String): String =
+    java.security.MessageDigest.getInstance("SHA-256")
+        .digest("artha-jago-pin:${pin.trim()}".toByteArray(Charsets.UTF_8))
+        .take(8).joinToString("") { "%02x".format(it) }

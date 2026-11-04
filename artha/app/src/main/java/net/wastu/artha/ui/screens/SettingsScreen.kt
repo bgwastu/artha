@@ -1,5 +1,6 @@
 package net.wastu.artha.ui.screens
 
+import net.wastu.artha.ui.components.Segment
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,14 +35,15 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SettingsSuggest
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Widgets
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -68,6 +71,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -117,6 +121,7 @@ import androidx.compose.material.icons.filled.Widgets
 internal fun SettingsScreen(
     viewModel: ArthaViewModel?,
     onOpen: (Page) -> Unit,
+    bridgeReady: Boolean = true,
 ) {
     val snapshot by viewModel?.analysisSnapshot?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val tunnelState by net.wastu.artha.api.service.ApiServerController.tunnelState.collectAsStateWithLifecycle()
@@ -128,19 +133,107 @@ internal fun SettingsScreen(
         is net.wastu.artha.api.tunnel.TunnelState.Failed -> "Could not connect"
         is net.wastu.artha.api.tunnel.TunnelState.Inactive -> "Off"
     }
+    val context = LocalContext.current
+    val updater = (context.applicationContext as? net.wastu.artha.ArthaApplication)?.updater
+    val updateState by updater?.state?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val updateSummary = when (val s = updateState) {
+        is net.wastu.artha.core.update.UpdateState.Ready -> "Update ready (${s.versionName})"
+        is net.wastu.artha.core.update.UpdateState.Downloading -> "Downloading... (${(s.progress * 100).toInt()}%)"
+        is net.wastu.artha.core.update.UpdateState.Checking -> "Checking for updates..."
+        is net.wastu.artha.core.update.UpdateState.Installing -> "Installing ${s.versionName}..."
+        is net.wastu.artha.core.update.UpdateState.WaitingForConfirmation -> "Confirmation requested"
+        is net.wastu.artha.core.update.UpdateState.Failed -> "Update check failed"
+        is net.wastu.artha.core.update.UpdateState.UpToDate -> "Up to date"
+        else -> updater?.installedVersionName?.ifBlank { null }?.let { "v$it" } ?: "Check for updates"
+    }
+    val locked = !bridgeReady
+    // Nothing to fix while Artha is locked; pairing comes first.
+    val attention = rememberAttentionItems().takeUnless { locked }.orEmpty()
+    val sourcesAttention = attention.filter { it.scope is net.wastu.artha.data.attention.AttentionScope.Source }
     LazyColumn(Modifier.widthIn(max = 600.dp).fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
-        item { SettingsLink("Sources", "Choose which apps to import", Icons.Default.AccountBalanceWallet) { onOpen(Page.SOURCES) } }
-        item { SettingsLink("Categories", "Expense and income categories", Icons.Default.Category) { onOpen(Page.CATEGORIES) } }
+        item { BridgeHeader(paired = bridgeReady) { onOpen(Page.BRIDGE) } }
+        item { Spacer(Modifier.height(8.dp)) }
+        item {
+            SettingsLink(
+                "Sources",
+                "Choose which apps to import",
+                Icons.Default.AccountBalanceWallet,
+                enabled = !locked,
+                attention = sourcesAttention,
+                segment = Segment.First,
+            ) { onOpen(Page.SOURCES) }
+        }
+        item { SettingsLink("Categories", "Expense and income categories", Icons.Default.Category, enabled = !locked, segment = Segment.Middle) { onOpen(Page.CATEGORIES) } }
         if (viewModel != null) {
-            item { SettingsLink("AI categorization", aiSummary, Icons.Default.SettingsSuggest) { onOpen(Page.AI) } }
-            item { SettingsLink("Remote access", remoteSummary, Icons.Default.Link) { onOpen(Page.REMOTE) } }
-            item { SettingsLink("Export and import", "Back up or restore your data", Icons.Default.FileDownload) { onOpen(Page.DATA) } }
+            item { SettingsLink("AI categorization", aiSummary, Icons.Default.SettingsSuggest, enabled = !locked, segment = Segment.Last) { onOpen(Page.AI) } }
+            item { Spacer(Modifier.height(16.dp)) }
+            item { SettingsLink("Remote access", remoteSummary, Icons.Default.Link, enabled = !locked, segment = Segment.First) { onOpen(Page.REMOTE) } }
+            item { SettingsLink("Export and import", "Back up or restore your data", Icons.Default.FileDownload, enabled = !locked, segment = Segment.Middle) { onOpen(Page.DATA) } }
+            item { SettingsLink("Updates", updateSummary, Icons.Default.SystemUpdate, enabled = !locked, segment = Segment.Last) { onOpen(Page.UPDATES) } }
+            item { Spacer(Modifier.height(16.dp)) }
         }
         item {
-            ListItem(
-                headlineContent = { Text("Widgets") },
-                supportingContent = { Text("Add from your home screen") },
-                leadingContent = { Icon(Icons.Default.Widgets, null) },
+            SettingsLink(
+                "Widgets",
+                "Add from your home screen",
+                Icons.Default.Widgets,
+                enabled = !locked,
+                segment = Segment.Single,
+                onClick = null,
+            )
+        }
+    }
+}
+
+/** Status card pinned to the top of Settings. Artha is unusable until the bridge is paired. */
+@Composable
+private fun BridgeHeader(paired: Boolean, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val context = LocalContext.current
+    val bridgePrefs = (context.applicationContext as? net.wastu.artha.ArthaApplication)?.bridgePreferences
+    val lastConnected = remember(paired) { bridgePrefs?.getBridgeLastSeenMillis() }
+    // Name the bridge phone once it has answered; until then, the product name.
+    val title = remember(paired) { bridgePrefs?.getBridgeDeviceName()?.takeIf { paired } } ?: "Artha Bridge"
+    val status = if (paired) bridgeLastConnectedLabel(lastConnected) else "Not connected · pair to start using Artha"
+    Surface(
+        onClick = onClick,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
+        color = if (paired) colors.surfaceContainer else colors.errorContainer.copy(alpha = 0.45f),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                color = if (paired) colors.primaryContainer else colors.error.copy(alpha = 0.18f),
+                modifier = Modifier.size(44.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Devices,
+                        contentDescription = null,
+                        tint = if (paired) colors.onPrimaryContainer else colors.error,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                    color = colors.onSurface,
+                )
+                Text(
+                    status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (paired) colors.onSurfaceVariant else colors.error,
+                )
+            }
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = if (paired) colors.onSurfaceVariant else colors.onErrorContainer,
             )
         }
     }
@@ -195,10 +288,11 @@ internal fun DataScreen(viewModel: ArthaViewModel, onBack: () -> Unit) {
         },
     ) { padding ->
         Column(Modifier.padding(padding).widthIn(max = 600.dp)) {
-            SettingsLink("Export backup", if (exporting) "Exporting" else "Save all data to a file", Icons.Default.FileDownload) {
+            Spacer(Modifier.height(8.dp))
+            SettingsLink("Export backup", if (exporting) "Exporting" else "Save all data to a file", Icons.Default.FileDownload, segment = Segment.First) {
                 if (!exporting) exportDocument.launch(viewModel.suggestedExportFileName())
             }
-            SettingsLink("Import backup", if (importingFile) "Importing" else "Restore from a backup file", Icons.Default.FileUpload) {
+            SettingsLink("Import backup", if (importingFile) "Importing" else "Restore from a backup file", Icons.Default.FileUpload, segment = Segment.Last) {
                 if (!importingFile) importDocument.launch(arrayOf("application/json", "application/*", "text/*", "*/*"))
             }
         }

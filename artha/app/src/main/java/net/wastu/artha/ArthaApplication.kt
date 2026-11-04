@@ -28,15 +28,24 @@ class ArthaApplication : Application() {
     val ledger by lazy { RoomLedgerRepository(database.transactions()) }
     val spending by lazy { net.wastu.artha.data.analysis.SpendingRepository(ledger, analysisStore, applicationScope) }
     val providerPreferences by lazy { net.wastu.artha.data.providers.ProviderPreferences(applicationContext) }
+    val attention by lazy { net.wastu.artha.data.attention.AttentionRepository(providerPreferences, applicationScope) }
     val analysisStore by lazy { net.wastu.artha.data.analysis.AnalysisStore(applicationContext) }
     val ingestion by lazy {
         val files = net.wastu.artha.data.ingestion.RootFileReader(applicationContext)
         val reader = net.wastu.artha.data.ingestion.JagoTransactionReader(files)
+        val isInteractive = { getSystemService(PowerManager::class.java)?.isInteractive == true }
+        val jagoSync = net.wastu.artha.data.sync.JagoScreenSync(
+            files,
+            isInteractive,
+            { false },
+            { providerPreferences.getJagoPin() },
+        )
+        val sessionWake = net.wastu.artha.data.sync.AppSessionWakeSync(files, isInteractive, { false })
         val adapters = listOf(
-            net.wastu.artha.data.ingestion.JagoProviderAdapter(reader),
-            net.wastu.artha.data.ingestion.ShopeeProviderAdapter(files),
+            net.wastu.artha.data.ingestion.JagoProviderAdapter(reader, jagoSync),
+            net.wastu.artha.data.ingestion.ShopeeProviderAdapter(files, sessionWake),
             net.wastu.artha.data.ingestion.GojekProviderAdapter(files),
-            net.wastu.artha.data.ingestion.GrabProviderAdapter(files),
+            net.wastu.artha.data.ingestion.GrabProviderAdapter(files, sessionWake),
         )
         IngestionCoordinator(rootAccess, { ledger }, adapters, reader::invalidate, preferences = providerPreferences)
     }
@@ -49,16 +58,53 @@ class ArthaApplication : Application() {
             { ledger.loadTransactions() },
         )
     }
+    val bridgePreferences by lazy { net.wastu.artha.data.sync.bridge.BridgePreferences(applicationContext) }
+    val bridgeCoordinator by lazy {
+        net.wastu.artha.data.sync.bridge.BridgeSyncCoordinator(
+            bridgePreferences = bridgePreferences,
+            providerPreferences = providerPreferences,
+            ingestion = ingestion,
+            loadLedgerTransactions = { ledger.loadTransactions() },
+            jagoScreenSync = null,
+            sessionWake = null,
+            gojekFlash = gojekFlash,
+            onNewTransactions = { transactions ->
+                ledger.appendProviderImport(transactions)
+                AnalysisWidgetProvider.triggerUpdate(this@ArthaApplication)
+                TransactionsWidgetProvider.triggerUpdate(this@ArthaApplication)
+            },
+        )
+    }
+
+    val updater by lazy {
+        net.wastu.artha.core.update.AppUpdater(
+            this,
+            net.wastu.artha.core.update.SessionUpdateInstaller(this),
+        )
+    }
+
+    private var startedActivities = 0
+    val isAppInForeground: Boolean get() = startedActivities > 0
 
     fun syncInBackground(provider: Provider? = null, force: Boolean = false): kotlinx.coroutines.Job =
         applicationScope.launch {
             if (BuildConfig.DEMO) return@launch
+            var readsLocally = false
             try {
-                if (!rootAccess.verify()) return@launch
-                val result = if (provider != null) {
-                    mapOf(provider to ingestion.syncProvider(provider))
+                if (rootAccess.verify()) {
+                    readsLocally = true
+                    val result = if (provider != null) {
+                        mapOf(provider to ingestion.syncProvider(provider))
+                    } else {
+                        ingestion.ingestAll(force = force)
+                    }
+                    if (bridgePreferences.hasPairing()) {
+                        bridgeCoordinator.sync()
+                    }
+                } else if (bridgePreferences.hasPairing()) {
+                    bridgeCoordinator.sync()
                 } else {
-                    ingestion.ingestAll(force = force)
+                    return@launch
                 }
                 AnalysisWidgetProvider.triggerUpdate(this@ArthaApplication)
                 TransactionsWidgetProvider.triggerUpdate(this@ArthaApplication)
@@ -66,9 +112,12 @@ class ArthaApplication : Application() {
                 throw e
             } catch (e: Exception) {
                 val message = e.message?.takeIf { it.isNotBlank() } ?: "Sync failed"
-                for (p in provider?.let { listOf(it) } ?: providerPreferences.importEnabled.value) {
-                    providerPreferences.recordSyncError(p, message)
-                }
+                // A paired phone shows the bridge's source state; a relay hiccup here says nothing about the sources.
+                if (readsLocally || !bridgePreferences.hasPairing()) {
+                    for (p in provider?.let { listOf(it) } ?: providerPreferences.importEnabled.value) {
+                        providerPreferences.recordSyncError(p, message)
+                    }
+                } else android.util.Log.w("ArthaBridgeSync", "Bridge sync failed: ${e.javaClass.simpleName}")
             }
         }
 
@@ -110,11 +159,6 @@ class ArthaApplication : Application() {
         }
     }
 
-    private fun toast(message: String) {
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            android.widget.Toast.makeText(applicationContext, message, android.widget.Toast.LENGTH_LONG).show()
-        }
-    }
 
     fun syncInBackgroundIfStale() {
         val anyStale = providerPreferences.importEnabled.value.any { providerPreferences.isStale(it) }
@@ -125,11 +169,26 @@ class ArthaApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityStarted(activity: android.app.Activity) { startedActivities++ }
+            override fun onActivityStopped(activity: android.app.Activity) { startedActivities-- }
+            override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) {}
+            override fun onActivityResumed(activity: android.app.Activity) {}
+            override fun onActivityPaused(activity: android.app.Activity) {}
+            override fun onActivitySaveInstanceState(activity: android.app.Activity, outState: android.os.Bundle) {}
+            override fun onActivityDestroyed(activity: android.app.Activity) {}
+        })
         if (BuildConfig.DEMO) {
             resetDemoIfNewDay()
             applicationScope.launch { seedDemoLedger() }
         } else {
             BackgroundSyncScheduler.schedule(this)
+            net.wastu.artha.core.update.AppUpdateScheduler.schedule(this)
+            applicationScope.launch {
+                if (updater.isCheckDue(net.wastu.artha.core.update.AppUpdateScheduler.INTERVAL_MILLIS)) {
+                    updater.update(install = false)
+                }
+            }
         }
         applicationScope.launch {
             spending.state
