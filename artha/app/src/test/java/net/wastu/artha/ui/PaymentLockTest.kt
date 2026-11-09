@@ -1,5 +1,6 @@
 package net.wastu.artha.ui
 
+import java.time.Instant
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.Provider
@@ -8,14 +9,12 @@ import net.wastu.artha.data.analysis.CategoryProgress
 import net.wastu.artha.data.analysis.PaymentCategoryState
 import net.wastu.artha.data.analysis.paymentCategoryState
 import net.wastu.artha.data.analysis.paymentCategoryStateLabel
-import net.wastu.artha.ui.screens.PeerPrompt
 import net.wastu.artha.ui.screens.TransactionDetailsState
 import net.wastu.artha.ui.screens.canEditTransaction
 import net.wastu.artha.ui.screens.paymentCategoryRowSupporting
 import net.wastu.artha.ui.screens.paymentNoteRowSupporting
 import org.junit.Assert.*
 import org.junit.Test
-import java.time.Instant
 
 class PaymentLockTest {
 
@@ -105,24 +104,6 @@ class PaymentLockTest {
         assertFalse(state.saving)
         assertEquals("Dining", state.categoryDraft)
         assertEquals("Category saved", state.savedFeedback)
-    }
-
-    @Test
-    fun applyMerchantPromptGuardsWhenBusy() {
-        val state = TransactionDetailsState().apply {
-            peerPrompt = PeerPrompt("Food", "Starbucks", 3)
-        }
-        var appliedCount = 0
-
-        state.applyMerchantPrompt(isBusy = true) {
-            appliedCount++
-        }
-        assertEquals(0, appliedCount)
-
-        state.applyMerchantPrompt(isBusy = false) { prompt ->
-            appliedCount += prompt.peerCount
-        }
-        assertEquals(3, appliedCount)
     }
 
     @Test

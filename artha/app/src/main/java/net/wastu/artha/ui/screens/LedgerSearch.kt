@@ -55,9 +55,9 @@ import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.analysis.CategoryProgress
 import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.LedgerState
+import net.wastu.artha.ui.components.collectOrDefault
 import net.wastu.artha.ui.formatMoney
 import net.wastu.artha.ui.transactionHumanLine
-import net.wastu.artha.ui.components.collectOrDefault
 
 private data class SearchEntry(val transaction: UnifiedTransaction, val fields: List<String>)
 private data class SearchResults(val query: String, val transactions: List<UnifiedTransaction>)

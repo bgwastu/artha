@@ -1,7 +1,7 @@
 package net.wastu.artha.data.ledger
 
-import net.wastu.artha.core.model.UnifiedTransaction
 import kotlinx.coroutines.flow.Flow
+import net.wastu.artha.core.model.UnifiedTransaction
 
 data class AppendResult(val inserted: Int, val duplicates: Int, val evidenceUpdates: Int = 0)
 

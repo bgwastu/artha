@@ -2,11 +2,11 @@ package net.wastu.artha.data.ingestion
 
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import net.wastu.artha.ArthaApplication
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.data.reconciliation.LedgerReconciler
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

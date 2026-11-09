@@ -2,9 +2,9 @@ package net.wastu.artha.data.providers
 
 import android.content.Context
 import androidx.core.content.edit
-import net.wastu.artha.core.model.Provider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import net.wastu.artha.core.model.Provider
 
 
 data class ProviderDiagnostic(

@@ -1,5 +1,6 @@
 package net.wastu.artha.api
 
+import java.time.Instant
 import net.wastu.artha.api.model.BatchUpdateRequest
 import net.wastu.artha.api.model.BatchUpdateResponse
 import net.wastu.artha.api.model.TransactionSummaryDto
@@ -16,7 +17,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.Instant
 
 class ApiContractTest {
 

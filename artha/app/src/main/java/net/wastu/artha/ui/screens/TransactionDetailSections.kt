@@ -38,6 +38,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
@@ -46,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import net.wastu.artha.core.model.TransactionType
 import net.wastu.artha.core.model.UnifiedTransaction
+import net.wastu.artha.data.analysis.AnalysisSnapshot
 import net.wastu.artha.data.analysis.CategorySource
 import net.wastu.artha.data.analysis.RecategorizeScope
 import net.wastu.artha.data.analysis.categoryReasonText
@@ -54,9 +57,6 @@ import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.categoryIconFor
 import net.wastu.artha.ui.theme.expenseColor
 import net.wastu.artha.ui.theme.incomeColor
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import net.wastu.artha.data.analysis.AnalysisSnapshot
 import org.json.JSONArray
 
 @Composable

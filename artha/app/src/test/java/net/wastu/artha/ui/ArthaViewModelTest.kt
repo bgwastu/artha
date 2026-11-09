@@ -1,10 +1,5 @@
 package net.wastu.artha.ui
 
-import net.wastu.artha.core.model.UnifiedTransaction
-import net.wastu.artha.core.root.RootAccess
-import net.wastu.artha.core.root.RootGateState
-import net.wastu.artha.data.ledger.AppendResult
-import net.wastu.artha.data.ledger.LedgerRepository
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -14,6 +9,11 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import net.wastu.artha.core.model.UnifiedTransaction
+import net.wastu.artha.core.root.RootAccess
+import net.wastu.artha.core.root.RootGateState
+import net.wastu.artha.data.ledger.AppendResult
+import net.wastu.artha.data.ledger.LedgerRepository
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before

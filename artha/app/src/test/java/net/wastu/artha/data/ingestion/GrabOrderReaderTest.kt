@@ -1,7 +1,5 @@
 package net.wastu.artha.data.ingestion
 
-import org.junit.Assert.assertEquals
-import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.util.Base64
 import javax.crypto.Cipher
@@ -10,6 +8,8 @@ import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
+import org.junit.Assert.assertEquals
+import org.junit.Test
 
 class GrabOrderReaderTest {
 

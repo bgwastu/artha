@@ -1,8 +1,8 @@
 package net.wastu.artha.data.ingestion
 
 import java.time.Instant
-import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.runTest
 import net.wastu.artha.core.model.*
 import net.wastu.artha.core.root.RootAccess
 import net.wastu.artha.data.ledger.*

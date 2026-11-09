@@ -1,12 +1,12 @@
 package net.wastu.artha.data.analysis
 
+import java.time.Instant
+import java.time.YearMonth
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.Pocket
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
-import java.time.Instant
-import java.time.YearMonth
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test

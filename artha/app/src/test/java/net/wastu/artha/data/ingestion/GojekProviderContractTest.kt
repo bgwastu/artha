@@ -1,7 +1,7 @@
 package net.wastu.artha.data.ingestion
 
-import java.io.ByteArrayOutputStream
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.Base64

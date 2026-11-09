@@ -1,5 +1,6 @@
 package net.wastu.artha.data.demo
 
+import java.time.Instant
 import kotlinx.coroutines.delay
 import net.wastu.artha.core.model.AccountingTime
 import net.wastu.artha.data.analysis.AiCategorization
@@ -7,7 +8,6 @@ import net.wastu.artha.data.analysis.AiConfig
 import net.wastu.artha.data.analysis.AnalysisSnapshot
 import net.wastu.artha.data.analysis.CategoryCandidate
 import net.wastu.artha.data.analysis.CategorySuggestion
-import java.time.Instant
 
 /** Stands in for the model in the demo build: waits like a request would, then answers from the generated ledger. */
 object DemoAi {

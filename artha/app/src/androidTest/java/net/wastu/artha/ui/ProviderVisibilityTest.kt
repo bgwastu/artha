@@ -6,6 +6,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import java.time.Instant
+import kotlinx.coroutines.flow.MutableStateFlow
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.Provider
@@ -15,8 +17,6 @@ import net.wastu.artha.data.ledger.AppendResult
 import net.wastu.artha.data.ledger.LedgerRepository
 import net.wastu.artha.data.providers.ProviderPreferences
 import net.wastu.artha.ui.theme.ArthaTheme
-import java.time.Instant
-import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test

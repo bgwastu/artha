@@ -1,7 +1,6 @@
 package net.wastu.artha.ui
 
 import java.time.Instant
-import net.wastu.artha.data.analysis.aiRecords
 import java.time.LocalDate
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Money
@@ -11,6 +10,7 @@ import net.wastu.artha.data.analysis.AI_REASON_PREFIX
 import net.wastu.artha.data.analysis.AiConfig
 import net.wastu.artha.data.analysis.AnalysisSnapshot
 import net.wastu.artha.data.analysis.CategoryConfidence
+import net.wastu.artha.data.analysis.aiRecords
 import net.wastu.artha.ui.screens.buildReviewQueue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

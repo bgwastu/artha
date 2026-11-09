@@ -1,5 +1,8 @@
 package net.wastu.artha.data.ingestion
 
+import java.time.Instant
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.runTest
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.Provider
@@ -7,9 +10,6 @@ import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.core.root.RootAccess
 import net.wastu.artha.data.ledger.AppendResult
 import net.wastu.artha.data.ledger.LedgerRepository
-import java.time.Instant
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

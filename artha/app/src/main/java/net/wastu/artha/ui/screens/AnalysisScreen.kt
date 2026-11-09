@@ -79,8 +79,8 @@ import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.TransactionType
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.analysis.CategoryAttention
-import net.wastu.artha.data.analysis.CategoryProgress
 import net.wastu.artha.data.analysis.CategoryAutomationState
+import net.wastu.artha.data.analysis.CategoryProgress
 import net.wastu.artha.data.analysis.RecategorizeScope
 import net.wastu.artha.data.analysis.categoryAttention
 import net.wastu.artha.data.analysis.categoryProgressLabel

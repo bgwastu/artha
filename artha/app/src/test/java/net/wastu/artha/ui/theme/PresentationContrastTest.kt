@@ -4,11 +4,11 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import java.io.File
-import net.wastu.artha.ui.widget.WidgetPalette
-import org.junit.Assert.assertTrue
-import org.junit.Assert.assertNotEquals
-import org.junit.Test
 import kotlin.math.pow
+import net.wastu.artha.ui.widget.WidgetPalette
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
 
 class PresentationContrastTest {
     @Test fun fallbackThemesHaveReadableTextAndActionPairs() {
