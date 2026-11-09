@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.verticalScroll
@@ -593,7 +592,7 @@ private fun TransactionDetailsBody(
                                 .fillMaxWidth()
                                 .background(
                                     MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                    RoundedCornerShape(12.dp),
+                                    MaterialTheme.shapes.small,
                                 )
                                 .padding(12.dp),
                         ) {
@@ -981,7 +980,7 @@ private fun CategoryPickerView(
                 }
             },
             singleLine = true,
-            shape = RoundedCornerShape(12.dp),
+            shape = MaterialTheme.shapes.small,
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -995,7 +994,7 @@ private fun CategoryPickerView(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(MaterialTheme.shapes.small)
                     .background(MaterialTheme.colorScheme.primaryContainer)
                     .clickable(enabled = !saving) {
                         onSelectCategory(queryTrimmed)
@@ -1029,7 +1028,7 @@ private fun CategoryPickerView(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(MaterialTheme.shapes.small)
                         .background(
                             if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
                             else Color.Transparent

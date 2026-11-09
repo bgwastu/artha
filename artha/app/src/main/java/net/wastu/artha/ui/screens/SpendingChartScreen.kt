@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronLeft
@@ -254,7 +253,7 @@ fun SpendingChartScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(MaterialTheme.shapes.small)
                                 .combinedClickable(
                                     onClick = { selected = if (isSelected) null else index },
                                     onLongClick = { onOpenCategory(slice) },
@@ -382,7 +381,7 @@ internal fun DonutChart(
                     Box(
                         modifier = Modifier
                             .widthIn(max = 140.dp)
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(MaterialTheme.shapes.small)
                             .then(
                                 if (picked != null) {
                                     Modifier.clickable { onOpenCategory(picked) }

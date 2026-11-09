@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -89,7 +88,7 @@ internal fun JagoPinSetting(dialogOpen: Boolean, onDialogOpenChange: (Boolean) -
     }
 
     Surface(
-        shape = RoundedCornerShape(16.dp),
+        shape = MaterialTheme.shapes.medium,
         color = if (isWrong) colors.errorContainer.copy(alpha = 0.4f) else colors.surfaceContainerLow,
         modifier = Modifier
             .fillMaxWidth()
@@ -113,7 +112,7 @@ internal fun JagoPinSetting(dialogOpen: Boolean, onDialogOpenChange: (Boolean) -
             },
             leadingContent = {
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = MaterialTheme.shapes.small,
                     color = if (isWrong) colors.error.copy(alpha = 0.15f) else colors.surfaceContainerHighest,
                     modifier = Modifier.size(40.dp),
                 ) {

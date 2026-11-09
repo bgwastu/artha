@@ -35,7 +35,6 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -1129,7 +1128,7 @@ fun LedgerFeedback(
             )
         } else {
             Surface(
-                shape = RoundedCornerShape(24.dp),
+                shape = MaterialTheme.shapes.large,
                 color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
                 modifier = Modifier.size(68.dp),
             ) {
@@ -1161,7 +1160,7 @@ fun LedgerFeedback(
             )
             onRetry?.let {
                 Spacer(Modifier.height(20.dp))
-                Button(onClick = it, shape = RoundedCornerShape(14.dp)) {
+                Button(onClick = it, shape = MaterialTheme.shapes.medium) {
                     Text("Retry")
                 }
             }

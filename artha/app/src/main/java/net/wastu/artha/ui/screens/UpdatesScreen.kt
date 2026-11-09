@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -97,14 +96,14 @@ internal fun UpdatesScreen(onBack: () -> Unit) {
         ) {
             // Version card
             Surface(
-                shape = RoundedCornerShape(20.dp),
+                shape = MaterialTheme.shapes.large,
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 ListItem(
                     leadingContent = {
                         Surface(
-                            shape = RoundedCornerShape(12.dp),
+                            shape = MaterialTheme.shapes.small,
                             color = MaterialTheme.colorScheme.primaryContainer,
                             modifier = Modifier.size(40.dp),
                         ) {
@@ -131,7 +130,7 @@ internal fun UpdatesScreen(onBack: () -> Unit) {
 
             // Status & Actions Card
             Surface(
-                shape = RoundedCornerShape(20.dp),
+                shape = MaterialTheme.shapes.large,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -225,7 +224,7 @@ internal fun UpdatesScreen(onBack: () -> Unit) {
 
             // Auto-update toggle
             Surface(
-                shape = RoundedCornerShape(20.dp),
+                shape = MaterialTheme.shapes.large,
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -244,7 +243,7 @@ internal fun UpdatesScreen(onBack: () -> Unit) {
             // Unknown sources permission card if needed
             if (!canRequestInstalls) {
                 Surface(
-                    shape = RoundedCornerShape(20.dp),
+                    shape = MaterialTheme.shapes.large,
                     color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
                     modifier = Modifier.fillMaxWidth(),
                 ) {

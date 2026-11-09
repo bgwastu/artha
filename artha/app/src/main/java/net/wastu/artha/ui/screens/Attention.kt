@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -59,7 +58,7 @@ internal fun attentionSummary(items: List<NeedsAttention>): String? = when (item
 internal fun AttentionCard(item: NeedsAttention, onAction: (AttentionAction) -> Unit) {
     val colors = MaterialTheme.colorScheme
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = MaterialTheme.shapes.large,
         color = colors.errorContainer.copy(alpha = 0.4f),
         modifier = Modifier
             .fillMaxWidth()
@@ -68,7 +67,7 @@ internal fun AttentionCard(item: NeedsAttention, onAction: (AttentionAction) -> 
         Column(Modifier.padding(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = MaterialTheme.shapes.small,
                     color = colors.error.copy(alpha = 0.15f),
                     modifier = Modifier.size(36.dp),
                 ) {
@@ -100,7 +99,7 @@ internal fun AttentionCard(item: NeedsAttention, onAction: (AttentionAction) -> 
                 Spacer(Modifier.height(14.dp))
                 Button(
                     onClick = { onAction(action) },
-                    shape = RoundedCornerShape(12.dp),
+                    shape = MaterialTheme.shapes.small,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = colors.error,
                         contentColor = colors.onError,

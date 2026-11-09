@@ -331,7 +331,7 @@ fun MarkdownText(
 
                 is MarkdownBlock.CodeBlock -> {
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
+                        shape = MaterialTheme.shapes.extraSmall,
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
