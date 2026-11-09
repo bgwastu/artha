@@ -26,7 +26,9 @@ class JagoScreenSync(
         ROOT_UNAVAILABLE, SKIPPED_NO_PIN, SKIPPED_NOT_INSTALLED, UNLOCK_FAILED, WRONG_PIN
     }
 
-    suspend fun run(): Result = withContext(Dispatchers.IO) {
+    suspend fun run(): Result = RootScreenSession.exclusive { walk() }
+
+    private suspend fun walk(): Result = withContext(Dispatchers.IO) {
         if (Build.VERSION.SDK_INT < 33) return@withContext skipped(Result.ROOT_UNAVAILABLE, "screen walk needs Android 13")
         if (shouldAbort() || !isInteractive()) return@withContext skipped(Result.SKIPPED_SCREEN_OFF, "display is off")
         val pin = getPin()?.trim()

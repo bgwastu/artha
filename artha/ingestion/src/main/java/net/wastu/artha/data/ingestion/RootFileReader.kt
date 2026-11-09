@@ -167,33 +167,40 @@ class RootFileReader(val context: Context) {
     /**
      * Stat-verified root copies of [paths], retried while a provider app is mid-write. Missing
      * sources map to null; every returned file belongs to the caller's [destination] naming.
+     * Each attempt is one root shell: stat, copy, stat, so a changed signature means a torn copy.
      */
     private suspend fun stableCopies(paths: List<String>, destination: (String) -> File): Map<String, File?> {
         paths.forEach(::validate)
         val caller = currentCoroutineContext()
         repeat(STABILITY_ATTEMPTS) {
             caller.ensureActive()
-            val before = signatures(paths)
-            val copies = copySources(paths, before, destination)
-            caller.ensureActive()
-            val after = signatures(paths)
-            if (before == after) return copies
-            copies.values.forEach { it?.delete() }
+            val destinations = paths.associateWith(destination)
+            val attempt = copyBetweenStats(destinations)
+            if (attempt.before == attempt.after) {
+                return paths.associateWith { path -> destinations.getValue(path).takeIf { path in attempt.copied } }
+            }
+            destinations.values.forEach { it.delete() }
         }
         error("Provider data is changing. Retry after its app finishes updating.")
     }
 
-    private fun copySources(
-        paths: List<String>,
-        signatures: Map<String, String?>,
-        destination: (String) -> File,
-    ): Map<String, File?> {
-        val present = paths.filter { signatures[it] != null }
-        if (present.isEmpty()) return paths.associateWith { null }
-        val destinations = present.associateWith(destination)
-        val total = present.sumOf { signatures[it].sizeOf() ?: 0L }
-        val copied = copyAll(destinations, total)
-        return paths.associateWith { path -> destinations[path]?.takeIf { path in copied } }
+    private class StableAttempt(val before: Map<String, String?>, val after: Map<String, String?>, val copied: Set<String>)
+
+    private fun copyBetweenStats(destinations: Map<String, File>): StableAttempt {
+        val entries = destinations.entries.toList()
+        val paths = entries.map { it.key }
+        rootShell(MAX_TIMEOUT_SECONDS).use { shell ->
+            if (!shell.isRoot) error("Root access unavailable")
+            val commands = statCommands(paths, STAT_BEFORE) + copyCommands(entries) + statCommands(paths, STAT_AFTER)
+            val output = mutableListOf<String>()
+            val result = shell.newJob().to(output).add(*commands.toTypedArray()).exec()
+            check(result.isSuccess) { "Unable to read provider snapshot" }
+            return StableAttempt(
+                before = parseSignatures(output, STAT_BEFORE, paths),
+                after = parseSignatures(output, STAT_AFTER, paths),
+                copied = copiedSources(output, entries),
+            )
+        }
     }
 
     /** Copies [destinations] as root into app-private files; returns the sources that were copied. */
@@ -201,20 +208,27 @@ class RootFileReader(val context: Context) {
         rootShell(timeoutSeconds(totalBytes)).use { shell ->
             if (!shell.isRoot) error("Root access unavailable")
             val entries = destinations.entries.toList()
-            val uid = Process.myUid()
-            val commands = entries.mapIndexed { index, (source, destination) ->
-                "echo __ARTHA_COPY_$index; if [ -f '$source' ]; then rm -f '${destination.path}'; " +
-                    "cp -f '$source' '${destination.path}' && chown $uid:$uid '${destination.path}' && " +
-                    "chmod 600 '${destination.path}' && echo OK; else echo MISSING; fi"
-            }
             val output = mutableListOf<String>()
-            val result = shell.newJob().to(output).add(*commands.toTypedArray()).exec()
+            val result = shell.newJob().to(output).add(*copyCommands(entries).toTypedArray()).exec()
             check(result.isSuccess) { "Unable to read provider snapshot" }
-            val values = markedOutput(output, "__ARTHA_COPY_")
-            val failed = entries.indices.filter { values[it]?.let { it != "OK" && it != "MISSING" } ?: true }
-            check(failed.isEmpty()) { "Unable to read provider snapshot" }
-            return entries.indices.filter { values[it] == "OK" }.mapTo(mutableSetOf()) { entries[it].key }
+            return copiedSources(output, entries)
         }
+    }
+
+    private fun copyCommands(entries: List<Map.Entry<String, File>>): List<String> {
+        val uid = Process.myUid()
+        return entries.mapIndexed { index, (source, destination) ->
+            "echo $COPY_MARKER$index; if [ -f '$source' ]; then rm -f '${destination.path}'; " +
+                "cp -f '$source' '${destination.path}' && chown $uid:$uid '${destination.path}' && " +
+                "chmod 600 '${destination.path}' && echo OK; else echo MISSING; fi"
+        }
+    }
+
+    private fun copiedSources(output: List<String>, entries: List<Map.Entry<String, File>>): Set<String> {
+        val values = markedOutput(output, COPY_MARKER)
+        val failed = entries.indices.filter { values[it]?.let { it != "OK" && it != "MISSING" } ?: true }
+        check(failed.isEmpty()) { "Unable to read provider snapshot" }
+        return entries.indices.filter { values[it] == "OK" }.mapTo(mutableSetOf()) { entries[it].key }
     }
 
     private suspend fun copyToSandbox(path: String, destination: File, size: Long?): File? {
@@ -229,17 +243,20 @@ class RootFileReader(val context: Context) {
         if (paths.isEmpty()) return emptyMap()
         rootShell(MIN_TIMEOUT_SECONDS).use { shell ->
             if (!shell.isRoot) error("Root access unavailable")
-            val commands = paths.mapIndexed { index, path ->
-                "echo __ARTHA_STAT_$index; if [ -f '$path' ]; then stat -c '%s %Y' '$path'; else echo MISSING; fi"
-            }
             val output = mutableListOf<String>()
-            val result = shell.newJob().to(output).add(*commands.toTypedArray()).exec()
+            val result = shell.newJob().to(output).add(*statCommands(paths, STAT_MARKER).toTypedArray()).exec()
             check(result.isSuccess) { "Unable to read provider snapshot" }
-            val values = markedOutput(output, "__ARTHA_STAT_")
-            return paths.mapIndexed { index, path ->
-                path to values[index]?.takeIf { it.isNotEmpty() && it != "MISSING" }
-            }.toMap()
+            return parseSignatures(output, STAT_MARKER, paths)
         }
+    }
+
+    private fun statCommands(paths: List<String>, marker: String): List<String> = paths.mapIndexed { index, path ->
+        "echo $marker$index; if [ -f '$path' ]; then stat -c '%s %Y' '$path'; else echo MISSING; fi"
+    }
+
+    private fun parseSignatures(output: List<String>, marker: String, paths: List<String>): Map<String, String?> {
+        val values = markedOutput(output, marker)
+        return paths.mapIndexed { index, path -> path to values[index]?.takeIf { it.isNotEmpty() && it != "MISSING" } }.toMap()
     }
 
     /** Maps `<marker><index>` lines to the first line that follows each marker. */
@@ -286,6 +303,10 @@ class RootFileReader(val context: Context) {
         const val BYTES_PER_EXTRA_TIMEOUT_SECOND = 2L * 1024 * 1024
         const val MAX_INLINE_BYTES = 256L * 1024
         const val STABILITY_ATTEMPTS = 3
+        const val STAT_MARKER = "__ARTHA_STAT_"
+        const val STAT_BEFORE = "__ARTHA_BEFORE_"
+        const val STAT_AFTER = "__ARTHA_AFTER_"
+        const val COPY_MARKER = "__ARTHA_COPY_"
         const val SNAPSHOT_TTL_MILLIS = 60L * 60 * 1000
     }
 }

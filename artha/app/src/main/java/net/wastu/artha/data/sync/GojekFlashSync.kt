@@ -86,7 +86,9 @@ class GojekScreenSync(
         FLASHED, QUIET, ABORTED, SKIPPED_SCREEN_OFF, SKIPPED_GOJEK_IN_USE, ROOT_UNAVAILABLE, SKIPPED, SKIPPED_COOLDOWN, BUSY,
     }
 
-    suspend fun run(gojekImportEnabled: Boolean): Result = withContext(Dispatchers.IO) {
+    suspend fun run(gojekImportEnabled: Boolean): Result = RootScreenSession.exclusive { walk(gojekImportEnabled) }
+
+    private suspend fun walk(gojekImportEnabled: Boolean): Result = withContext(Dispatchers.IO) {
         if (!gojekImportEnabled) return@withContext skipped(Result.SKIPPED, "gojek import disabled")
         if (android.os.Build.VERSION.SDK_INT < 33) return@withContext skipped(Result.ROOT_UNAVAILABLE, "screen walk needs Android 13")
         if (shouldAbort() || !isInteractive()) return@withContext skipped(Result.SKIPPED_SCREEN_OFF, "display is off")

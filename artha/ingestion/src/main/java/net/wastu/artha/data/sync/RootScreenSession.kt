@@ -4,6 +4,8 @@ import java.io.BufferedWriter
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -82,6 +84,12 @@ class RootScreenSession private constructor(private val process: Process) : Goje
 
     companion object {
         private const val TAG = "ArthaScreen"
+
+        /** Provider imports run side by side, but only one hidden display can be driven at a time. */
+        private val displayLock = Mutex()
+
+        suspend fun <T> exclusive(block: suspend () -> T): T = displayLock.withLock { block() }
+
         private const val CLOSED = "\u0000closed"
         private const val HELPER = "net.wastu.artha.walk.GojekScreenHelper"
 

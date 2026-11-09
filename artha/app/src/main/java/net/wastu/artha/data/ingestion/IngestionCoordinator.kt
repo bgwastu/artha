@@ -1,6 +1,10 @@
 package net.wastu.artha.data.ingestion
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -23,11 +27,18 @@ class IngestionCoordinator(
 ) {
     private val mutex = Mutex()
     private val adaptersByProvider = adapters.associateBy { it.provider }
+    private val active = MutableStateFlow<List<Provider>>(emptyList())
     private val _syncingProvider = MutableStateFlow<Provider?>(null)
+    /** The provider the UI shows as importing; with several in flight, the one that started first. */
     val syncingProvider = _syncingProvider.asStateFlow()
+
+    private fun markActive(provider: Provider, running: Boolean) {
+        _syncingProvider.value = active.updateAndGet { if (running) it + provider else it - provider }.firstOrNull()
+    }
 
     init { require(adaptersByProvider.size == adapters.size) { "Only one adapter per Provider is allowed." } }
 
+    /** Imports the selected providers side by side; each one's outcome is recorded independently. */
     suspend fun ingestAll(force: Boolean = true): Map<Provider, String> = mutex.withLock {
         val selected = adaptersByProvider.keys.filter { provider ->
             preferences == null || (provider in preferences.importEnabled.value && (force || preferences.isStale(provider)))
@@ -35,19 +46,23 @@ class IngestionCoordinator(
         if (selected.isEmpty()) return@withLock emptyMap()
         check(rootAccess.verify()) { "Root access unavailable" }
         beforeBatch()
-        try { buildMap {
-            for (provider in selected) {
-                _syncingProvider.value = provider
-                put(provider, importAndRecord(provider))
+        try {
+            coroutineScope {
+                selected.map { provider -> async { provider to importTracked(provider) } }.awaitAll().toMap()
             }
-        } } finally { _syncingProvider.value = null; beforeBatch() }
+        } finally { beforeBatch() }
     }
 
     suspend fun syncProvider(provider: Provider): String = mutex.withLock {
         check(rootAccess.verify()) { "Root access unavailable" }
         beforeBatch()
-        try { _syncingProvider.value = provider; importAndRecord(provider, interactive = true) }
-        finally { _syncingProvider.value = null; beforeBatch() }
+        try { importTracked(provider, interactive = true) }
+        finally { beforeBatch() }
+    }
+
+    private suspend fun importTracked(provider: Provider, interactive: Boolean = false): String {
+        markActive(provider, true)
+        try { return importAndRecord(provider, interactive) } finally { markActive(provider, false) }
     }
 
     suspend fun ingest(provider: Provider): AppendResult {

@@ -46,6 +46,15 @@ class AppSessionWakeSync(
         component: String,
         targetPath: String,
         maxWaitSeconds: Int,
+    ): Boolean = RootScreenSession.exclusive {
+        wakeOnVirtualDisplay(pkg, component, targetPath, maxWaitSeconds)
+    }
+
+    private suspend fun wakeOnVirtualDisplay(
+        pkg: String,
+        component: String,
+        targetPath: String,
+        maxWaitSeconds: Int,
     ): Boolean {
         if (isResumedOnDisplay0(pkg)) return false
         val mtimeBefore = fileMtime(targetPath)
