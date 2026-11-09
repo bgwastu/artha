@@ -568,29 +568,6 @@ class CategorizationEngine(
         publish(snapshot.value)
     }
 
-    /** Retries this month's unlabeled and failed payments after an error or Stop. */
-    fun retry() {
-        stopped = false
-        fatalError = null
-        clearBackoff()
-        attempts.clear(); sendAlone.clear()
-        val snapshot = snapshot.value
-        val month = currentMonth()
-        // A forced run: these may not be "new", and the automatic list only sends new payments.
-        val keys = rows.value.filter { tx ->
-            monthOf(tx) == month && AiCategorization.isEligible(tx, snapshot) &&
-                (tx.key in snapshot.categoryFailures || AiCategorization.isPending(tx, snapshot))
-        }.mapTo(mutableSetOf()) { it.key }
-        val failed = keys.filter { it in snapshot.categoryFailures }
-        if (failed.isNotEmpty()) scope.launch(ioDispatcher) { store?.clearCategoryFailures(failed) }
-        val queued = manualQueue.mapTo(mutableSetOf()) { it.key }
-        val entries = keys.filter { it !in inFlight && it !in queued }
-        manualQueue.addAll(entries.map { ManualEntry(it, replaceManual = false) })
-        runTotal += entries.count { run.add(it) }
-        triggerPump()
-        start()
-    }
-
     /** The user decided these payments themselves; forget pending retries for them. */
     fun userDecided(keys: Collection<String>) {
         for (key in keys) settle(key)

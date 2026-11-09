@@ -182,7 +182,7 @@ class ViewModelBehaviorTest {
     }
 
     @Test
-    fun retryOfChangedButNotNewPaymentRunsOnceAndGoesIdle() = runTest(dispatcher) {
+    fun recategorizingChangedButNotNewPaymentRunsOnceAndGoesIdle() = runTest(dispatcher) {
         // The one-shot fingerprint repair already ran; otherwise it would accept the changed note as current.
         val prefs = FixturePreferences(configuredPrefs() + ("ai_fingerprint_version" to "1"))
         val store = AnalysisStore(prefs.context)
@@ -199,7 +199,7 @@ class ViewModelBehaviorTest {
                 batch.associate { it.transaction.key to CategorySuggestion("Dining Out", "AI suggestion: Cafe") }
             })
         model.enterForeground(); advanceUntilIdle()
-        model.retryAutomaticCategories(); advanceUntilIdle()
+        model.recategorize(RecategorizeScope.MonthPending(YearMonth.of(2026, 10))); advanceUntilIdle()
         assertEquals(1, calls.get())
         assertTrue(model.categoryProgress.value.queuedKeys.isEmpty())
         assertEquals(CategoryAutomationState.READY, model.categoryProgress.value.state)
@@ -252,7 +252,7 @@ class ViewModelBehaviorTest {
         advanceUntilIdle()
         assertNull(store.snapshot.value.categories[p1.key])
 
-        // Retry clears stopped and restarts categorization
+        // Categorizing the month again clears stopped and restarts categorization
         val newGate = CompletableDeferred<Unit>()
         val model2 = ArthaViewModel(
             RootAccess { true },
@@ -266,7 +266,7 @@ class ViewModelBehaviorTest {
                 batch.associate { it.transaction.key to CategorySuggestion("Groceries", "AI suggestion: Food") }
             },
         )
-        model.retryAutomaticCategories()
+        model.recategorize(RecategorizeScope.MonthPending(YearMonth.of(2026, 10)))
         advanceUntilIdle()
 
         val resumedProgress = model.categoryProgress.first { it.state == CategoryAutomationState.READY && !it.stopped && it.labeled == 1 }

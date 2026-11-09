@@ -269,8 +269,6 @@ class ArthaViewModel(
         }
     }
 
-    fun retryAutomaticCategories() = categorizer.retry()
-
     private fun visibleLedger(
         rows: List<UnifiedTransaction>,
         enabled: Set<Provider>,
