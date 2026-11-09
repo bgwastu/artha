@@ -3,8 +3,10 @@ package net.wastu.artha.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -13,7 +15,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
@@ -56,66 +57,13 @@ import kotlinx.coroutines.launch
 import net.wastu.artha.data.analysis.AiClient
 import net.wastu.artha.data.analysis.CategoryAutomationState
 import net.wastu.artha.data.analysis.CategoryProgress
-import net.wastu.artha.data.analysis.CategorySource
-import net.wastu.artha.data.analysis.PaymentCategoryState
 import net.wastu.artha.data.analysis.RecategorizeScope
 import net.wastu.artha.data.analysis.aiConfigValidation
 import net.wastu.artha.data.analysis.aiConnectionFailure
-import net.wastu.artha.data.analysis.categoryProgressLabel
 import net.wastu.artha.data.analysis.categoryRunMessage
 import net.wastu.artha.data.analysis.recategorizeConfirmation
 import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.components.PageScaffold
-
-internal object AiCategoriesLogic {
-    fun headerStatusText(progress: CategoryProgress): String? = when {
-        progress.stopped -> "Stopped"
-        progress.state == CategoryAutomationState.ERROR -> progress.error ?: "Categorizing stopped"
-        else -> categoryProgressLabel(progress)
-    }
-
-    fun showStopAction(progress: CategoryProgress): Boolean =
-        progress.state == CategoryAutomationState.WORKING
-
-    fun showRetryAction(progress: CategoryProgress): Boolean =
-        progress.state != CategoryAutomationState.WORKING &&
-            (progress.state == CategoryAutomationState.ERROR || progress.stopped || progress.failed > 0)
-
-    fun showCategorizeNewAction(progress: CategoryProgress, newCount: Int): Boolean =
-        progress.state != CategoryAutomationState.WORKING && newCount > 0
-
-    fun historyHeadline(pending: Int, progress: CategoryProgress): String = when {
-        progress.state == CategoryAutomationState.WORKING -> categoryProgressLabel(progress) ?: "Categorizing"
-        pending == 0 -> "All payments categorized"
-        pending == 1 -> "1 payment not categorized"
-        else -> "$pending payments not categorized"
-    }
-
-    fun historySupporting(progress: CategoryProgress, configured: Boolean): String? = when {
-        !configured -> "Add a provider below"
-        progress.stopped || progress.state == CategoryAutomationState.ERROR -> headerStatusText(progress)
-        else -> null
-    }
-
-    fun iconContentDescription(state: PaymentCategoryState, source: CategorySource): String = when (state) {
-        PaymentCategoryState.CATEGORIZING -> "Categorizing"
-        PaymentCategoryState.QUEUED -> "Queued"
-        PaymentCategoryState.IDLE -> when (source) {
-            CategorySource.MANUAL -> "Set by you"
-            CategorySource.AI -> "Suggested by AI"
-            CategorySource.MERCHANT -> "Same merchant"
-            CategorySource.REVIEW -> "Needs review"
-            CategorySource.FAILED -> "Couldn't categorize"
-            CategorySource.PENDING, CategorySource.NONE -> "Not categorized"
-        }
-    }
-
-    fun paymentRowSupportingText(state: PaymentCategoryState, category: String?): String = when (state) {
-        PaymentCategoryState.CATEGORIZING -> "Categorizing"
-        PaymentCategoryState.QUEUED -> "Queued"
-        PaymentCategoryState.IDLE -> category ?: "Uncategorized"
-    }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -137,8 +85,6 @@ fun AiScreen(
     var context by rememberSaveable(snapshot.knowledge) { mutableStateOf(snapshot.knowledge.orEmpty()) }
     var testing by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
-
-    var menu by remember { mutableStateOf(false) }
     var pendingScope by remember { mutableStateOf<RecategorizeScope?>(null) }
 
     val snackbar = remember { SnackbarHostState() }
@@ -159,7 +105,6 @@ fun AiScreen(
     val providerDirty = draft() != saved
     val contextDirty = context != snapshot.knowledge.orEmpty()
     val busy = testing || saving
-    val providerEnabled = !busy
 
     fun save() {
         if (contextDirty) viewModel.applyKnowledgeRewrite(context)
@@ -204,99 +149,129 @@ fun AiScreen(
         onBack = onBack,
         snackbarHost = snackbar,
         actions = {
-                    if (working) {
-                        IconButton(onClick = { viewModel.stopCategorization() }) {
-                            Icon(Icons.Default.Stop, contentDescription = "Stop categorization")
-                        }
-                    }
-                    TextButton(enabled = !busy && (providerDirty || contextDirty), onClick = ::save) { Text("Save") }
-                    Box {
-                        IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More options") }
-                        DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                            DropdownMenuItem(
-                                text = { Text("Re-categorize uncategorized") },
-                                enabled = !working && uncategorizedCount > 0,
-                                onClick = { menu = false; pendingScope = RecategorizeScope.Uncategorized },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Re-categorize all") },
-                                enabled = !working && allCount > 0,
-                                onClick = { menu = false; pendingScope = RecategorizeScope.All },
-                            )
-                        }
-                    }
+            AiActions(
+                working = working,
+                canSave = !busy && (providerDirty || contextDirty),
+                canRecategorizeUncategorized = !working && uncategorizedCount > 0,
+                canRecategorizeAll = !working && allCount > 0,
+                onStop = { viewModel.stopCategorization() },
+                onSave = ::save,
+                onRecategorize = { pendingScope = it },
+            )
         },
-        belowBar = {
-                if (working) {
-                    if (progress.runTotal > 0) {
-                        LinearWavyProgressIndicator(
-                            progress = { AiCardLogic.categoryProgressFraction(progress.runDone, progress.runTotal) },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    } else LinearWavyProgressIndicator(Modifier.fillMaxWidth())
-                } else if (busy) LinearWavyProgressIndicator(Modifier.fillMaxWidth())
-        },
+        belowBar = { AiProgressBar(progress, working = working, busy = busy) },
     ) { padding ->
         LazyColumn(Modifier.fillMaxSize().imePadding().padding(padding)) {
-            item {
-                ListItem(
-                    headlineContent = { Text(AiCategoriesLogic.historyHeadline(historyCount, progress)) },
-                    supportingContent = AiCategoriesLogic.historySupporting(progress, configured)
-                        ?.let { text -> { Text(text) } },
-                    trailingContent = if (!working && historyCount > 0) {
-                        {
-                            FilledTonalButton(
-                                enabled = configured,
-                                onClick = { pendingScope = RecategorizeScope.AllPending },
-                            ) { Text("Categorize") }
-                        }
-                    } else null,
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
+            item { AiHistoryRow(historyCount, progress, configured, working) { pendingScope = RecategorizeScope.AllPending } }
             item { SectionHeader("Provider") }
-            item { ProviderForm(baseUrl, apiKey, model, enabled = providerEnabled, onTest = ::testConnection) }
-            item {
-                ListItem(
-                    headlineContent = { Text("Auto-categorize") },
-                    supportingContent = { Text("New payments in the current month") },
-                    trailingContent = { Switch(checked = snapshot.autoCategorize, onCheckedChange = null) },
-                    modifier = Modifier.toggleable(
-                        value = snapshot.autoCategorize,
-                        role = Role.Switch,
-                        onValueChange = { viewModel.setAutoCategorize(it) },
-                    ),
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
+            item { ProviderForm(baseUrl, apiKey, model, enabled = !busy, onTest = ::testConnection) }
+            item { AutoCategorizeRow(snapshot.autoCategorize) { viewModel.setAutoCategorize(it) } }
             item { SectionHeader("Personal context") }
             item {
                 OutlinedTextField(
-                    value = context, onValueChange = { context = it },
+                    value = context,
+                    onValueChange = { context = it },
                     placeholder = { Text("Job, household, shops you use") },
                     minLines = 3,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
-            item { Box(Modifier.padding(16.dp)) }
+            item { Spacer(Modifier.height(32.dp)) }
         }
     }
 
     pendingScope?.let { scope ->
-        val count = viewModel.recategorizeCount(scope)
         val monthLabel = remember(selectedMonth) { DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US).format(selectedMonth) }
-        val text = recategorizeConfirmation(scope, count, monthLabel)
-        if (text != null) AlertDialog(
-            onDismissRequest = { pendingScope = null },
-            text = { Text(text) },
-            confirmButton = {
-                TextButton(onClick = { pendingScope = null; viewModel.recategorize(scope) }) {
-                    Text(if (scope == RecategorizeScope.AllPending) "Categorize" else "Re-categorize")
-                }
-            },
-            dismissButton = { TextButton(onClick = { pendingScope = null }) { Text("Cancel") } },
+        val text = recategorizeConfirmation(scope, viewModel.recategorizeCount(scope), monthLabel)
+        if (text != null) RecategorizeDialog(
+            scope = scope,
+            text = text,
+            onConfirm = { viewModel.recategorize(scope) },
+            onDismiss = { pendingScope = null },
         )
     }
+}
+
+/** Stop while a run is going, Save, and the bulk re-categorize menu. */
+@Composable
+private fun AiActions(
+    working: Boolean,
+    canSave: Boolean,
+    canRecategorizeUncategorized: Boolean,
+    canRecategorizeAll: Boolean,
+    onStop: () -> Unit,
+    onSave: () -> Unit,
+    onRecategorize: (RecategorizeScope) -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    if (working) {
+        IconButton(onClick = onStop) { Icon(Icons.Default.Stop, contentDescription = "Stop categorization") }
+    }
+    TextButton(enabled = canSave, onClick = onSave) { Text("Save") }
+    Box {
+        IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More options") }
+        DropdownMenu(menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(
+                text = { Text("Re-categorize uncategorized") },
+                enabled = canRecategorizeUncategorized,
+                onClick = { menu = false; onRecategorize(RecategorizeScope.Uncategorized) },
+            )
+            DropdownMenuItem(
+                text = { Text("Re-categorize all") },
+                enabled = canRecategorizeAll,
+                onClick = { menu = false; onRecategorize(RecategorizeScope.All) },
+            )
+        }
+    }
+}
+
+/** Determinate while the run knows its size, indeterminate while it works or a save/test is in flight. */
+@Composable
+private fun AiProgressBar(progress: CategoryProgress, working: Boolean, busy: Boolean) {
+    when {
+        working && progress.runTotal > 0 -> LinearWavyProgressIndicator(
+            progress = { AiCardLogic.categoryProgressFraction(progress.runDone, progress.runTotal) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        working || busy -> LinearWavyProgressIndicator(Modifier.fillMaxWidth())
+    }
+}
+
+@Composable
+private fun AiHistoryRow(historyCount: Int, progress: CategoryProgress, configured: Boolean, working: Boolean, onCategorize: () -> Unit) {
+    ListItem(
+        headlineContent = { Text(AiCategoriesLogic.historyHeadline(historyCount, progress)) },
+        supportingContent = AiCategoriesLogic.historySupporting(progress, configured)?.let { text -> { Text(text) } },
+        trailingContent = if (!working && historyCount > 0) {
+            { FilledTonalButton(enabled = configured, onClick = onCategorize) { Text("Categorize") } }
+        } else null,
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+    )
+}
+
+@Composable
+private fun AutoCategorizeRow(enabled: Boolean, onChange: (Boolean) -> Unit) {
+    ListItem(
+        headlineContent = { Text("Auto-categorize") },
+        supportingContent = { Text("New payments in the current month") },
+        trailingContent = { Switch(checked = enabled, onCheckedChange = null) },
+        modifier = Modifier.toggleable(value = enabled, role = Role.Switch, onValueChange = onChange),
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+    )
+}
+
+@Composable
+private fun RecategorizeDialog(scope: RecategorizeScope, text: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        text = { Text(text) },
+        confirmButton = {
+            TextButton(onClick = { onDismiss(); onConfirm() }) {
+                Text(if (scope == RecategorizeScope.AllPending) "Categorize" else "Re-categorize")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
@@ -306,7 +281,6 @@ private fun SectionHeader(title: String) {
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
     )
 }
-
 
 @Composable
 private fun ProviderForm(baseUrl: TextFieldState, apiKey: TextFieldState, model: TextFieldState, enabled: Boolean, onTest: () -> Unit) {
@@ -327,7 +301,7 @@ private fun ProviderForm(baseUrl: TextFieldState, apiKey: TextFieldState, model:
             state = apiKey,
             label = { Text("API key") },
             labelPosition = TextFieldLabelPosition.Above(),
-            outputTransformation = { replace(0, length, "\u2022".repeat(length)) },
+            outputTransformation = { replace(0, length, "•".repeat(length)) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
             lineLimits = TextFieldLineLimits.SingleLine, enabled = enabled,
             modifier = Modifier.fillMaxWidth(),
