@@ -23,13 +23,4 @@ class TransactionMetadataTest {
         val snapshot = AnalysisSnapshot(categories = mapOf(tx.key to "Groceries"), manualCategories = setOf(tx.key))
         assertEquals(snapshot, TransactionMetadata.applyAutomatic(snapshot, mapOf(tx.key to ("Dining Out" to "AI")), 100))
     }
-
-
-    @Test fun resetTombstonesBeatOldCloudClassificationsAndTimestampTiesConverge() {
-        val deleted = AnalysisSnapshot(updatedAt = mapOf("cat:12" to 20))
-        val old = AnalysisSnapshot(categories = mapOf("12" to "Shopping"), updatedAt = mapOf("cat:12" to 10))
-        assertTrue(AnalysisSyncMerger.mergeAnalysis(deleted, old).categories.isEmpty())
-        val other = old.copy(categories = mapOf("12" to "Dining Out"))
-        assertEquals(AnalysisSyncMerger.mergeAnalysis(old, other), AnalysisSyncMerger.mergeAnalysis(other, old))
-    }
 }

@@ -484,33 +484,6 @@ class AnalysisStore(context: Context) {
     }
 
     @Synchronized
-    fun applyMergedSnapshot(merged: AnalysisSnapshot) {
-        // Classification request fingerprints are a local cache, not backup content.
-        val merged = merged.copy(
-            aiConfig = _snapshot.value.aiConfig,
-            aiRecords = _snapshot.value.aiRecords,
-            autoCategorize = _snapshot.value.autoCategorize,
-        )
-        prefs.edit {
-            putString("user_notes", JSONObject(merged.userNotes as Map<*, *>).toString())
-            putString("categories", JSONObject(merged.categories as Map<*, *>).toString())
-            putString("reasons", JSONObject(merged.reasons as Map<*, *>).toString())
-            putString("knowledge", merged.knowledge)
-            putString("ai_base_url", merged.aiConfig.baseUrl)
-            putString("ai_model", merged.aiConfig.model)
-            putString("custom_categories", JSONArray(merged.customCategories).toString())
-            putString("income_categories", JSONArray(merged.incomeCategories).toString())
-            putString("type_overrides", JSONObject(merged.typeOverrides as Map<*, *>).toString())
-            putString("custom_category_icons", JSONObject(merged.categoryIcons as Map<*, *>).toString())
-            putString("updated_at_map", JSONObject(merged.updatedAt as Map<*, *>).toString())
-            putString("deleted_categories_map", JSONObject(merged.deletedCategories as Map<*, *>).toString())
-            putString("manual_categories", JSONArray(merged.manualCategories.toList()).toString())
-        }
-        _snapshot.value = merged
-        runCatching { AnalysisWidgetProvider.triggerUpdate(appContext) }
-    }
-
-    @Synchronized
     fun mergeImportedAnalysis(meta: org.json.JSONObject?, labels: List<ImportedLabels>) {
         var next = _snapshot.value
         meta?.optJSONObject("analysis")?.let { analysis ->

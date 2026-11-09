@@ -147,25 +147,6 @@ class AnalysisStoreEngineTest {
     }
 
     @Test
-    fun applyMergedSnapshotPreservesLocalFields() {
-        val prefs = TestPrefs()
-        val store = AnalysisStore(prefs.context)
-        store.recordCategoryFailures(listOf("f1"), "Failure")
-        store.setAutoCategorize(false)
-
-        val merged = store.snapshot.value.copy(
-            knowledge = "New knowledge from cloud sync",
-            aiRecords = aiRecords(failures = emptyMap()),
-            autoCategorize = true,
-        )
-
-        store.applyMergedSnapshot(merged)
-        assertEquals("New knowledge from cloud sync", store.snapshot.value.knowledge)
-        assertEquals("Failure", store.snapshot.value.categoryFailures["f1"])
-        assertFalse(store.snapshot.value.autoCategorize)
-    }
-
-    @Test
     fun commitMerchantSuggestionsStoresFingerprintsForReconciledRows() {
         val prefs = TestPrefs()
         val store = AnalysisStore(prefs.context)

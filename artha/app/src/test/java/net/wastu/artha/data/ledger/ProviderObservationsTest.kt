@@ -69,6 +69,5 @@ class ProviderObservationsTest {
         val records = listOf(old) + ProviderObservations.capture(listOf(old), listOf(corrected), 1000)
         assertEquals(listOf(corrected), ProviderObservations.resolve(records))
         assertEquals(2, records.size)
-        assertTrue(AnalysisSyncMerger.findMissingTransactionsToAppend(records, records).isEmpty())
     }
 }

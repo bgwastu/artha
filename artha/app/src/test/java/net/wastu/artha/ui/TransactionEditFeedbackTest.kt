@@ -21,7 +21,6 @@ import kotlinx.coroutines.test.setMain
 import net.wastu.artha.core.model.*
 import net.wastu.artha.core.root.RootAccess
 import net.wastu.artha.data.analysis.*
-import net.wastu.artha.data.analysis.AnalysisSyncMerger
 import net.wastu.artha.ui.screens.TransactionDetailsState
 import net.wastu.artha.ui.screens.linkedRecordsExplanation
 import net.wastu.artha.ui.screens.transactionAccountingLabel
@@ -115,7 +114,7 @@ class TransactionEditFeedbackTest {
         } finally { Dispatchers.resetMain() }
     }
 
-    @Test fun manualChoiceAndNoteSurviveFreshFactsAutomaticInsightsAndOlderRestore() {
+    @Test fun manualChoiceAndNoteSurviveFreshFactsAndAutomaticInsights() {
         val tx = payment()
         val chosen = AnalysisSnapshot(
             userNotes = mapOf(tx.key to "First line\nSecond line"),
@@ -123,13 +122,9 @@ class TransactionEditFeedbackTest {
             manualCategories = setOf(tx.key), updatedAt = mapOf("cat:${tx.key}" to 20, "note:${tx.key}" to 20),
         )
         val automated = TransactionMetadata.applyAutomatic(chosen, mapOf(tx.key to ("Dining Out" to "Suggestion")), 30)
-        val restored = AnalysisSyncMerger.mergeAnalysis(automated, AnalysisSnapshot(
-            categories = mapOf(tx.key to "Older category"), userNotes = mapOf(tx.key to "Older note"),
-            updatedAt = mapOf("cat:${tx.key}" to 10, "note:${tx.key}" to 10),
-        ))
         val projector = SpendingProjector()
-        val first = projector.project(listOf(tx), restored).transactions.single()
-        val fresh = projector.project(listOf(tx.copy(description = "Updated fictional payment")), restored).transactions.single()
+        val first = projector.project(listOf(tx), automated).transactions.single()
+        val fresh = projector.project(listOf(tx.copy(description = "Updated fictional payment")), automated).transactions.single()
         for (record in listOf(first, fresh)) {
             assertEquals("A long fictional manual category name", record.category)
             assertEquals("First line\nSecond line", record.userNote)
