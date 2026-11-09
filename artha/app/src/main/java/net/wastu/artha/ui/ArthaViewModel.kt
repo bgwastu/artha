@@ -6,7 +6,6 @@ import java.time.Clock
 import java.time.YearMonth
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.channels.Channel
 import net.wastu.artha.core.model.*
 import net.wastu.artha.core.root.*
 import net.wastu.artha.data.analysis.*
@@ -16,7 +15,6 @@ import net.wastu.artha.data.export.LedgerExportStorage
 import net.wastu.artha.data.export.LedgerJsonlExport
 import net.wastu.artha.data.export.LedgerJsonlImport
 import net.wastu.artha.data.ledger.LedgerRepository
-import net.wastu.artha.data.ledger.ProviderObservations
 import net.wastu.artha.data.providers.ProviderPreferences
 sealed interface LedgerState {
     data object Loading : LedgerState
@@ -75,8 +73,6 @@ class ArthaViewModel(
     private val _selectedMonth = MutableStateFlow(YearMonth.now(clock.withZone(AccountingTime.zone)))
     val selectedMonth = _selectedMonth.asStateFlow()
     private val _analysisType = MutableStateFlow(TransactionType.EXPENSE)
-    /** Which side of the books Analysis shows; never [TransactionType.TRANSFER]. */
-    val analysisType = _analysisType.asStateFlow()
     private val _typeFilter = MutableStateFlow<TransactionType?>(null)
     /** Transactions tab filter; null shows everything. */
     val typeFilter = _typeFilter.asStateFlow()
@@ -85,7 +81,6 @@ class ArthaViewModel(
     private val _categoryFilter = MutableStateFlow<String?>(null)
     val categoryFilter = _categoryFilter.asStateFlow()
     private val _categoryFilterSet = MutableStateFlow<Set<String>?>(null)
-    val categoryFilterSet = _categoryFilterSet.asStateFlow()
     private var categoryReturnDates: Pair<Long?, Long?>? = null
     private var categoryDrillActive = false
     private val _targetDestination = MutableStateFlow<String?>(null)
@@ -105,8 +100,6 @@ class ArthaViewModel(
     private val _importFeedback = MutableStateFlow<ImportFeedback?>(null)
     val importFeedback = _importFeedback.asStateFlow()
     private var importSequence = 0L
-    private val _ingestionStatus = MutableStateFlow<Map<Provider, String>>(emptyMap())
-    val ingestionStatus = _ingestionStatus.asStateFlow()
     val enabledProviders = preferences?.enabled ?: MutableStateFlow(Provider.entries.toSet()).asStateFlow()
     val importEnabled = preferences?.importEnabled ?: MutableStateFlow(Provider.entries.toSet()).asStateFlow()
     /** Fresh exposure of the last invisible GoPay refresh, surfaced on the GOJEK provider card. */
@@ -337,7 +330,6 @@ class ArthaViewModel(
                 val result = if (net.wastu.artha.BuildConfig.DEMO) simulateDemoSync(provider)
                     else if (provider != null && syncSingle != null) mapOf(provider to syncSingle.invoke(provider))
                     else if (automatic && ingestStale != null) ingestStale.invoke() else ingest?.invoke().orEmpty()
-                _ingestionStatus.value = _ingestionStatus.value + result
                 if (!automatic) {
                     val failed = result.values.count { it.startsWith("Unavailable:") }
                     val message = when {
@@ -351,7 +343,6 @@ class ArthaViewModel(
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (e: Exception) {
-                _ingestionStatus.value = _ingestionStatus.value + ((provider ?: Provider.JAGO) to (e.message ?: "Import unavailable"))
                 if (!automatic) _importFeedback.value = ImportFeedback(++importSequence, provider, "Import failed. Try again", true)
             }
             finally {

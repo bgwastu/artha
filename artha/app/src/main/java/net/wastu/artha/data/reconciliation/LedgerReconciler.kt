@@ -214,9 +214,6 @@ object LedgerReconciler {
         return result.sortedWith(compareByDescending<UnifiedTransaction> { it.occurredAt }.thenBy { it.key })
     }
 
-    fun reconcileProviderOrders(primary: List<UnifiedTransaction>, linked: List<UnifiedTransaction>): List<UnifiedTransaction> =
-        reconcileLedger(primary + linked)
-
     private fun reconcileOrderPayments(transactions: List<UnifiedTransaction>): List<UnifiedTransaction> {
         val facts = transactions.map(::evidence)
         val byOrder = facts.filter { it.order.isNotBlank() }.groupBy { Triple(it.tx.provider,

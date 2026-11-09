@@ -1,6 +1,5 @@
 package net.wastu.artha.data.ingestion
 
-import net.wastu.artha.core.model.Provider
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import javax.crypto.Cipher

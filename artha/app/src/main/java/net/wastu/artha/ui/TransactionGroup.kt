@@ -7,7 +7,6 @@ import net.wastu.artha.core.model.Pocket
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import org.json.JSONObject
-import org.json.JSONArray
 
 /** What the tiny bottom-right icon overlay on a grouped row shows. */
 data class GroupBadge(val secondProvider: Provider, val extraCount: Int)

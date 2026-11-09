@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import net.wastu.artha.core.model.Provider
-import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.core.root.RootAccess
 import net.wastu.artha.data.ledger.AppendResult
 import net.wastu.artha.data.ledger.LedgerRepository

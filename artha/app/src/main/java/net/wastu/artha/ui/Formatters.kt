@@ -3,13 +3,9 @@ package net.wastu.artha.ui
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.UnifiedTransaction
-import java.math.BigDecimal
 import java.math.BigInteger
-import java.text.NumberFormat
 import java.time.Instant
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Currency
 import java.util.Locale
 
 private val IndonesianLocale = Locale.forLanguageTag("id-ID")

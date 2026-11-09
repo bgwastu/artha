@@ -1,10 +1,8 @@
 package net.wastu.artha.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Box
@@ -19,7 +17,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.graphics.shapes.RoundedPolygon
-import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.ToggleButton
@@ -28,7 +25,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -61,33 +57,6 @@ fun <T> ConnectedChoiceRow(
             ) {
                 Text(label(option), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-        }
-    }
-}
-
-/** Page-level wait: the Expressive morphing loading indicator with an optional caption. */
-@Composable
-fun PageLoader(
-    modifier: Modifier = Modifier,
-    label: String? = null,
-    detail: String? = null,
-) {
-    Column(
-        modifier.padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        LoadingIndicator(Modifier.size(64.dp))
-        if (label != null) {
-            Text(label, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-        }
-        if (detail != null) {
-            Text(
-                detail,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
         }
     }
 }

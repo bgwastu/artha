@@ -2,15 +2,11 @@
 
 package net.wastu.artha.data.ingestion
 
-import net.wastu.artha.core.model.Direction
-import net.wastu.artha.core.model.Money
-import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
-import java.time.Instant
 import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.Mac

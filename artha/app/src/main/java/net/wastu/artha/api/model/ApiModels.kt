@@ -1,6 +1,5 @@
 package net.wastu.artha.api.model
 
-import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.core.model.formatMinorAmount
@@ -276,14 +275,6 @@ data class CategorySpendingDto(
         put("previousMonthAmountMinor", previousMonthAmountMinor)
         put("deltaPercent", deltaPercent?.let { java.lang.Double.valueOf(it.toDouble()) } ?: JSONObject.NULL)
         put("transactionCount", transactionCount)
-    }
-}
-
-data class KnowledgeDto(
-    val knowledge: String,
-) {
-    fun toJson(): JSONObject = JSONObject().apply {
-        put("knowledge", knowledge)
     }
 }
 

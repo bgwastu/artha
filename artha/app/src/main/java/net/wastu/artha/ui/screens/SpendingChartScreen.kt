@@ -2,38 +2,21 @@ package net.wastu.artha.ui.screens
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
-import net.wastu.artha.ui.components.PageScaffold
 import androidx.compose.animation.Crossfade
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChevronLeft
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,13 +34,8 @@ import net.wastu.artha.core.model.Money
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import java.time.YearMonth
-import java.util.Locale
-import net.wastu.artha.core.model.AccountingTime
 import net.wastu.artha.data.analysis.MonthSpendingAnalysis
 import net.wastu.artha.data.analysis.label
-import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.categoryIconFor
 import net.wastu.artha.ui.formatMoney
 
@@ -142,132 +120,6 @@ internal fun sliceColor(sliceName: String, isOther: Boolean = false): Color =
 
 internal fun sliceColor(index: Int, isOther: Boolean = false): Color =
     if (isOther) Color(0xFF6B7280) else net.wastu.artha.ui.categoryColorFor("")
-
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
-@Composable
-fun SpendingChartScreen(
-    viewModel: ArthaViewModel,
-    onBack: () -> Unit,
-    onOpenCategory: (SpendingChartLogic.Slice) -> Unit = { slice ->
-        viewModel.openCategoryTransactions(slice.name, slice.categories)
-        onBack()
-    },
-) {
-    val analysis by viewModel.monthAnalysis.collectAsStateWithLifecycle()
-    val snapshot by viewModel.analysisSnapshot.collectAsStateWithLifecycle()
-    val selectedMonth by viewModel.selectedMonth.collectAsStateWithLifecycle()
-    val canGoNext = selectedMonth < YearMonth.now(AccountingTime.clock)
-    val slices = remember(analysis) { SpendingChartLogic.categorySlices(analysis) }
-    var selected by rememberSaveable(analysis.month) { mutableStateOf<Int?>(null) }
-    val total = slices.sumOf { it.amountMinor }.coerceAtLeast(1)
-    val listState = rememberLazyListState()
-
-    LaunchedEffect(selected) {
-        selected?.let { listState.animateScrollToItem(it) }
-    }
-
-    PageScaffold(title = "Chart", onBack = onBack) { innerPadding ->
-        Column(
-            Modifier
-                .padding(innerPadding)
-                .fillMaxSize()
-                .padding(top = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (slices.isEmpty()) {
-                Column(
-                    Modifier.fillMaxWidth().padding(vertical = 40.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(
-                        "No confirmed spending this month",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            } else {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        selectedMonth.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.weight(1f),
-                        textAlign = TextAlign.Center,
-                    )
-                    IconButton(onClick = { viewModel.setAnalysisMonth(selectedMonth.minusMonths(1)) }) {
-                        Icon(Icons.Default.ChevronLeft, contentDescription = "Previous month")
-                    }
-                    IconButton(onClick = { viewModel.setAnalysisMonth(selectedMonth.plusMonths(1)) }, enabled = canGoNext) {
-                        Icon(Icons.Default.ChevronRight, contentDescription = "Next month")
-                    }
-                }
-                DonutChart(
-                    slices = slices,
-                    icons = snapshot.categoryIcons,
-                    selected = selected,
-                    onSelect = { index -> selected = if (selected == index) null else index },
-                    onOpenCategory = onOpenCategory,
-                    total = total,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .height(280.dp),
-                )
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    items(slices.size) { index ->
-                        val slice = slices[index]
-                        val isSelected = selected == index
-                        val color = sliceColor(index, slice.isOther)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(MaterialTheme.shapes.small)
-                                .combinedClickable(
-                                    onClick = { selected = if (isSelected) null else index },
-                                    onLongClick = { onOpenCategory(slice) },
-                                    onClickLabel = "Select category",
-                                    onLongClickLabel = "Filter transactions",
-                                )
-                                .background(
-                                    if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh
-                                    else MaterialTheme.colorScheme.surface,
-                                )
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                        ) {
-                            Box(
-                                Modifier
-                                    .size(12.dp)
-                                    .background(color, CircleShape),
-                            )
-                            Icon(categoryIconFor(slice.name, snapshot.categoryIcons), contentDescription = null)
-                            Text(
-                                slice.name,
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                "${slice.percent}%",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                formatMoney(net.wastu.artha.core.model.Money(slice.amountMinor)),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
 
 /** One slice the donut draws; pixel math lives with the canvas. */
 @OptIn(ExperimentalKoalaPlotApi::class)

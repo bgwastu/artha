@@ -4,7 +4,6 @@ package net.wastu.artha.data.ingestion
 import android.os.Build
 import androidx.core.content.pm.PackageInfoCompat
 import java.net.HttpURLConnection
-import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
@@ -12,7 +11,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.delay
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
@@ -332,8 +330,6 @@ class GojekOrderReader(private val files: RootFileReader, private val screen: Go
             .distinctBy { it.orderId }
             .toList()
     }.getOrDefault(emptyList())
-
-    private suspend fun gopayOrderIdsFromJagoHints(): List<String> = jagoGopayHints().map { it.orderId }
 
     private fun paymentDetailRequest(orderId: String, headers: Map<String, String>, started: Long, checkActive: () -> Unit): JSONObject {
         val escaped = URLEncoder.encode(orderId, "UTF-8").replace("+", "%20")

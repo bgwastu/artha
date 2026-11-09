@@ -7,7 +7,6 @@ import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
-import net.wastu.artha.data.analysis.BudgetAnalyzer
 import net.wastu.artha.ui.screens.TransactionPeriod
 import net.wastu.artha.ui.screens.periodSummary
 import net.wastu.artha.ui.widget.WidgetPaymentRow

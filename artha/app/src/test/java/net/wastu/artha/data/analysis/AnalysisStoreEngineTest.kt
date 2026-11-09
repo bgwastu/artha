@@ -9,7 +9,6 @@ import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
-import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 

@@ -1,6 +1,5 @@
 package net.wastu.artha.data.providers
 
-import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
 import java.lang.reflect.Proxy

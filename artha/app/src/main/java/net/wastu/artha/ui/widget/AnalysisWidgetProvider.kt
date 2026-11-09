@@ -19,7 +19,6 @@ import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import android.os.Build
-import android.net.Uri
 import android.widget.RemoteViewsService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking

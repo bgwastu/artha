@@ -21,7 +21,6 @@ import net.wastu.artha.ui.theme.ArthaTheme
 import java.time.Instant
 import kotlinx.coroutines.runBlocking
 import org.junit.After
-import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith

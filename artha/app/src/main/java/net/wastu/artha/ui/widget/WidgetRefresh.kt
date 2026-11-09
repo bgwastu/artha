@@ -37,13 +37,6 @@ internal object WidgetRefresh {
     }
 
     @Synchronized
-    internal fun resetForTests() {
-        activityJob?.cancel()
-        activityJob = null
-        appContext = null
-    }
-
-    @Synchronized
     fun schedule(key: String, pending: BroadcastReceiver.PendingResult?, onFailure: () -> Unit = {}, update: suspend () -> Unit) {
         jobs.remove(key)?.cancel()
         val job = scope.launch(start = CoroutineStart.LAZY) {
