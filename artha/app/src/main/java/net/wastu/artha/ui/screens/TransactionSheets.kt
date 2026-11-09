@@ -1,55 +1,51 @@
 package net.wastu.artha.ui.screens
 
-import net.wastu.artha.core.model.iconRes
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.selection.DisableSelection
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.EditNote
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingBag
-import androidx.compose.material3.LoadingIndicator
-import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetValue
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -57,72 +53,44 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.launch
-import androidx.compose.material3.SuggestionChipDefaults
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
-import androidx.compose.material3.SuggestionChip
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
-import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.Check
-import net.wastu.artha.data.analysis.categoryReasonText
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import net.wastu.artha.data.analysis.CategorySource
-import net.wastu.artha.data.analysis.categorySource
+import kotlinx.coroutines.launch
+import net.wastu.artha.core.model.Direction
+import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.analysis.CategoryProgress
+import net.wastu.artha.data.analysis.CategorySource
 import net.wastu.artha.data.analysis.PaymentCategoryState
+import net.wastu.artha.data.analysis.RecategorizeScope
+import net.wastu.artha.data.analysis.categoryReasonText
+import net.wastu.artha.data.analysis.categorySource
 import net.wastu.artha.data.analysis.paymentCategoryState
 import net.wastu.artha.data.analysis.paymentCategoryStateLabel
-import net.wastu.artha.data.analysis.RecategorizeScope
-import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.semantics
-import net.wastu.artha.core.model.Direction
-import net.wastu.artha.core.model.Provider
-import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.categoryIconFor
 import net.wastu.artha.ui.formatDate
 import net.wastu.artha.ui.formatMoney
-import net.wastu.artha.ui.paymentRowAmount
-import net.wastu.artha.ui.transactionHumanLine
-import net.wastu.artha.ui.originalPaymentMoney
-import net.wastu.artha.ui.GroupRecord
-import net.wastu.artha.ui.TransactionTag
-import net.wastu.artha.ui.TransactionTagKind
-import net.wastu.artha.ui.formatTime
-import net.wastu.artha.core.model.AccountingTime
-import net.wastu.artha.ui.formatMinorAmount
-import net.wastu.artha.ui.groupNetMinor
 import net.wastu.artha.ui.groupRecords
-import net.wastu.artha.ui.transactionTags
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
+import net.wastu.artha.ui.originalPaymentMoney
+import net.wastu.artha.ui.paymentRowAmount
 import net.wastu.artha.ui.theme.expenseColor
 import net.wastu.artha.ui.theme.incomeColor
-import java.time.Instant
-import org.json.JSONObject
+import net.wastu.artha.ui.transactionHumanLine
+import net.wastu.artha.ui.transactionTags
 import org.json.JSONException
-import androidx.compose.ui.semantics.selected
+import org.json.JSONObject
 
 data class PeerPrompt(val category: String, val merchant: String, val peerCount: Int)
 class TransactionDetailsState internal constructor() {
@@ -723,405 +691,9 @@ private fun TransactionDetailsBody(
     }
 }
 
-private fun JSONObject.detailText(key: String): String? {
+internal fun JSONObject.detailText(key: String): String? {
     if (isNull(key)) return null
     val value = opt(key)
     if (value is JSONObject || value is org.json.JSONArray) return null
     return value?.toString()?.trim()?.takeIf { it.isNotBlank() }
 }
-
-/** Providers store item prices as whole rupiah, sometimes with an "Rp" prefix; show them like other amounts. */
-internal fun itemPriceText(raw: String): String {
-    val digits = raw.trim().removePrefix("Rp").trim()
-    val rupiah = digits.takeIf { it.isNotEmpty() && it.all(Char::isDigit) }?.toBigIntegerOrNull() ?: return raw
-    return formatMinorAmount(rupiah.multiply(java.math.BigInteger.valueOf(100)))
-}
-
-private val StatusTagKinds = setOf(TransactionTagKind.REVERSED, TransactionTagKind.REFUND,
-    TransactionTagKind.TRANSFER, TransactionTagKind.PARTIAL_REFUND)
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun TagRow(tags: List<TransactionTag>) {
-    if (tags.isEmpty()) return
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        tags.forEach { tag -> TransactionTagPill(tag, Modifier.height(20.dp).semantics { contentDescription = tag.description }, compact = false) }
-    }
-}
-
-@Composable
-private fun SourceHeader(provider: Provider, supporting: String) {
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Image(painterResource(provider.iconRes), contentDescription = null,
-            modifier = Modifier.size(40.dp).clip(MaterialTheme.shapes.medium))
-        Column {
-            Text(provider.displayName, style = MaterialTheme.typography.titleSmall)
-            Text(supporting, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-/** The source records behind one reconciled row, each openable, with a net line for refunds. */
-@Composable
-private fun GroupRecordsSection(records: List<GroupRecord>, parentTime: Instant, explanation: String?, onOpen: (Int) -> Unit) {
-    val parentDay = parentTime.atZone(AccountingTime.zone).toLocalDate()
-    Column(Modifier.fillMaxWidth().padding(top = SectionGap), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionHeading("Records", explanation)
-        Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.large) {
-            Column {
-                records.forEachIndexed { index, item ->
-                    if (index > 0) HorizontalDivider(Modifier.padding(start = 68.dp, end = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                    val at = item.transaction.occurredAt
-                    Row(
-                        Modifier.fillMaxWidth().clickable(onClickLabel = "Open record") { onOpen(index) }
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        Image(painterResource(item.transaction.provider.iconRes), item.transaction.provider.displayName,
-                            Modifier.size(36.dp).clip(MaterialTheme.shapes.small))
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(item.role, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(item.title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(if (at.atZone(AccountingTime.zone).toLocalDate() == parentDay) formatTime(at) else formatDate(at),
-                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Text(item.signedAmount, style = MaterialTheme.typography.titleSmall,
-                            color = if (item.transaction.direction == Direction.CREDIT) incomeColor() else MaterialTheme.colorScheme.onSurface)
-                    }
-                }
-                groupNetMinor(records)?.let { net ->
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                    val currency = records.first().transaction.money.currencyCode
-                    val amount = formatMinorAmount(java.math.BigInteger.valueOf(kotlin.math.abs(net)), currency)
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Net", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                        Text(if (net < 0) "+$amount" else amount, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
-                            color = if (net < 0) incomeColor() else MaterialTheme.colorScheme.onSurface)
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** Space above a section, on top of the sheet's line spacing, so sections read as separate groups. */
-private val SectionGap = 14.dp
-
-@Composable
-private fun SectionHeading(title: String, supporting: String? = null) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
-        supporting?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-    }
-}
-
-/** One source record on its own: what that source saw, before reconciliation merged it. */
-@Composable
-private fun GroupRecordDetails(item: GroupRecord, minHeight: androidx.compose.ui.unit.Dp, showBack: Boolean, onBack: () -> Unit) {
-    val tx = item.transaction
-    val payload = remember(tx.rawPayload) { runCatching { JSONObject(tx.rawPayload) }.getOrNull() }
-    Column(Modifier.fillMaxWidth().heightIn(min = minHeight)) {
-        // Pinned header; the 12dp start inset puts the arrow glyph on the 24dp content edge.
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = if (showBack) 12.dp else 24.dp, end = 24.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (showBack) {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to transaction") }
-                Spacer(Modifier.width(4.dp))
-            }
-            Text(item.role, style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.semantics { heading() })
-        }
-    SelectionContainer {
-        Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
-                .padding(start = 24.dp, end = 24.dp, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            SourceHeader(tx.provider, formatDate(tx.occurredAt))
-            Text(item.signedAmount, style = MaterialTheme.typography.headlineMediumEmphasized, color = if (tx.direction == Direction.CREDIT) incomeColor() else expenseColor())
-            Text(item.title, style = MaterialTheme.typography.titleLargeEmphasized)
-            DisableSelection { TagRow(item.tags) }
-            DetailRow("Reference", tx.providerTransactionId)
-            (payload?.detailText("sourcePaymentMethod") ?: payload?.detailText("paymentMethod"))?.let { DetailRow("Payment method", it) }
-            payload?.detailText("counterpart")?.takeUnless { item.title.contains(it, ignoreCase = true) }?.let { DetailRow("Counterpart", it) }
-            tx.pocket?.let { DetailRow("Pocket", it.name) }
-            payload?.detailText("notes")?.let { DetailRow("Source note", it) }
-            tx.description.takeUnless { item.title.equals(it, ignoreCase = true) }?.let { DetailRow("Source description", it) }
-            Spacer(Modifier.height(24.dp))
-        }
-    }
-    }
-}
-
-@Composable
-private fun DetailCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(top = SectionGap), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionHeading(title)
-        content()
-    }
-}
-
-@Composable
-private fun DetailRow(label: String, value: String) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.bodyMedium)
-    }
-}
-
-@Composable
-private fun DetailEditRow(
-    label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector,
-    enabled: Boolean, supporting: String? = null,
-    supportingContent: (@Composable () -> Unit)? = null,
-    onClick: () -> Unit,
-) {
-    Row(
-        Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, style = MaterialTheme.typography.bodyLarge)
-            if (supportingContent != null) {
-                supportingContent()
-            } else {
-                supporting?.let { Text(it, style = MaterialTheme.typography.labelMedium) }
-            }
-        }
-        if (enabled) Icon(Icons.Default.ChevronRight, contentDescription = "Edit $label")
-    }
-}
-
-@Composable
-private fun SaveFeedback(message: String, error: Boolean) {
-    Text(message, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-        style = MaterialTheme.typography.bodyMedium,
-        color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-}
-
-@Composable
-private fun CategoryPickerView(
-    currentCategory: String,
-    availableCategories: List<String>,
-    categoryIcons: Map<String, String>,
-    onSelectCategory: (String) -> Unit,
-    saving: Boolean,
-    error: String?,
-    onRetry: () -> Unit,
-    onBack: () -> Unit,
-) {
-    var searchQuery by remember { mutableStateOf("") }
-    val filteredCategories = remember(searchQuery, availableCategories) {
-        if (searchQuery.isBlank()) {
-            availableCategories
-        } else {
-            availableCategories.filter { it.contains(searchQuery.trim(), ignoreCase = true) }
-        }
-    }
-    val queryTrimmed = searchQuery.trim()
-    val isExactMatch = availableCategories.any { it.equals(queryTrimmed, ignoreCase = true) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        // Header with Back button
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            IconButton(onClick = onBack, enabled = !saving) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
-            Text(
-                "Category",
-                style = MaterialTheme.typography.titleLargeEmphasized,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        if (saving) {
-            LinearWavyProgressIndicator(
-                modifier = Modifier.fillMaxWidth().height(2.dp),
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-
-        // Search field
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            label = { Text("Search categories") },
-            enabled = !saving,
-            leadingIcon = {
-                Icon(
-                    Icons.Default.Search,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            },
-            trailingIcon = {
-                if (searchQuery.isNotBlank()) {
-                    IconButton(onClick = { searchQuery = "" }, enabled = !saving) {
-                        Icon(Icons.Default.Clear, contentDescription = "Clear")
-                    }
-                }
-            },
-            singleLine = true,
-            shape = MaterialTheme.shapes.small,
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        error?.let {
-            SaveFeedback(it, true)
-            TextButton(onClick = onRetry, enabled = !saving) { Text("Retry") }
-        }
-
-        // A typed category can be assigned without changing the shared picker.
-        if (queryTrimmed.isNotBlank() && !isExactMatch) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.small)
-                    .background(MaterialTheme.colorScheme.primaryContainer)
-                    .clickable(enabled = !saving) {
-                        onSelectCategory(queryTrimmed)
-                    }
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Icon(
-                    Icons.Default.AddCircle,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(20.dp),
-                )
-                Text(
-                    "Use \"$queryTrimmed\"",
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
-
-        // Clean flat category rows (no cards on top of cards)
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            for (cat in filteredCategories) {
-                val isSelected = cat == currentCategory
-                val icon = categoryIconFor(cat, categoryIcons)
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(MaterialTheme.shapes.small)
-                        .background(
-                            if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                            else Color.Transparent
-                        )
-                        .semantics { selected = isSelected }
-                        .clickable(enabled = !saving) { onSelectCategory(cat) }
-                        .padding(horizontal = 12.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    Icon(
-                        icon,
-                        contentDescription = null,
-                        tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Text(
-                        cat,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (isSelected) {
-                        Icon(
-                            Icons.Default.Check,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
-            }
-        }
-        Spacer(Modifier.height(16.dp))
-    }
-}
-
-@Composable
-private fun TransactionNoteEditor(
-    text: String, onTextChange: (String) -> Unit, saving: Boolean, error: String?,
-    onDismiss: () -> Unit, onSave: () -> Unit,
-) {
-    Column(
-        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text("Note", style = MaterialTheme.typography.titleLargeEmphasized)
-        OutlinedTextField(
-            value = text, onValueChange = onTextChange, label = { Text("Personal note") },
-            enabled = !saving, minLines = 3, maxLines = 8, modifier = Modifier.fillMaxWidth(),
-        )
-        Text("Notes add context. Your chosen category stays.", style = MaterialTheme.typography.bodySmall)
-        error?.let { SaveFeedback(it, true) }
-        if (text.isNotEmpty()) TextButton(onClick = { onTextChange("") }, enabled = !saving) { Text("Clear") }
-        EditorActions(saving, onDismiss, onSave)
-        Spacer(Modifier.height(16.dp))
-    }
-}
-
-@Composable
-private fun EditorActions(saving: Boolean, onCancel: () -> Unit, onSave: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = onCancel, enabled = !saving) { Text("Cancel") }
-        FilledTonalButton(onClick = onSave, enabled = !saving) { Text(if (saving) "Saving" else "Save") }
-        if (saving) LoadingIndicator(Modifier.size(20.dp),)
-    }
-}
-
-internal fun transactionAccountingLabel(transaction: UnifiedTransaction): String? {
-    if (transaction.isExpense) return null
-    val payload = try { JSONObject(transaction.rawPayload) } catch (_: JSONException) { null }
-    return when {
-        transaction.isReversedRecord -> if (transaction.direction == Direction.CREDIT) "Incoming reversal" else "Reversed"
-        transaction.direction == Direction.CREDIT -> "Incoming"
-        transaction.money.currencyCode != "IDR" -> "Outside IDR spending"
-        payload?.optBoolean("isWalletFunding") == true || payload?.optString("code") in net.wastu.artha.core.model.TransactionClassifier.WALLET_FUNDING_CODES -> "Wallet funding"
-        payload?.optBoolean("isPocketTransfer") == true || transaction.description.startsWith("Pocket Transfer:", ignoreCase = true) -> "Pocket transfer"
-        payload?.optString("code") in net.wastu.artha.core.model.TransactionClassifier.INTERNAL_TRANSFER_CODES ||
-            payload?.optJSONObject("fields")?.optString("f22") == "INTERNAL" -> "Transfer"
-        else -> "Not included in spending"
-    }
-}
-
-internal fun linkedRecordsExplanation(transaction: UnifiedTransaction): String? {
-    val groups = try { JSONObject(transaction.rawPayload).optJSONArray("groupedTransactions") } catch (_: JSONException) { null } ?: return null
-    return if (groups.length() > 1 && transaction.canonicalKey != null && transaction.isExpense)
-        "Counted once in spending." else null
-}
-
-internal fun paymentCategoryRowSupporting(state: PaymentCategoryState): String? =
-    paymentCategoryStateLabel(state)
-
-internal fun paymentNoteRowSupporting(state: PaymentCategoryState): String? =
-    if (state != PaymentCategoryState.IDLE) "Locked while categorizing" else null
-
-internal fun canEditTransaction(state: PaymentCategoryState, hasStore: Boolean): Boolean =
-    hasStore && state == PaymentCategoryState.IDLE
-
-private fun sureText(label: String, percent: Int?): String = if (percent == null) label else "$label, $percent% sure"

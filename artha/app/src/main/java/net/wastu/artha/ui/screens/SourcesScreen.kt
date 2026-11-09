@@ -1,9 +1,5 @@
 package net.wastu.artha.ui.screens
 
-import net.wastu.artha.core.model.iconRes
-import net.wastu.artha.ui.components.PageScaffold
-import net.wastu.artha.ui.components.shape
-import androidx.core.net.toUri
 import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
@@ -12,37 +8,29 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material3.LoadingIndicator
-import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -52,37 +40,32 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
-import net.wastu.artha.data.attention.AttentionAction
-import net.wastu.artha.data.attention.NeedsAttention
-import net.wastu.artha.data.attention.forSource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.text.font.FontWeight
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import net.wastu.artha.core.model.AccountingTime
-import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
+import net.wastu.artha.core.model.iconRes
+import net.wastu.artha.data.attention.AttentionAction
+import net.wastu.artha.data.attention.forSource
 import net.wastu.artha.data.providers.AccountStatus
 import net.wastu.artha.data.providers.GojekFlashRecord
 import net.wastu.artha.data.providers.ProviderDiagnostic
 import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.SourceCoverage
+import net.wastu.artha.ui.components.PageScaffold
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -504,184 +487,3 @@ private fun SyncHeaderAction(importing: Boolean, enabled: Boolean, onSync: () ->
         }
     }
 }
-
-@Composable
-internal fun SettingsHeading(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier
-            .semantics { heading() }
-            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
-    )
-}
-
-@Composable
-internal fun SettingsLink(
-    title: String,
-    summary: String?,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    enabled: Boolean = true,
-    attention: List<NeedsAttention> = emptyList(),
-    segment: net.wastu.artha.ui.components.Segment? = null,
-    onClick: (() -> Unit)?,
-) {
-    val attentionText = attentionSummary(attention)
-    val grouped = segment != null
-    val shape = segment?.shape() ?: androidx.compose.ui.graphics.RectangleShape
-    val color = if (grouped) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surface
-    val outer = if (grouped) Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = net.wastu.artha.ui.components.SegmentGap) else Modifier
-    val body: @Composable () -> Unit = { ListItem(
-            headlineContent = {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium,
-                )
-            },
-            supportingContent = when {
-                attentionText != null -> { { Text(attentionText, color = MaterialTheme.colorScheme.error) } }
-                summary != null -> { { Text(summary) } }
-                else -> null
-            },
-            leadingContent = {
-                Surface(
-                    shape = MaterialTheme.shapes.small,
-                    color = when {
-                        attentionText != null -> MaterialTheme.colorScheme.errorContainer
-                        grouped -> MaterialTheme.colorScheme.secondaryContainer
-                        else -> MaterialTheme.colorScheme.surfaceContainerHigh
-                    },
-                    modifier = Modifier.size(40.dp),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            icon,
-                            contentDescription = null,
-                            tint = when {
-                                attentionText != null -> MaterialTheme.colorScheme.onErrorContainer
-                                grouped -> MaterialTheme.colorScheme.onSecondaryContainer
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
-            },
-            trailingContent = when {
-                attentionText != null -> { { AttentionIcon() } }
-                onClick != null -> { { Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) } }
-                else -> null
-            },
-            colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-            modifier = if (enabled) Modifier else Modifier.alpha(0.38f),
-        ) }
-    if (onClick != null) Surface(onClick = onClick, enabled = enabled, shape = shape, color = color, modifier = outer) { body() }
-    else Surface(shape = shape, color = color, modifier = outer) { body() }
-}
-
-@Composable
-internal fun SettingsSwitch(
-    title: String,
-    checked: Boolean,
-    onChange: (Boolean) -> Unit,
-    sourceName: String? = null,
-) {
-    ListItem(
-        modifier = Modifier
-            .toggleable(checked, role = Role.Switch, onValueChange = onChange)
-            .semantics { if (sourceName != null) contentDescription = "$sourceName, $title" },
-        headlineContent = { Text(title) },
-        trailingContent = { Switch(checked = checked, onCheckedChange = null) },
-    )
-}
-
-internal fun isSourceProblem(diagnostic: ProviderDiagnostic?, importEnabled: Boolean, importing: Boolean): Boolean {
-    if (importing || !importEnabled) return false
-    return when (diagnostic?.accountStatus) {
-        AccountStatus.NEEDS_LOGIN,
-        AccountStatus.APP_NOT_INSTALLED,
-        AccountStatus.RATE_LIMITED,
-        AccountStatus.ERROR -> true
-        else -> false
-    }
-}
-
-internal fun sourceRowStatus(
-    provider: Provider,
-    diagnostic: ProviderDiagnostic?,
-    importEnabled: Boolean,
-    importing: Boolean,
-    now: Long = System.currentTimeMillis(),
-): String {
-    if (importing) return "Syncing"
-    if (!importEnabled) return "Paused"
-    return when (diagnostic?.accountStatus) {
-        AccountStatus.NEEDS_LOGIN -> "Sign in to ${provider.displayName}"
-        AccountStatus.APP_NOT_INSTALLED -> "${provider.displayName} app not installed"
-        AccountStatus.RATE_LIMITED -> "Limited by ${provider.displayName}. Try later"
-        AccountStatus.ERROR -> "Last sync failed"
-        AccountStatus.PARTIAL -> diagnostic.lastSyncEpochMillis
-            ?.let { "Partly synced ${formatRelativeTime(it, now)}" } ?: "Partly synced"
-        else -> {
-            val lastSync = diagnostic?.lastSyncEpochMillis
-            if (lastSync == null) {
-                "Not synced yet"
-            } else if ((now - lastSync) in 0 until 15 * 60 * 1000L) {
-                "Up to date"
-            } else {
-                "Synced ${formatRelativeTime(lastSync, now)}"
-            }
-        }
-    }
-}
-
-internal fun sourceHeadline(
-    provider: Provider,
-    diagnostic: ProviderDiagnostic?,
-    importEnabled: Boolean,
-    importing: Boolean,
-): String = when {
-    importing -> "Syncing"
-    !importEnabled -> "Paused"
-    diagnostic?.accountStatus == AccountStatus.NEEDS_LOGIN -> "Sign in to ${provider.displayName}"
-    diagnostic?.accountStatus == AccountStatus.APP_NOT_INSTALLED -> "${provider.displayName} app not installed"
-    diagnostic?.accountStatus == AccountStatus.RATE_LIMITED -> "Limited by ${provider.displayName}"
-    diagnostic?.accountStatus == AccountStatus.ERROR -> "Last sync failed"
-    diagnostic?.accountStatus == AccountStatus.PARTIAL -> "Partly synced"
-    else -> "Up to date"
-}
-
-internal fun formatRelativeTime(epochMillis: Long, now: Long = System.currentTimeMillis()): String {
-    val diffSec = ((now - epochMillis) / 1000).coerceAtLeast(0)
-    val diffMin = diffSec / 60
-    val diffHours = diffMin / 60
-    val diffDays = diffHours / 24
-    return when {
-        diffSec < 60 -> "just now"
-        diffMin < 60 -> "$diffMin min ago"
-        diffHours < 24 -> "$diffHours h ago"
-        diffDays == 1L -> "yesterday"
-        else -> "$diffDays days ago"
-    }
-}
-
-private val ADDED_REGEX = Regex("""\b(\d+)\s+added\b""", RegexOption.IGNORE_CASE)
-
-internal fun lastSyncText(summary: String?): String? {
-    if (summary.isNullOrBlank()) return null
-    val match = ADDED_REGEX.find(summary) ?: return null
-    val count = match.groupValues[1].toIntOrNull() ?: return null
-    return when (count) {
-        0 -> "No new payments"
-        1 -> "1 new payment"
-        else -> "$count new payments"
-    }
-}
-
-internal fun countExpenses(transactions: List<UnifiedTransaction>, provider: Provider): Int =
-    transactions.count { it.provider == provider && it.direction == Direction.DEBIT }
-
-internal fun formatSavedDay(instant: Instant, zone: ZoneId = AccountingTime.zone): String =
-    DateTimeFormatter.ofPattern("d MMM yyyy", Locale.US).withZone(zone).format(instant)
