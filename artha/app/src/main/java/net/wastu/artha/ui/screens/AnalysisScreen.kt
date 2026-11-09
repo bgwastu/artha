@@ -88,6 +88,7 @@ import net.wastu.artha.data.analysis.recategorizeConfirmation
 import net.wastu.artha.ui.AVAILABLE_CATEGORY_ICONS
 import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.LedgerState
+import net.wastu.artha.ui.categoryColorFor
 import net.wastu.artha.ui.categoryIconFor
 import net.wastu.artha.ui.categoryIconLabel
 import net.wastu.artha.ui.components.ConnectedChoiceRow
@@ -221,7 +222,7 @@ fun AnalysisScreen(
             items(slices.size, key = { slices[it].name }) { index ->
                 val slice = slices[index]
                 val isSelected = selectedSliceIndex == index
-                val color = sliceColor(slice.name, slice.isOther)
+                val color = categoryColorFor(slice.name, slice.isOther)
                 CategorySliceRow(
                     slice = slice,
                     color = color,
