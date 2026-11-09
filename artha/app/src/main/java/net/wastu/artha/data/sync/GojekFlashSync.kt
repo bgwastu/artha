@@ -1,5 +1,7 @@
 package net.wastu.artha.data.sync
 
+import android.os.Build
+import android.util.Log
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.concurrent.atomic.AtomicBoolean
@@ -46,14 +48,14 @@ class GojekFlashController(
 
     suspend fun run(gojekImportEnabled: Boolean, ignoreCooldown: Boolean = false): GojekScreenSync.Result {
         if (!running.compareAndSet(false, true)) {
-            android.util.Log.i("ArthaScreen", "BUSY: already running")
+            Log.i("ArthaScreen", "BUSY: already running")
             return GojekScreenSync.Result.BUSY
         }
         abort.set(false)
         try {
             val last = preferences.gojekFlash.value
             if (!ignoreCooldown && GojekFlashPolicy.cooldownActive(last.result, last.millis, System.currentTimeMillis())) {
-                android.util.Log.i("ArthaScreen", "SKIPPED_COOLDOWN")
+                Log.i("ArthaScreen", "SKIPPED_COOLDOWN")
                 return GojekScreenSync.Result.SKIPPED_COOLDOWN
             }
             val result = GojekScreenSync(reader, isInteractive, abort::get, ledgerPayments).run(gojekImportEnabled)
@@ -90,7 +92,7 @@ class GojekScreenSync(
 
     private suspend fun walk(gojekImportEnabled: Boolean): Result = withContext(Dispatchers.IO) {
         if (!gojekImportEnabled) return@withContext skipped(Result.SKIPPED, "gojek import disabled")
-        if (android.os.Build.VERSION.SDK_INT < 33) return@withContext skipped(Result.ROOT_UNAVAILABLE, "screen walk needs Android 13")
+        if (Build.VERSION.SDK_INT < 33) return@withContext skipped(Result.ROOT_UNAVAILABLE, "screen walk needs Android 13")
         if (shouldAbort() || !isInteractive()) return@withContext skipped(Result.SKIPPED_SCREEN_OFF, "display is off")
         val installed = sh("pm path com.gojek.app 2>/dev/null")
             ?: return@withContext skipped(Result.ROOT_UNAVAILABLE, "no root shell")
@@ -147,7 +149,7 @@ class GojekScreenSync(
 
     private suspend fun sh(command: String): List<String>? = reader.executeCommandWithOutput(command)
 
-    private fun log(message: String) = android.util.Log.i(TAG, message)
+    private fun log(message: String) = Log.i(TAG, message)
 
     private fun skipped(result: Result, why: String): Result = log("$result: $why").let { result }
 

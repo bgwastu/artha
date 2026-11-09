@@ -29,6 +29,7 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextFieldLabelPosition
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Switch
@@ -43,7 +44,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.format.DateTimeFormatter
@@ -127,9 +131,9 @@ fun AiScreen(
     val working = progress.state == CategoryAutomationState.WORKING
 
     val saved = snapshot.aiConfig
-    var baseUrl by remember(saved.baseUrl) { mutableStateOf(saved.baseUrl) }
-    var apiKey by remember(saved.apiKey) { mutableStateOf(saved.apiKey) }
-    var model by remember(saved.model) { mutableStateOf(saved.model) }
+    val baseUrl = remember(saved.baseUrl) { TextFieldState(saved.baseUrl) }
+    val apiKey = remember(saved.apiKey) { TextFieldState(saved.apiKey) }
+    val model = remember(saved.model) { TextFieldState(saved.model) }
     var context by rememberSaveable(snapshot.knowledge) { mutableStateOf(snapshot.knowledge.orEmpty()) }
     var testing by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
@@ -151,7 +155,7 @@ fun AiScreen(
         }
     }
 
-    fun draft() = saved.copy(baseUrl = baseUrl.trim(), apiKey = apiKey.trim(), model = model.trim())
+    fun draft() = saved.copy(baseUrl = baseUrl.text.trim().toString(), apiKey = apiKey.text.trim().toString(), model = model.text.trim().toString())
     val providerDirty = draft() != saved
     val contextDirty = context != snapshot.knowledge.orEmpty()
     val busy = testing || saving
@@ -237,25 +241,29 @@ fun AiScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     OutlinedTextField(
-                        value = baseUrl, onValueChange = { baseUrl = it },
+                        state = baseUrl,
                         label = { Text("Endpoint URL") },
+                        labelPosition = TextFieldLabelPosition.Above(),
                         placeholder = { Text("https://example.com/v1") },
                         supportingText = { Text("Merchant names and amounts are sent to this endpoint") },
-                        singleLine = true, enabled = providerEnabled,
+                        lineLimits = TextFieldLineLimits.SingleLine, enabled = providerEnabled,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
-                        value = apiKey, onValueChange = { apiKey = it },
+                        state = apiKey,
                         label = { Text("API key") },
-                        visualTransformation = PasswordVisualTransformation(),
-                        singleLine = true, enabled = providerEnabled,
+                        labelPosition = TextFieldLabelPosition.Above(),
+                        outputTransformation = { replace(0, length, "\u2022".repeat(length)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                        lineLimits = TextFieldLineLimits.SingleLine, enabled = providerEnabled,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
-                        value = model, onValueChange = { model = it },
+                        state = model,
                         label = { Text("Model") },
+                        labelPosition = TextFieldLabelPosition.Above(),
                         placeholder = { Text("model name") },
-                        singleLine = true, enabled = providerEnabled,
+                        lineLimits = TextFieldLineLimits.SingleLine, enabled = providerEnabled,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedButton(

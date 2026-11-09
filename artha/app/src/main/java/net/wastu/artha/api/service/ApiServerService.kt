@@ -13,6 +13,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
@@ -118,7 +119,7 @@ class ApiServerService : Service() {
             engine?.start()
             tunnel?.start(localPort = 8080)
         } catch (e: Exception) {
-            android.util.Log.e("ArthaApi", "Failed to start server", e)
+            Log.e("ArthaApi", "Failed to start server", e)
             ApiServerController.updateTunnelState(TunnelState.Failed(e.message ?: "Server start failed"))
         }
 

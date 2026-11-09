@@ -1,6 +1,7 @@
 package net.wastu.artha.data.sync
 
 import android.os.Build
+import android.util.Log
 import java.io.StringReader
 import javax.xml.parsers.DocumentBuilderFactory
 import kotlinx.coroutines.Dispatchers
@@ -120,7 +121,7 @@ class JagoScreenSync(
 
     private suspend fun sh(command: String): List<String>? = reader.executeCommandWithOutput(command)
 
-    private fun log(message: String) = android.util.Log.i(TAG, message)
+    private fun log(message: String) = Log.i(TAG, message)
 
     private fun skipped(result: Result, why: String): Result = log("$result: $why").let { result }
 

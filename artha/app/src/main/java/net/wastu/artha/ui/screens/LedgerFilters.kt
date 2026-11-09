@@ -36,16 +36,18 @@ import androidx.compose.ui.unit.dp
 import java.time.LocalDate
 import net.wastu.artha.core.model.AccountingTime
 import net.wastu.artha.core.model.Provider
+import net.wastu.artha.core.model.TransactionType
 import net.wastu.artha.core.model.UnifiedTransaction
+import net.wastu.artha.data.analysis.RecategorizeScope
 import net.wastu.artha.ui.ArthaViewModel
 
 @Composable
-internal fun TypeChips(selected: net.wastu.artha.core.model.TransactionType?, onSelect: (net.wastu.artha.core.model.TransactionType?) -> Unit) {
-    val options = listOf<Pair<String, net.wastu.artha.core.model.TransactionType?>>(
+internal fun TypeChips(selected: TransactionType?, onSelect: (TransactionType?) -> Unit) {
+    val options = listOf<Pair<String, TransactionType?>>(
         "All" to null,
-        "Expenses" to net.wastu.artha.core.model.TransactionType.EXPENSE,
-        "Income" to net.wastu.artha.core.model.TransactionType.INCOME,
-        "Transfers" to net.wastu.artha.core.model.TransactionType.TRANSFER,
+        "Expenses" to TransactionType.EXPENSE,
+        "Income" to TransactionType.INCOME,
+        "Transfers" to TransactionType.TRANSFER,
     )
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         options.forEach { (label, type) -> FilterChip(selected = selected == type, onClick = { onSelect(type) }, label = { Text(label) }) }
@@ -102,7 +104,7 @@ internal fun TransactionFilterSheet(
                                 AssistChip(
                                     onClick = {
                                         val month = viewModel.selectedMonth.value
-                                        viewModel.recategorize(net.wastu.artha.data.analysis.RecategorizeScope.CategoryInMonth(category, month))
+                                        viewModel.recategorize(RecategorizeScope.CategoryInMonth(category, month))
                                         onDismiss()
                                     },
                                     label = { Text("Re-categorize") },

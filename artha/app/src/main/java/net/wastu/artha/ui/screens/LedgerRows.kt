@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -73,7 +74,7 @@ fun HighlightedText(
     style: TextStyle,
     modifier: Modifier = Modifier,
     fontWeight: FontWeight? = null,
-    color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
+    color: Color = Color.Unspecified,
     maxLines: Int = 1,
 ) {
     val background = MaterialTheme.colorScheme.primaryContainer

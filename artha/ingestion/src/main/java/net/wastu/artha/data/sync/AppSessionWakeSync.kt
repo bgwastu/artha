@@ -1,6 +1,7 @@
 package net.wastu.artha.data.sync
 
 import android.os.Build
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -72,7 +73,7 @@ class AppSessionWakeSync(
                 delay(400)
                 val mtimeAfter = fileMtime(targetPath)
                 if (mtimeAfter != null && mtimeAfter != mtimeBefore) {
-                    android.util.Log.i(TAG, "Session refreshed for $pkg (mtime $mtimeBefore -> $mtimeAfter)")
+                    Log.i(TAG, "Session refreshed for $pkg (mtime $mtimeBefore -> $mtimeAfter)")
                     return true
                 }
             }

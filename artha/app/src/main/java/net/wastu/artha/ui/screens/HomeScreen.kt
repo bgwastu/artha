@@ -8,63 +8,73 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.consumeWindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.ui.Alignment
-import androidx.compose.material3.TextButton
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.LinearWavyProgressIndicator
-import androidx.compose.material3.ShortNavigationBarItem
-import androidx.compose.material3.ShortNavigationBar
-import androidx.compose.material3.LoadingIndicator
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.foundation.layout.size
-import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.width
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material.icons.filled.Analytics
-import net.wastu.artha.ui.ArthaViewModel
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.WideNavigationRail
-import androidx.compose.material3.WideNavigationRailItem
 import androidx.compose.material3.FloatingToolbarDefaults
 import androidx.compose.material3.HorizontalFloatingToolbar
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ShortNavigationBar
+import androidx.compose.material3.ShortNavigationBarItem
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.WideNavigationRail
+import androidx.compose.material3.WideNavigationRailItem
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import net.wastu.artha.data.analysis.categoryRunMessage
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
+import net.wastu.artha.core.root.RootGateState
+import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.LedgerState
 import net.wastu.artha.ui.Page
 import net.wastu.artha.ui.PageStack
@@ -77,7 +87,7 @@ internal enum class Destination(val label: String, val icon: ImageVector) {
     SETTINGS("Settings", Icons.Default.Settings);
 
     companion object {
-        val Saver = androidx.compose.runtime.saveable.Saver<Destination, String>(
+        val Saver = Saver<Destination, String>(
             save = { it.name },
             restore = { name -> entries.firstOrNull { it.name == name } ?: TRANSACTIONS }
         )
@@ -98,7 +108,7 @@ fun HomeScreen(
     viewModel: ArthaViewModel? = null,
 ) {
     val context = LocalContext.current
-    val saveableStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+    val saveableStateHolder = rememberSaveableStateHolder()
     var transactionFilters by rememberSaveable(stateSaver = TransactionFiltersSaver) { mutableStateOf(TransactionFilters()) }
     var destination by rememberSaveable(stateSaver = Destination.Saver) { mutableStateOf(Destination.TRANSACTIONS) }
     val pages = rememberSaveable(saver = PageStack.Saver) { PageStack() }
@@ -108,26 +118,26 @@ fun HomeScreen(
     var selectedKey by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedFallback by remember { mutableStateOf<UnifiedTransaction?>(null) }
 
-    val snackbarHost = remember { androidx.compose.material3.SnackbarHostState() }
+    val snackbarHost = remember { SnackbarHostState() }
     val importFeedback by viewModel?.importFeedback?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val automaticImport by viewModel?.automaticImportActive?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(importFeedback?.sequence) {
+    LaunchedEffect(importFeedback?.sequence) {
         importFeedback?.let { snackbarHost.showSnackbar(it.message) }
     }
-    androidx.compose.runtime.LaunchedEffect(viewModel, pages.top) {
+    LaunchedEffect(viewModel, pages.top) {
         if (pages.top != Page.AI) viewModel?.categoryRunResults?.collect {
             val result = snackbarHost.showSnackbar(
-                net.wastu.artha.data.analysis.categoryRunMessage(it),
+                categoryRunMessage(it),
                 actionLabel = if (it.review > 0 || it.failed > 0) "Review" else null,
             )
-            if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) pages.open(Page.REVIEW)
+            if (result == SnackbarResult.ActionPerformed) pages.open(Page.REVIEW)
         }
     }
     val ledgerLoadFailed by viewModel?.ledgerLoadFailed?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
-    val rootGate by viewModel?.rootGate?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(net.wastu.artha.core.root.RootGateState.LOCKED) }
+    val rootGate by viewModel?.rootGate?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(RootGateState.LOCKED) }
     val categoryFilter by viewModel?.categoryFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<String?>(null) }
     val targetDest by viewModel?.targetDestination?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
-    androidx.compose.runtime.LaunchedEffect(targetDest) {
+    LaunchedEffect(targetDest) {
         targetDest?.let {
             when (it) {
                 "ANALYSIS" -> destination = Destination.ANALYSIS
@@ -163,11 +173,14 @@ fun HomeScreen(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val showDetailsPane = maxWidth >= 1080.dp && maxHeight >= 480.dp && destination == Destination.TRANSACTIONS && !showSearch && selected != null
         val showRail = maxWidth >= 600.dp && maxHeight >= 480.dp
+        val barBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
         Scaffold(
-            snackbarHost = { androidx.compose.material3.SnackbarHost(snackbarHost) },
-            modifier = if (showSearch) Modifier.clearAndSetSemantics {} else Modifier,
+            snackbarHost = { SnackbarHost(snackbarHost) },
+            modifier = (if (showSearch) Modifier.clearAndSetSemantics {} else Modifier)
+                .nestedScroll(barBehavior.nestedScrollConnection),
             topBar = {
-                TopAppBar(
+                LargeFlexibleTopAppBar(
+                    scrollBehavior = barBehavior,
                     navigationIcon = {
                         if (destination == Destination.TRANSACTIONS && categoryFilter != null) {
                             IconButton(onClick = {
@@ -180,7 +193,7 @@ fun HomeScreen(
                             }
                         }
                     },
-                    title = { Text(destination.label, style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    title = { Text(destination.label, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 )
             },
             floatingActionButton = {

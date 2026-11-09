@@ -1,31 +1,35 @@
 package net.wastu.artha.ui.widget
 
-import net.wastu.artha.core.model.iconRes
-import androidx.core.net.toUri
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.view.View
-import android.os.Bundle
 import android.os.Build
+import android.os.Bundle
+import android.util.Log
+import android.view.View
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
-import net.wastu.artha.MainActivity
-import net.wastu.artha.R
-import net.wastu.artha.core.model.Direction
-import net.wastu.artha.core.model.UnifiedTransaction
-import net.wastu.artha.ui.paymentRowAmount
-import net.wastu.artha.ui.transactionHumanLine
-import net.wastu.artha.ui.transactionTags
-import net.wastu.artha.ui.TransactionTag
-import net.wastu.artha.ui.TransactionTagKind
+import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import net.wastu.artha.ArthaApplication
+import net.wastu.artha.MainActivity
+import net.wastu.artha.R
+import net.wastu.artha.core.model.AccountingTime
+import net.wastu.artha.core.model.Direction
+import net.wastu.artha.core.model.UnifiedTransaction
+import net.wastu.artha.core.model.iconRes
+import net.wastu.artha.ui.TransactionTag
+import net.wastu.artha.ui.TransactionTagKind
+import net.wastu.artha.ui.paymentRowAmount
+import net.wastu.artha.ui.transactionHumanLine
+import net.wastu.artha.ui.transactionTags
 
 class TransactionsWidgetProvider : AppWidgetProvider() {
 
@@ -37,7 +41,7 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
             val ids = appWidgetManager.getAppWidgetIds(ComponentName(context, TransactionsWidgetProvider::class.java))
             if (ids.isNotEmpty()) {
                 updateWidgets(context, appWidgetManager, ids)
-                (context.applicationContext as? net.wastu.artha.ArthaApplication)?.syncInBackgroundIfStale()
+                (context.applicationContext as? ArthaApplication)?.syncInBackgroundIfStale()
             }
         }
     }
@@ -49,7 +53,7 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
         }
         if (targetIds.isNotEmpty()) {
             updateWidgets(context, appWidgetManager, targetIds)
-            (context.applicationContext as? net.wastu.artha.ArthaApplication)?.syncInBackgroundIfStale()
+            (context.applicationContext as? ArthaApplication)?.syncInBackgroundIfStale()
         }
     }
 
@@ -99,7 +103,7 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
         }
         status()
         WidgetRefresh.schedule("transactions", pendingResult, onFailure = { status(failed = true) }) {
-                val app = context.applicationContext as net.wastu.artha.ArthaApplication
+                val app = context.applicationContext as ArthaApplication
                 val enabled = app.providerPreferences.enabled.value
                 val allPayments = widgetSpending(context).transactions.filter { it.isConfirmed && it.provider in enabled && it.direction == Direction.DEBIT }
                 val rows = groupedWidgetPayments(allPayments, enabled)
@@ -169,7 +173,7 @@ internal fun buildTransactionItemView(
     val tags = transactionTags(tx)
     bindWidgetTags(views, tags)
 
-    val zone = net.wastu.artha.core.model.AccountingTime.zone
+    val zone = AccountingTime.zone
     val localDate = tx.occurredAt.atZone(zone).toLocalDate()
     val timeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
     val timeStr = tx.occurredAt.atZone(zone).format(timeFormatter)
@@ -188,7 +192,7 @@ internal fun buildTransactionItemView(
         isCredit -> R.color.widget_amount_incoming
         else -> R.color.widget_amount_outgoing
     }
-    val amountColor = androidx.core.content.ContextCompat.getColor(context, amountColorRes)
+    val amountColor = ContextCompat.getColor(context, amountColorRes)
     views.setTextViewText(R.id.widget_item_amount, amountText)
     views.setTextColor(R.id.widget_item_amount, amountColor)
 
@@ -234,10 +238,10 @@ private class TransactionsRemoteViewsFactory(
     override fun onDataSetChanged() {
         runBlocking(Dispatchers.IO) {
             try {
-                val app = context.applicationContext as net.wastu.artha.ArthaApplication
+                val app = context.applicationContext as ArthaApplication
                 val enabled = app.providerPreferences.enabled.value
                 rows = groupedWidgetPayments(widgetSpending(context).transactions, enabled)
-            } catch (e: Exception) { android.util.Log.w("ArthaWidget", "Keeping the last widget rows", e) }
+            } catch (e: Exception) { Log.w("ArthaWidget", "Keeping the last widget rows", e) }
         }
     }
 

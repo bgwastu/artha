@@ -1,20 +1,29 @@
 package net.wastu.artha
 
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.InternalComposeUiApi
+import androidx.compose.ui.MotionDurationScale
+import androidx.compose.ui.platform.WindowRecomposerPolicy
+import androidx.compose.ui.platform.createLifecycleAwareWindowRecomposer
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import androidx.compose.ui.platform.createLifecycleAwareWindowRecomposer
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
+import net.wastu.artha.data.demo.DemoAi
 import net.wastu.artha.ui.ArthaApp
 import net.wastu.artha.ui.ArthaViewModel
+import net.wastu.artha.ui.DemoRibbon
 import net.wastu.artha.ui.theme.ArthaTheme
+import net.wastu.artha.ui.widget.AnalysisWidgetProvider
+import net.wastu.artha.ui.widget.TransactionsWidgetProvider
 
 class MainActivity : ComponentActivity() {
     private var viewModelInstance: ArthaViewModel? = null
@@ -22,7 +31,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val isDebuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        val isDebuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         if (!isDebuggable) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
@@ -31,8 +40,8 @@ class MainActivity : ComponentActivity() {
         val application = application as ArthaApplication
         // The view model has already verified root; each import just refreshes the widgets afterwards.
         suspend fun <T> synced(block: suspend () -> T): T = block().also {
-            net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(application)
-            net.wastu.artha.ui.widget.TransactionsWidgetProvider.triggerUpdate(application)
+            AnalysisWidgetProvider.triggerUpdate(application)
+            TransactionsWidgetProvider.triggerUpdate(application)
         }
         setContent {
             ArthaTheme {
@@ -44,7 +53,7 @@ class MainActivity : ComponentActivity() {
                             ingest = { synced { application.ingestion.ingestAll() } },
                             ingestStale = { synced { application.ingestion.ingestAll(force = false) } },
                             syncSingle = { provider -> synced { application.ingestion.syncProvider(provider) } },
-                            categorize = if (BuildConfig.DEMO) net.wastu.artha.data.demo.DemoAi::categorize else null,
+                            categorize = if (BuildConfig.DEMO) DemoAi::categorize else null,
                             preferences = application.providerPreferences,
                             syncingProvider = application.ingestion.syncingProvider,
                             analysisStore = application.analysisStore,
@@ -57,21 +66,21 @@ class MainActivity : ComponentActivity() {
                     }
                 })
                 viewModelInstance = model
-                androidx.compose.foundation.layout.Box {
+                Box {
                     ArthaApp(model)
-                    if (BuildConfig.DEMO) net.wastu.artha.ui.DemoRibbon()
+                    if (BuildConfig.DEMO) DemoRibbon()
                 }
             }
         }
     }
 
     /** The demo always animates, even when the device has animations switched off. */
-    @OptIn(androidx.compose.ui.InternalComposeUiApi::class)
+    @OptIn(InternalComposeUiApi::class)
     private fun keepAnimationsOn() {
-        val fullSpeed = object : androidx.compose.ui.MotionDurationScale {
+        val fullSpeed = object : MotionDurationScale {
             override val scaleFactor = 1f
         }
-        androidx.compose.ui.platform.WindowRecomposerPolicy.setFactory { view ->
+        WindowRecomposerPolicy.setFactory { view ->
             view.createLifecycleAwareWindowRecomposer(fullSpeed)
         }
     }
@@ -85,7 +94,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(this)
-        net.wastu.artha.ui.widget.TransactionsWidgetProvider.triggerUpdate(this)
+        AnalysisWidgetProvider.triggerUpdate(this)
+        TransactionsWidgetProvider.triggerUpdate(this)
     }
 }

@@ -1,5 +1,6 @@
 package net.wastu.artha.notifications
 
+import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import net.wastu.artha.ArthaApplication
@@ -13,8 +14,8 @@ class TransactionNotificationListener : NotificationListenerService() {
         if (sbn.isOngoing) return
         val provider = ProviderNotificationRules.providerFor(sbn.packageName) ?: return
         val extras = sbn.notification.extras
-        val title = extras.getCharSequence(android.app.Notification.EXTRA_TITLE)
-        val text = extras.getCharSequence(android.app.Notification.EXTRA_TEXT)
+        val title = extras.getCharSequence(Notification.EXTRA_TITLE)
+        val text = extras.getCharSequence(Notification.EXTRA_TEXT)
         if (!ProviderNotificationRules.worthSyncing(provider, title, text)) return
         (applicationContext as? ArthaApplication)?.syncAfterProviderNotification(provider)
     }

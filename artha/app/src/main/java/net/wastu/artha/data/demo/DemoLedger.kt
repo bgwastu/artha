@@ -1,24 +1,25 @@
 package net.wastu.artha.data.demo
 
 import java.time.DayOfWeek
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Random
-import org.json.JSONObject
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.analysis.INTEREST_INCOME_CATEGORY
 import net.wastu.artha.data.export.ImportedLabels
+import org.json.JSONObject
 
 /**
  * A year of invented activity for demos: made-up shops, employer and amounts that look plausible
  * (paydays, weekday habits, a holiday bonus, trips) without matching any real account.
  */
 object DemoLedger {
-    private val RECENT_UNLABELLED = java.time.Duration.ofHours(30)
+    private val RECENT_UNLABELLED = Duration.ofHours(30)
 
     data class Data(val transactions: List<UnifiedTransaction>, val labels: List<ImportedLabels>)
 

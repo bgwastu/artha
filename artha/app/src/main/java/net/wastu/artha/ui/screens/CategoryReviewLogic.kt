@@ -5,9 +5,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
 import java.util.Locale
 import kotlinx.coroutines.flow.first
 import net.wastu.artha.core.model.AccountingTime
+import net.wastu.artha.core.model.TransactionType
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.analysis.AI_REASON_PREFIX
 import net.wastu.artha.data.analysis.AnalysisSnapshot
@@ -73,7 +75,7 @@ internal fun buildReviewQueue(
     snapshot: AnalysisSnapshot,
     busyKeys: Set<String>,
     today: LocalDate = LocalDate.now(AccountingTime.clock.withZone(AccountingTime.zone)),
-    month: java.time.YearMonth? = null,
+    month: YearMonth? = null,
 ): List<ReviewItem> {
     // Spending payments whose categorySource is REVIEW or FAILED, newest first, excluding busy.
     val candidates: List<UnifiedTransaction> = rows.filter { tx ->
@@ -108,7 +110,7 @@ internal fun buildReviewItems(
         .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
         .map { it.key }
 
-    fun overallTopFor(type: net.wastu.artha.core.model.TransactionType): List<String> {
+    fun overallTopFor(type: TransactionType): List<String> {
         val own = snapshot.categoriesFor(type)
         return overallTopFromRows.filter { it in own } + own.filter { it !in overallCategoryCounts }
     }
@@ -207,8 +209,8 @@ internal data class MerchantGroup(
 internal fun buildMonthGroups(
     rows: List<UnifiedTransaction>,
     snapshot: AnalysisSnapshot,
-    month: java.time.YearMonth,
-    type: net.wastu.artha.core.model.TransactionType,
+    month: YearMonth,
+    type: TransactionType,
 ): List<MerchantGroup> = rows
     .filter { it.type == type && it.money.currencyCode == "IDR" && inMonth(it, month) }
     .groupBy { txMerchantKey(it) }

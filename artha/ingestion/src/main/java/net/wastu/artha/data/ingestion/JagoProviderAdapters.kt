@@ -1,15 +1,9 @@
-@file:android.annotation.SuppressLint("SdCardPath") // Provider sandboxes are intentionally read as root.
+@file:SuppressLint("SdCardPath") // Provider sandboxes are intentionally read as root.
 
 package net.wastu.artha.data.ingestion
 
+import android.annotation.SuppressLint
 import android.util.Base64
-import net.wastu.artha.core.model.Direction
-import net.wastu.artha.core.model.Money
-import net.wastu.artha.core.model.Pocket
-import net.wastu.artha.core.model.Provider
-import net.wastu.artha.core.model.UnifiedTransaction
-import net.wastu.artha.data.providers.AccountStatus
-import net.wastu.artha.data.providers.historyCoverageHint
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -19,6 +13,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import net.wastu.artha.core.model.Direction
+import net.wastu.artha.core.model.Money
+import net.wastu.artha.core.model.Pocket
+import net.wastu.artha.core.model.Provider
+import net.wastu.artha.core.model.UnifiedTransaction
+import net.wastu.artha.data.providers.AccountStatus
+import net.wastu.artha.data.providers.historyCoverageHint
+import net.wastu.artha.data.sync.AppSessionWakeSync
+import net.wastu.artha.data.sync.JagoScreenSync
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -300,8 +303,8 @@ object JagoCachedHistory {
 
 class JagoProviderAdapter(
     private val reader: JagoTransactionReader,
-    private val screenSync: net.wastu.artha.data.sync.JagoScreenSync? = null,
-    private val onScreenSync: (net.wastu.artha.data.sync.JagoScreenSync.Result) -> Unit = {},
+    private val screenSync: JagoScreenSync? = null,
+    private val onScreenSync: (JagoScreenSync.Result) -> Unit = {},
 ) : ProviderAdapter {
     override val coverageHint = Provider.JAGO.historyCoverageHint
     override val provider = Provider.JAGO
@@ -314,7 +317,7 @@ class JagoProviderAdapter(
 
 class ShopeeProviderAdapter(
     private val files: RootFileReader,
-    private val sessionWake: net.wastu.artha.data.sync.AppSessionWakeSync? = null,
+    private val sessionWake: AppSessionWakeSync? = null,
 ) : ProviderAdapter {
     override val coverageHint = Provider.SHOPEE.historyCoverageHint
     override val provider = Provider.SHOPEE
@@ -343,7 +346,7 @@ class GojekProviderAdapter(private val files: RootFileReader) : ProviderAdapter 
 
 class GrabProviderAdapter(
     private val files: RootFileReader,
-    private val sessionWake: net.wastu.artha.data.sync.AppSessionWakeSync? = null,
+    private val sessionWake: AppSessionWakeSync? = null,
 ) : ProviderAdapter {
     override val coverageHint = Provider.GRAB.historyCoverageHint
     override val provider = Provider.GRAB

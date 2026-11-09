@@ -1,7 +1,9 @@
-@file:android.annotation.SuppressLint("SdCardPath")
+@file:SuppressLint("SdCardPath")
 package net.wastu.artha.data.ingestion
 
+import android.annotation.SuppressLint
 import android.os.Build
+import android.util.Log
 import androidx.core.content.pm.PackageInfoCompat
 import java.net.HttpURLConnection
 import java.net.URL
@@ -95,7 +97,7 @@ class GojekOrderReader(private val files: RootFileReader, private val screen: Go
         // `gopay:<ID transaksi>` identity as the API rows, so rows the ledger already has are ignored.
         val screenRows = try { screen.transactions() }
         catch (cancelled: CancellationException) { throw cancelled }
-        catch (t: Exception) { android.util.Log.w("ArthaScreen", "screen store read failed", t); emptyList() }
+        catch (t: Exception) { Log.w("ArthaScreen", "screen store read failed", t); emptyList() }
         val screenContributed = screenRows.isNotEmpty()
         for (row in screenRows) if (rows.transactions.none { it.key == row.key }) rows.transactions += row
         if (liveHeaders != null) {

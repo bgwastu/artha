@@ -1,27 +1,30 @@
 package net.wastu.artha.ui.widget
 
 import java.math.BigInteger
-import net.wastu.artha.data.analysis.MonthSpendingAnalysis
-import net.wastu.artha.ui.formatMinorAmount
 import java.time.Instant
+import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.UUID
 import net.wastu.artha.core.model.AccountingTime
-import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.core.model.Direction
+import net.wastu.artha.core.model.Provider
+import net.wastu.artha.core.model.UnifiedTransaction
+import net.wastu.artha.data.analysis.MonthSpendingAnalysis
+import net.wastu.artha.ui.formatMinorAmount
 
 internal const val RECENT_PAYMENT_LIMIT = 40
 
-internal fun recentWidgetPayments(transactions: List<UnifiedTransaction>, enabled: Set<net.wastu.artha.core.model.Provider>): List<UnifiedTransaction> =
+internal fun recentWidgetPayments(transactions: List<UnifiedTransaction>, enabled: Set<Provider>): List<UnifiedTransaction> =
     transactions.asSequence().filter { it.isConfirmed && it.provider in enabled && it.direction == Direction.DEBIT }
         .sortedByDescending { it.occurredAt }.take(RECENT_PAYMENT_LIMIT).toList()
 
 internal sealed interface WidgetPaymentRow {
-    data class Day(val date: java.time.LocalDate) : WidgetPaymentRow
+    data class Day(val date: LocalDate) : WidgetPaymentRow
     data class Payment(val transaction: UnifiedTransaction) : WidgetPaymentRow
 }
 
-internal fun groupedWidgetPayments(transactions: List<UnifiedTransaction>, enabled: Set<net.wastu.artha.core.model.Provider>): List<WidgetPaymentRow> = buildList {
+internal fun groupedWidgetPayments(transactions: List<UnifiedTransaction>, enabled: Set<Provider>): List<WidgetPaymentRow> = buildList {
     val grouped = recentWidgetPayments(transactions, enabled).groupBy { it.occurredAt.atZone(AccountingTime.zone).toLocalDate() }
     grouped.forEach { (day, payments) ->
         add(WidgetPaymentRow.Day(day))
@@ -29,12 +32,12 @@ internal fun groupedWidgetPayments(transactions: List<UnifiedTransaction>, enabl
     }
 }
 
-internal fun widgetRowId(row: WidgetPaymentRow): Long = java.util.UUID.nameUUIDFromBytes(when (row) {
+internal fun widgetRowId(row: WidgetPaymentRow): Long = UUID.nameUUIDFromBytes(when (row) {
     is WidgetPaymentRow.Day -> "day:${row.date}"
     is WidgetPaymentRow.Payment -> "payment:${row.transaction.key}"
 }.toByteArray(Charsets.UTF_8)).mostSignificantBits
 
-internal fun widgetDayLabel(day: java.time.LocalDate, today: java.time.LocalDate = java.time.LocalDate.now(AccountingTime.clock.withZone(AccountingTime.zone))): String = when (day) {
+internal fun widgetDayLabel(day: LocalDate, today: LocalDate = LocalDate.now(AccountingTime.clock.withZone(AccountingTime.zone))): String = when (day) {
     today -> "Today"
     today.minusDays(1) -> "Yesterday"
     else -> day.format(DateTimeFormatter.ofPattern(if (day.year == today.year) "d MMM" else "d MMM yyyy", Locale.US))

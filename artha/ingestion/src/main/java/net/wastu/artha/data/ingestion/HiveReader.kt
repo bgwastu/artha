@@ -2,6 +2,8 @@ package net.wastu.artha.data.ingestion
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.security.MessageDigest
+import java.util.zip.CRC32
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -59,13 +61,13 @@ object HiveBox {
     fun read(data: ByteArray, key: ByteArray): Map<String, Any?> {
         val buffer = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
         val values = linkedMapOf<String, ByteArray>()
-        val keyHash = java.security.MessageDigest.getInstance("SHA-256").digest(key)
+        val keyHash = MessageDigest.getInstance("SHA-256").digest(key)
         while (buffer.hasRemaining()) {
             val start = buffer.position()
             require(buffer.remaining() >= 4) { "Truncated Hive frame" }
             val length = buffer.int
             require(length >= 10 && length <= data.size - start) { "Invalid Hive frame length" }
-            val checksum = java.util.zip.CRC32().apply {
+            val checksum = CRC32().apply {
                 update(keyHash)
                 update(data, start, length - 4)
             }.value

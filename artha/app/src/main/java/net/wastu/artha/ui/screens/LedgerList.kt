@@ -30,6 +30,7 @@ import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,17 +45,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import net.wastu.artha.core.model.AccountingTime
+import net.wastu.artha.core.model.TransactionType
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.analysis.CategoryProgress
 import net.wastu.artha.data.analysis.paymentCategoryState
@@ -92,7 +96,7 @@ internal fun TransactionList(
 
     val groupedByDay by produceState<List<DayGroup>>(emptyList(), transactions) {
         value = withContext(Dispatchers.Default) {
-            val zone = net.wastu.artha.core.model.AccountingTime.zone
+            val zone = AccountingTime.zone
             transactions
                 .groupBy { it.occurredAt.atZone(zone).toLocalDate() }
                 .map { (date, dailyTxs) -> DayGroup(date, dailyTxs) }
@@ -220,7 +224,7 @@ internal fun TransactionList(
             ) { transaction ->
                 TransactionRow(
                     transaction = transaction,
-                    modifier = if (transaction.type == net.wastu.artha.core.model.TransactionType.TRANSFER) Modifier.alpha(0.6f) else Modifier,
+                    modifier = if (transaction.type == TransactionType.TRANSFER) Modifier.alpha(0.6f) else Modifier,
                     onClick = { onTransaction(transaction) },
                     highlightQuery = highlightQuery,
                     showCategory = showCategory,
@@ -303,7 +307,7 @@ private fun TotalsSummary(
 }
 
 @Composable
-private fun TotalsFigure(title: String, value: String, color: androidx.compose.ui.graphics.Color, modifier: Modifier = Modifier) {
+private fun TotalsFigure(title: String, value: String, color: Color, modifier: Modifier = Modifier) {
     Column(modifier) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = color)
@@ -322,7 +326,7 @@ private fun DayTotalsSheet(
     val incomeMinor = group.transactions.filter(UnifiedTransaction::isIncome).sumOf { it.money.amountMinor }
     val zone = AccountingTime.zone
     val dayStart = group.date.atStartOfDay(zone).toInstant().toEpochMilli()
-    val month = java.time.YearMonth.from(group.date)
+    val month = YearMonth.from(group.date)
     val monthStart = month.atDay(1).atStartOfDay(zone).toInstant().toEpochMilli()
     val monthEnd = month.atEndOfMonth().atStartOfDay(zone).toInstant().toEpochMilli()
     val dayActive = activeRange == dayStart to dayStart
@@ -344,7 +348,7 @@ private fun DayTotalsSheet(
                         onClick = { onFilterDates(dayStart, dayStart); onDismiss() },
                         modifier = Modifier.weight(1f),
                     ) { Text("Only this day") }
-                    androidx.compose.material3.OutlinedButton(
+                    OutlinedButton(
                         enabled = !monthActive,
                         onClick = { onFilterDates(monthStart, monthEnd); onDismiss() },
                         modifier = Modifier.weight(1f),

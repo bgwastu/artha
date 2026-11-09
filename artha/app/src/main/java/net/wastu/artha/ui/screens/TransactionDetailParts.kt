@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
@@ -43,7 +44,9 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import java.math.BigInteger
 import java.time.Instant
 import net.wastu.artha.core.model.AccountingTime
 import net.wastu.artha.core.model.Direction
@@ -64,7 +67,7 @@ import org.json.JSONObject
 internal fun itemPriceText(raw: String): String {
     val digits = raw.trim().removePrefix("Rp").trim()
     val rupiah = digits.takeIf { it.isNotEmpty() && it.all(Char::isDigit) }?.toBigIntegerOrNull() ?: return raw
-    return formatMinorAmount(rupiah.multiply(java.math.BigInteger.valueOf(100)))
+    return formatMinorAmount(rupiah.multiply(BigInteger.valueOf(100)))
 }
 
 internal val StatusTagKinds = setOf(TransactionTagKind.REVERSED, TransactionTagKind.REFUND,
@@ -123,7 +126,7 @@ internal fun GroupRecordsSection(records: List<GroupRecord>, parentTime: Instant
                 groupNetMinor(records)?.let { net ->
                     HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                     val currency = records.first().transaction.money.currencyCode
-                    val amount = formatMinorAmount(java.math.BigInteger.valueOf(kotlin.math.abs(net)), currency)
+                    val amount = formatMinorAmount(BigInteger.valueOf(kotlin.math.abs(net)), currency)
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("Net", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                         Text(if (net < 0) "+$amount" else amount, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
@@ -148,7 +151,7 @@ private fun SectionHeading(title: String, supporting: String? = null) {
 
 /** One source record on its own: what that source saw, before reconciliation merged it. */
 @Composable
-internal fun GroupRecordDetails(item: GroupRecord, minHeight: androidx.compose.ui.unit.Dp, showBack: Boolean, onBack: () -> Unit) {
+internal fun GroupRecordDetails(item: GroupRecord, minHeight: Dp, showBack: Boolean, onBack: () -> Unit) {
     val tx = item.transaction
     val payload = remember(tx.rawPayload) { runCatching { JSONObject(tx.rawPayload) }.getOrNull() }
     Column(Modifier.fillMaxWidth().heightIn(min = minHeight)) {
@@ -203,7 +206,7 @@ internal fun DetailRow(label: String, value: String) {
 
 @Composable
 internal fun DetailEditRow(
-    label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String, value: String, icon: ImageVector,
     enabled: Boolean, supporting: String? = null,
     supportingContent: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,

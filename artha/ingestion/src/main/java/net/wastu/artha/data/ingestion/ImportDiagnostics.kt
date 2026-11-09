@@ -1,6 +1,9 @@
 package net.wastu.artha.data.ingestion
 
+import java.net.ConnectException
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.nio.charset.Charset
 import kotlinx.coroutines.CancellationException
 import net.wastu.artha.core.model.UnifiedTransaction
@@ -107,9 +110,9 @@ fun isTransientNetworkError(error: Throwable): Boolean {
     var current: Throwable? = error
     while (current != null) {
         when (current) {
-            is java.net.UnknownHostException,
-            is java.net.SocketTimeoutException,
-            is java.net.ConnectException,
+            is UnknownHostException,
+            is SocketTimeoutException,
+            is ConnectException,
             -> return true
         }
         val message = current.message.orEmpty()

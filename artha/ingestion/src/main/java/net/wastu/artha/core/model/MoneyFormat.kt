@@ -28,7 +28,7 @@ fun formatMinorAmount(amountMinor: BigInteger, currencyCode: String = "IDR"): St
     if (currencyCode == "IDR") {
         // Show whole rupiah even when the minor part carries cents (Rp1.234,56 stays as its own
         // fractional string elsewhere; explicit user request: cleaner whole-rupiah display).
-        return requireNotNull(CachedCurrencyFormat.get()).format(amountMinor.divide(java.math.BigInteger.valueOf(100)))
+        return requireNotNull(CachedCurrencyFormat.get()).format(amountMinor.divide(BigInteger.valueOf(100)))
     }
     val currency = Currency.getInstance(currencyCode)
     val amount = BigDecimal(amountMinor, currency.defaultFractionDigits)

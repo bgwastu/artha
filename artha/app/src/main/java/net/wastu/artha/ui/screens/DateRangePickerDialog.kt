@@ -38,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -194,7 +195,7 @@ private fun DayCell(date: LocalDate, today: LocalDate, start: LocalDate?, end: L
             Modifier
                 .size(40.dp)
                 .clip(CircleShape)
-                .background(if (selected) colors.primary else androidx.compose.ui.graphics.Color.Transparent)
+                .background(if (selected) colors.primary else Color.Transparent)
                 .then(if (date == today && !selected) Modifier.border(1.dp, colors.outline, CircleShape) else Modifier)
                 .clickable(enabled = !future) { onPick(date) }
                 .alpha(if (future) 0.38f else 1f),

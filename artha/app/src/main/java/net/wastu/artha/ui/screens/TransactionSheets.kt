@@ -33,6 +33,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
@@ -69,9 +70,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import net.wastu.artha.core.model.Direction
+import net.wastu.artha.core.model.TransactionType
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.analysis.CategoryProgress
 import net.wastu.artha.data.analysis.CategorySource
+import net.wastu.artha.data.analysis.INITIAL_DEFAULT_CATEGORIES
+import net.wastu.artha.data.analysis.INITIAL_INCOME_CATEGORIES
 import net.wastu.artha.data.analysis.PaymentCategoryState
 import net.wastu.artha.data.analysis.RecategorizeScope
 import net.wastu.artha.data.analysis.categoryReasonText
@@ -249,7 +253,7 @@ private fun TransactionDetailsBody(
     } ?: transaction
     val recordType = record.type
     val availableCategories = snapshot?.categoriesFor(recordType)
-        ?: if (recordType == net.wastu.artha.core.model.TransactionType.INCOME) net.wastu.artha.data.analysis.INITIAL_INCOME_CATEGORIES else net.wastu.artha.data.analysis.INITIAL_DEFAULT_CATEGORIES
+        ?: if (recordType == TransactionType.INCOME) INITIAL_INCOME_CATEGORIES else INITIAL_DEFAULT_CATEGORIES
     val currentCategory = snapshot?.categories?.get(record.key) ?: record.category ?: "Uncategorized"
     val currentNote = if (snapshot?.updatedAt?.containsKey("note:${record.key}") == true)
         snapshot.userNotes[record.key].orEmpty() else record.userNote.orEmpty()
@@ -386,7 +390,7 @@ private fun TransactionDetailsBody(
                     TagRow(tags)
                     if (records.isNotEmpty()) GroupRecordsSection(records, record.occurredAt, linkedRecordsExplanation(record)) { state.recordIndex = it }
 
-                    if (recordType != net.wastu.artha.core.model.TransactionType.TRANSFER) {
+                    if (recordType != TransactionType.TRANSFER) {
                         Column(Modifier.padding(top = if (records.isNotEmpty()) SectionGap else 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             DetailEditRow(
                                 label = "Category", value = currentCategory,
@@ -515,11 +519,11 @@ private fun TransactionDetailsBody(
                     if (viewModel?.analysisStore != null && records.isEmpty()) {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf(
-                                net.wastu.artha.core.model.TransactionType.EXPENSE to "Expense",
-                                net.wastu.artha.core.model.TransactionType.INCOME to "Income",
-                                net.wastu.artha.core.model.TransactionType.TRANSFER to "Transfer",
+                                TransactionType.EXPENSE to "Expense",
+                                TransactionType.INCOME to "Income",
+                                TransactionType.TRANSFER to "Transfer",
                             ).forEach { (type, label) ->
-                                androidx.compose.material3.FilterChip(
+                                FilterChip(
                                     selected = recordType == type,
                                     onClick = { if (recordType != type) viewModel.setTransactionType(record, type) },
                                     label = { Text(label) },

@@ -1,12 +1,15 @@
 package net.wastu.artha.data.analysis
 
-import net.wastu.artha.core.model.TransactionType
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import net.wastu.artha.core.model.TransactionType
+import net.wastu.artha.core.model.UnifiedTransaction
+import net.wastu.artha.data.export.ImportedLabels
+import net.wastu.artha.ui.widget.AnalysisWidgetProvider
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -214,7 +217,7 @@ class AnalysisStore(context: Context) {
             updatedAt = currentUpdated,
             aiRecords = records,
         )
-        runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
+        runCatching { AnalysisWidgetProvider.triggerUpdate(appContext) }
     }
 
     /** Lets the AI replace a user's pick after they confirmed "Replace your pick?". */
@@ -267,7 +270,7 @@ class AnalysisStore(context: Context) {
     fun commitMerchantSuggestions(
         suggestions: Map<String, CategorySuggestion>,
         input: AnalysisSnapshot,
-        rows: List<net.wastu.artha.core.model.UnifiedTransaction> = emptyList(),
+        rows: List<UnifiedTransaction> = emptyList(),
     ): Int {
         val current = _snapshot.value
         if (!sameRequestSettings(current, input)) return 0
@@ -318,7 +321,7 @@ class AnalysisStore(context: Context) {
             putString("updated_at_map", JSONObject(times as Map<*, *>).toString())
         }
         _snapshot.value = current.copy(categories = categories, reasons = reasons, updatedAt = times, aiRecords = records)
-        runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
+        runCatching { AnalysisWidgetProvider.triggerUpdate(appContext) }
     }
 
     @Synchronized
@@ -443,7 +446,7 @@ class AnalysisStore(context: Context) {
             putString("updated_at_map", JSONObject(updated as Map<*, *>).toString())
         }
         _snapshot.value = current.copy(categories = categories, reasons = reasons, manualCategories = manual, updatedAt = updated)
-        runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
+        runCatching { AnalysisWidgetProvider.triggerUpdate(appContext) }
     }
 
     @Synchronized
@@ -504,11 +507,11 @@ class AnalysisStore(context: Context) {
             putString("manual_categories", JSONArray(merged.manualCategories.toList()).toString())
         }
         _snapshot.value = merged
-        runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
+        runCatching { AnalysisWidgetProvider.triggerUpdate(appContext) }
     }
 
     @Synchronized
-    fun mergeImportedAnalysis(meta: org.json.JSONObject?, labels: List<net.wastu.artha.data.export.ImportedLabels>) {
+    fun mergeImportedAnalysis(meta: org.json.JSONObject?, labels: List<ImportedLabels>) {
         var next = _snapshot.value
         meta?.optJSONObject("analysis")?.let { analysis ->
             val importedNotes = jsonObjectToMap(analysis.optJSONObject("userNotes"))
@@ -564,7 +567,7 @@ class AnalysisStore(context: Context) {
             putString("updated_at_map", JSONObject(next.updatedAt.mapValues { it.value.toString() } as Map<*, *>).toString())
         }
         _snapshot.value = next
-        runCatching { net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(appContext) }
+        runCatching { AnalysisWidgetProvider.triggerUpdate(appContext) }
     }
 
     private fun jsonObjectToMap(obj: JSONObject?): Map<String, String> {

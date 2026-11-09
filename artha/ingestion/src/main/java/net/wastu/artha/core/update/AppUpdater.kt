@@ -7,8 +7,10 @@ import android.os.Build
 import android.util.Log
 import androidx.core.content.edit
 import androidx.core.content.pm.PackageInfoCompat
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
@@ -268,8 +270,8 @@ class AppUpdater(
         fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 
         /** Reads at most [limit] bytes; a manifest is tiny, so anything bigger is not one. */
-        fun java.io.InputStream.readNBytesCompat(limit: Int): ByteArray {
-            val out = java.io.ByteArrayOutputStream()
+        fun InputStream.readNBytesCompat(limit: Int): ByteArray {
+            val out = ByteArrayOutputStream()
             val buffer = ByteArray(8 * 1024)
             while (true) {
                 val read = read(buffer)

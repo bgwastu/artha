@@ -1,51 +1,48 @@
 package net.wastu.artha.ui.screens
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import net.wastu.artha.ui.components.PageScaffold
-import net.wastu.artha.ui.components.Segment
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.SettingsSuggest
-import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import net.wastu.artha.ArthaApplication
+import net.wastu.artha.api.service.ApiServerController
+import net.wastu.artha.api.tunnel.TunnelState
+import net.wastu.artha.core.update.UpdateState
+import net.wastu.artha.data.attention.AttentionScope
 import net.wastu.artha.data.export.LedgerExportStorage
 import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.Page
-import androidx.compose.material.icons.filled.AccountBalanceWallet
-import androidx.compose.material.icons.filled.Category
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material.icons.filled.SettingsSuggest
-import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.FileUpload
-import androidx.compose.material.icons.filled.Widgets
+import net.wastu.artha.ui.components.PageScaffold
+import net.wastu.artha.ui.components.Segment
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,30 +51,30 @@ internal fun SettingsScreen(
     onOpen: (Page) -> Unit,
 ) {
     val snapshot by viewModel?.analysisSnapshot?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
-    val tunnelState by net.wastu.artha.api.service.ApiServerController.tunnelState.collectAsStateWithLifecycle()
+    val tunnelState by ApiServerController.tunnelState.collectAsStateWithLifecycle()
     val config = snapshot?.aiConfig
     val aiSummary = if (config != null && config.baseUrl.isNotBlank() && config.apiKey.isNotBlank() && config.model.isNotBlank()) "On" else "Not set up"
     val remoteSummary = when (tunnelState) {
-        is net.wastu.artha.api.tunnel.TunnelState.Active -> "Link is live"
-        is net.wastu.artha.api.tunnel.TunnelState.Starting -> "Creating link"
-        is net.wastu.artha.api.tunnel.TunnelState.Failed -> "Could not connect"
-        is net.wastu.artha.api.tunnel.TunnelState.Inactive -> "Off"
+        is TunnelState.Active -> "Link is live"
+        is TunnelState.Starting -> "Creating link"
+        is TunnelState.Failed -> "Could not connect"
+        is TunnelState.Inactive -> "Off"
     }
     val context = LocalContext.current
-    val updater = (context.applicationContext as? net.wastu.artha.ArthaApplication)?.updater
+    val updater = (context.applicationContext as? ArthaApplication)?.updater
     val updateState by updater?.state?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val updateSummary = when (val s = updateState) {
-        is net.wastu.artha.core.update.UpdateState.Ready -> "Update ready (${s.versionName})"
-        is net.wastu.artha.core.update.UpdateState.Downloading -> "Downloading... (${(s.progress * 100).toInt()}%)"
-        is net.wastu.artha.core.update.UpdateState.Checking -> "Checking for updates..."
-        is net.wastu.artha.core.update.UpdateState.Installing -> "Installing ${s.versionName}..."
-        is net.wastu.artha.core.update.UpdateState.WaitingForConfirmation -> "Confirmation requested"
-        is net.wastu.artha.core.update.UpdateState.Failed -> "Update check failed"
-        is net.wastu.artha.core.update.UpdateState.UpToDate -> "Up to date"
+        is UpdateState.Ready -> "Update ready (${s.versionName})"
+        is UpdateState.Downloading -> "Downloading... (${(s.progress * 100).toInt()}%)"
+        is UpdateState.Checking -> "Checking for updates..."
+        is UpdateState.Installing -> "Installing ${s.versionName}..."
+        is UpdateState.WaitingForConfirmation -> "Confirmation requested"
+        is UpdateState.Failed -> "Update check failed"
+        is UpdateState.UpToDate -> "Up to date"
         else -> updater?.installedVersionName?.ifBlank { null }?.let { "v$it" } ?: "Check for updates"
     }
     val attention = rememberAttentionItems()
-    val sourcesAttention = attention.filter { it.scope is net.wastu.artha.data.attention.AttentionScope.Source }
+    val sourcesAttention = attention.filter { it.scope is AttentionScope.Source }
     LazyColumn(Modifier.widthIn(max = 600.dp).fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
         item {
             SettingsLink(

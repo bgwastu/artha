@@ -1,18 +1,19 @@
 package net.wastu.artha.ui
 
-import net.wastu.artha.core.model.Money
-import net.wastu.artha.core.model.Direction
-import net.wastu.artha.core.model.UnifiedTransaction
 import java.math.BigInteger
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import net.wastu.artha.core.model.AccountingTime
+import net.wastu.artha.core.model.Direction
+import net.wastu.artha.core.model.Money
+import net.wastu.artha.core.model.UnifiedTransaction
 
 private val IndonesianLocale = Locale.forLanguageTag("id-ID")
 
 private val TransactionDateFormatter: DateTimeFormatter = DateTimeFormatter
     .ofPattern("d MMM yyyy, HH:mm", Locale.US)
-    .withZone(net.wastu.artha.core.model.AccountingTime.zone)
+    .withZone(AccountingTime.zone)
 
 fun formatMoney(money: Money): String = net.wastu.artha.core.model.formatMoney(money)
 fun formatMinorAmount(amountMinor: BigInteger, currencyCode: String = "IDR"): String = net.wastu.artha.core.model.formatMinorAmount(amountMinor, currencyCode)
@@ -21,7 +22,7 @@ fun formatDate(instant: Instant): String = TransactionDateFormatter.format(insta
 
 private val TransactionTimeFormatter: DateTimeFormatter = DateTimeFormatter
     .ofPattern("HH:mm", Locale.US)
-    .withZone(net.wastu.artha.core.model.AccountingTime.zone)
+    .withZone(AccountingTime.zone)
 
 fun formatTime(instant: Instant): String = TransactionTimeFormatter.format(instant)
 

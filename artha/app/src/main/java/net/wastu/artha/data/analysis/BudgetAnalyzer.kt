@@ -1,8 +1,10 @@
 package net.wastu.artha.data.analysis
 
+import java.math.BigInteger
+import java.time.YearMonth
+import net.wastu.artha.core.model.AccountingTime
 import net.wastu.artha.core.model.TransactionType
 import net.wastu.artha.core.model.UnifiedTransaction
-import java.time.YearMonth
 
 object BudgetAnalyzer {
     fun analyzeMonth(
@@ -11,7 +13,7 @@ object BudgetAnalyzer {
         type: TransactionType = TransactionType.EXPENSE,
     ): MonthSpendingAnalysis {
         require(type != TransactionType.TRANSFER) { "Transfers are not analysed" }
-        val zone = net.wastu.artha.core.model.AccountingTime.zone
+        val zone = AccountingTime.zone
         val currentMonthTxs = allTransactions.filter { YearMonth.from(it.occurredAt.atZone(zone)) == month }
         val prevMonth = month.minusMonths(1)
         val prevMonthTxs = allTransactions.filter { YearMonth.from(it.occurredAt.atZone(zone)) == prevMonth }
@@ -61,7 +63,7 @@ object BudgetAnalyzer {
     }
 
     fun localSummary(analysis: MonthSpendingAnalysis): String {
-        fun rupiah(amount: Long) = net.wastu.artha.core.model.formatMinorAmount(java.math.BigInteger.valueOf(amount))
+        fun rupiah(amount: Long) = net.wastu.artha.core.model.formatMinorAmount(BigInteger.valueOf(amount))
         if (analysis.totalMinor == 0L) return if (analysis.type == TransactionType.INCOME) "- No income recorded for this month." else "- No spending recorded for this month."
         return buildString {
             append("- ${if (analysis.type == TransactionType.INCOME) "Income" else "Spending"}: ${rupiah(analysis.totalMinor)}.\n")

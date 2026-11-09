@@ -37,6 +37,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.wastu.artha.ArthaApplication
+import net.wastu.artha.core.model.Provider
 import net.wastu.artha.data.providers.JagoPinStatus
 
 /**
@@ -158,7 +159,7 @@ private fun JagoPinDialog(
     fun save() {
         app.providerPreferences.setJagoPin(pin.ifBlank { null })
         // A new PIN is checked by the very next Bank Jago sync.
-        if (pin.isNotBlank()) app.syncInBackground(net.wastu.artha.core.model.Provider.JAGO, force = true)
+        if (pin.isNotBlank()) app.syncInBackground(Provider.JAGO, force = true)
         onDismiss()
     }
 

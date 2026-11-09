@@ -1,5 +1,7 @@
 package net.wastu.artha.api.model
 
+import java.lang.Double
+import java.math.BigInteger
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.core.model.formatMinorAmount
@@ -9,7 +11,6 @@ import net.wastu.artha.data.analysis.MerchantMemory
 import net.wastu.artha.data.analysis.MonthSpendingAnalysis
 import org.json.JSONArray
 import org.json.JSONObject
-import java.math.BigInteger
 
 data class TransactionSummaryDto(
     val key: String,
@@ -226,7 +227,7 @@ data class MonthSummaryDto(
         put("totalFormatted", totalFormatted)
         put("previousMonthTotalMinor", previousMonthTotalMinor)
         put("previousMonthTotalFormatted", previousMonthTotalFormatted)
-        put("deltaPercent", deltaPercent?.let { java.lang.Double.valueOf(it.toDouble()) } ?: JSONObject.NULL)
+        put("deltaPercent", deltaPercent?.let { Double.valueOf(it.toDouble()) } ?: JSONObject.NULL)
         put("localSummary", localSummary)
         val catArr = JSONArray()
         categories.forEach { catArr.put(it.toJson()) }
@@ -273,7 +274,7 @@ data class CategorySpendingDto(
         put("amountFormatted", amountFormatted)
         put("sharePercent", sharePercent.toDouble())
         put("previousMonthAmountMinor", previousMonthAmountMinor)
-        put("deltaPercent", deltaPercent?.let { java.lang.Double.valueOf(it.toDouble()) } ?: JSONObject.NULL)
+        put("deltaPercent", deltaPercent?.let { Double.valueOf(it.toDouble()) } ?: JSONObject.NULL)
         put("transactionCount", transactionCount)
     }
 }

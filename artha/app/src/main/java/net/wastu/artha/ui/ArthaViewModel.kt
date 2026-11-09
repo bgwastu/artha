@@ -1,20 +1,28 @@
 package net.wastu.artha.ui
 
+import android.content.Context
+import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import java.time.Clock
+import java.time.Instant
 import java.time.YearMonth
 import kotlinx.coroutines.*
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
+import net.wastu.artha.BuildConfig
 import net.wastu.artha.core.model.*
 import net.wastu.artha.core.root.*
 import net.wastu.artha.data.analysis.*
-import android.content.Context
-import android.net.Uri
+import net.wastu.artha.data.analysis.UNCATEGORIZED_LABEL
 import net.wastu.artha.data.export.LedgerExportStorage
 import net.wastu.artha.data.export.LedgerJsonlExport
 import net.wastu.artha.data.export.LedgerJsonlImport
 import net.wastu.artha.data.ledger.LedgerRepository
+import net.wastu.artha.data.providers.AccountStatus
+import net.wastu.artha.data.providers.GojekFlashRecord
+import net.wastu.artha.data.providers.ProviderDiagnostic
 import net.wastu.artha.data.providers.ProviderPreferences
 sealed interface LedgerState {
     data object Loading : LedgerState
@@ -25,7 +33,7 @@ sealed interface LedgerState {
 data class ImportFeedback(val sequence: Long, val provider: Provider?, val message: String, val failed: Boolean = false)
 
 /** Saved payment date range for one provider, measured on the resolved ledger rows the UI shows. */
-data class SourceCoverage(val earliest: java.time.Instant?, val latest: java.time.Instant?) {
+data class SourceCoverage(val earliest: Instant?, val latest: Instant?) {
     init { require(earliest != null || latest != null) }
 }
 
@@ -34,7 +42,7 @@ internal fun sourceCoverage(rows: List<UnifiedTransaction>): Map<Provider, Sourc
     .groupBy { it.provider }
     .mapValues { (_, providerRows) -> SourceCoverage(providerRows.minOf { it.occurredAt }, providerRows.maxOf { it.occurredAt }) }
 
-@OptIn(kotlinx.coroutines.FlowPreview::class)
+@OptIn(FlowPreview::class)
 class ArthaViewModel(
     private val rootAccess: RootAccess,
     private val ledger: () -> LedgerRepository,
@@ -103,8 +111,8 @@ class ArthaViewModel(
     val enabledProviders = preferences?.enabled ?: MutableStateFlow(Provider.entries.toSet()).asStateFlow()
     val importEnabled = preferences?.importEnabled ?: MutableStateFlow(Provider.entries.toSet()).asStateFlow()
     /** Fresh exposure of the last invisible GoPay refresh, surfaced on the GOJEK provider card. */
-    val gojekFlash = preferences?.gojekFlash ?: MutableStateFlow<net.wastu.artha.data.providers.GojekFlashRecord?>(null).asStateFlow()
-    val providerDiagnostics = preferences?.diagnostics ?: MutableStateFlow(emptyMap<Provider, net.wastu.artha.data.providers.ProviderDiagnostic>()).asStateFlow()
+    val gojekFlash = preferences?.gojekFlash ?: MutableStateFlow<GojekFlashRecord?>(null).asStateFlow()
+    val providerDiagnostics = preferences?.diagnostics ?: MutableStateFlow(emptyMap<Provider, ProviderDiagnostic>()).asStateFlow()
     private var observerJob: Job? = null
     private var ingestionJob: Job? = null
     private val categorizer = CategorizationEngine(
@@ -131,10 +139,10 @@ class ArthaViewModel(
             stream.readBytes().toString(Charsets.UTF_8)
         } ?: throw IllegalStateException("Unable to read the import file.")
         val parsed = LedgerJsonlImport.parse(body)
-        android.util.Log.i("ArthaImport", "parsed ${parsed.transactions.size} rows from ${body.length} bytes")
+        Log.i("ArthaImport", "parsed ${parsed.transactions.size} rows from ${body.length} bytes")
         analysisStore?.mergeImportedAnalysis(parsed.meta, parsed.labels)
         ledger().append(parsed.transactions).also { result ->
-            android.util.Log.i("ArthaImport", "append: ${result.inserted} inserted, ${result.duplicates} duplicates")
+            Log.i("ArthaImport", "append: ${result.inserted} inserted, ${result.duplicates} duplicates")
         }
     }
 
@@ -277,7 +285,7 @@ class ArthaViewModel(
         return LedgerState.Ready(rows.filter { tx ->
             val millis = tx.occurredAt.toEpochMilli()
             (activeSet != null || tx.provider in enabled) &&
-                (activeSet == null || ((tx.category ?: net.wastu.artha.data.analysis.UNCATEGORIZED_LABEL) in activeSet && tx.type == _analysisType.value)) &&
+                (activeSet == null || ((tx.category ?: UNCATEGORIZED_LABEL) in activeSet && tx.type == _analysisType.value)) &&
                 (start == null || millis >= start) && (end == null || millis < AccountingTime.dayAfter(end))
         })
     }
@@ -317,17 +325,17 @@ class ArthaViewModel(
                 previous?.join()
                 _rootGate.value = RootGateState.CHECKING
                 val rootGranted = try { rootAccess.verify() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { false }
-                val granted = net.wastu.artha.BuildConfig.DEMO || rootGranted
+                val granted = BuildConfig.DEMO || rootGranted
                 _rootGate.value = if (granted) RootGateState.GRANTED else RootGateState.DENIED
                 if (!granted) {
                     if (!automatic) _importFeedback.value = ImportFeedback(++importSequence, provider, "Root access is required to sync", true)
                     return@launch
                 }
-                if (walk != null && !net.wastu.artha.BuildConfig.DEMO) {
+                if (walk != null && !BuildConfig.DEMO) {
                     _importFeedback.value = ImportFeedback(++importSequence, provider, walk())
                     return@launch
                 }
-                val result = if (net.wastu.artha.BuildConfig.DEMO) simulateDemoSync(provider)
+                val result = if (BuildConfig.DEMO) simulateDemoSync(provider)
                     else if (provider != null && syncSingle != null) mapOf(provider to syncSingle.invoke(provider))
                     else if (automatic && ingestStale != null) ingestStale.invoke() else ingest?.invoke().orEmpty()
                 if (!automatic) {
@@ -336,7 +344,7 @@ class ArthaViewModel(
                         result.isEmpty() -> "No sources enabled for import"
                         failed == result.size -> "Import failed. Open source details"
                         failed > 0 -> "Import finished. Some sources are unavailable"
-                        preferences?.diagnostics?.value?.filterKeys { it in result }?.values?.any { it.accountStatus == net.wastu.artha.data.providers.AccountStatus.PARTIAL } == true -> "Imported available history"
+                        preferences?.diagnostics?.value?.filterKeys { it in result }?.values?.any { it.accountStatus == AccountStatus.PARTIAL } == true -> "Imported available history"
                         else -> "Import complete"
                     }
                     _importFeedback.value = ImportFeedback(++importSequence, provider, message, result.isEmpty() || failed == result.size)

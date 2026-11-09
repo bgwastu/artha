@@ -1,13 +1,15 @@
-@file:android.annotation.SuppressLint("SdCardPath")
+@file:SuppressLint("SdCardPath")
 
 package net.wastu.artha.data.ingestion
 
+import android.annotation.SuppressLint
+import android.util.Log
 import java.io.File
-import java.time.Duration
-import java.time.Instant
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
@@ -15,10 +17,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.providers.AccountStatus
@@ -50,7 +52,7 @@ class ShopeeOrderReader(private val files: RootFileReader) {
             val json = JSONObject()
             cache.entries.toList().takeLast(500).forEach { (k, v) -> json.put(k, v) }
             file.writeText(json.toString(), Charsets.UTF_8)
-        } catch (e: Exception) { android.util.Log.w("ArthaShopee", "Could not save order cache", e) }
+        } catch (e: Exception) { Log.w("ArthaShopee", "Could not save order cache", e) }
     }
 
     suspend fun transactions(): List<UnifiedTransaction> = withContext(Dispatchers.IO) {

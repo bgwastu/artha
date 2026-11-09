@@ -1,21 +1,9 @@
 package net.wastu.artha.ui.screens
 
-import androidx.compose.material.icons.filled.PieChart
-import net.wastu.artha.ui.components.ConnectedChoiceRow
-import androidx.compose.material3.LoadingIndicator
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.material.icons.filled.Category
-import androidx.compose.ui.graphics.Color
-import net.wastu.artha.data.analysis.RecategorizeScope
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.heading
-import net.wastu.artha.ui.categoryIconLabel
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,69 +16,87 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.runtime.LaunchedEffect
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Dispatchers
-import androidx.compose.runtime.produceState
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.AssistChip
-import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.PieChart
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.ui.draw.clip
-import net.wastu.artha.core.model.Money
-import net.wastu.artha.ui.formatMoney
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PieChart
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.PieChart
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.LinearWavyProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import net.wastu.artha.ui.AVAILABLE_CATEGORY_ICONS
-import net.wastu.artha.ui.ArthaViewModel
-import net.wastu.artha.data.analysis.CategoryAutomationState
-import kotlinx.coroutines.delay
-import net.wastu.artha.data.analysis.categoryProgressLabel
-import net.wastu.artha.data.analysis.recategorizeConfirmation
-import net.wastu.artha.ui.categoryIconFor
-import net.wastu.artha.data.analysis.CategoryAttention
-import net.wastu.artha.data.analysis.categoryAttention
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import net.wastu.artha.core.model.AccountingTime
+import net.wastu.artha.core.model.Money
+import net.wastu.artha.core.model.TransactionType
+import net.wastu.artha.core.model.UnifiedTransaction
+import net.wastu.artha.data.analysis.CategoryAttention
+import net.wastu.artha.data.analysis.CategoryAutomationState
+import net.wastu.artha.data.analysis.RecategorizeScope
+import net.wastu.artha.data.analysis.categoryAttention
+import net.wastu.artha.data.analysis.categoryProgressLabel
+import net.wastu.artha.data.analysis.recategorizeConfirmation
+import net.wastu.artha.ui.AVAILABLE_CATEGORY_ICONS
+import net.wastu.artha.ui.ArthaViewModel
+import net.wastu.artha.ui.LedgerState
+import net.wastu.artha.ui.categoryIconFor
+import net.wastu.artha.ui.categoryIconLabel
+import net.wastu.artha.ui.components.ConnectedChoiceRow
+import net.wastu.artha.ui.components.ShapeBadge
+import net.wastu.artha.ui.formatMoney
 
 @Composable
 fun AnalysisScreen(
     viewModel: ArthaViewModel,
-    onOpenTransaction: (net.wastu.artha.core.model.UnifiedTransaction) -> Unit = {},
+    onOpenTransaction: (UnifiedTransaction) -> Unit = {},
     onOpenCategories: () -> Unit = {},
     onOpenCategoryReview: () -> Unit = {},
     onOpenAiCategories: () -> Unit = {},
@@ -122,13 +128,13 @@ fun AnalysisScreen(
         }
     }
 
-    if (ledgerState is net.wastu.artha.ui.LedgerState.Loading && savedTransactions.isEmpty()) {
+    if (ledgerState is LedgerState.Loading && savedTransactions.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             LoadingIndicator(Modifier.size(64.dp).semantics { contentDescription = "Loading saved spending" })
         }
         return
     }
-    if (ledgerState is net.wastu.artha.ui.LedgerState.Failed && savedTransactions.isEmpty()) {
+    if (ledgerState is LedgerState.Failed && savedTransactions.isEmpty()) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Text("Unable to load saved spending")
             TextButton(onClick = { viewModel.setTargetDestination("TRANSACTIONS") }) { Text("Open transactions") }
@@ -139,7 +145,7 @@ fun AnalysisScreen(
     val slices = remember(analysis) { SpendingChartLogic.categorySlices(analysis) }
     var selectedSliceIndex by rememberSaveable(analysis.month) { mutableStateOf<Int?>(null) }
     val total = slices.sumOf { it.amountMinor }.coerceAtLeast(1)
-    val canGoNext = selectedMonth < YearMonth.now(net.wastu.artha.core.model.AccountingTime.clock)
+    val canGoNext = selectedMonth < YearMonth.now(AccountingTime.clock)
 
     LazyColumn(
         modifier = Modifier.widthIn(max = 720.dp).fillMaxSize(),
@@ -158,10 +164,10 @@ fun AnalysisScreen(
         }
         item(key = "type_toggle") {
             ConnectedChoiceRow(
-                options = listOf(net.wastu.artha.core.model.TransactionType.EXPENSE, net.wastu.artha.core.model.TransactionType.INCOME),
+                options = listOf(TransactionType.EXPENSE, TransactionType.INCOME),
                 selected = analysis.type,
                 onSelect = viewModel::setAnalysisType,
-                label = { if (it == net.wastu.artha.core.model.TransactionType.INCOME) "Income" else "Expenses" },
+                label = { if (it == TransactionType.INCOME) "Income" else "Expenses" },
                 modifier = Modifier.padding(vertical = 4.dp),
             )
         }
@@ -192,9 +198,9 @@ fun AnalysisScreen(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 ) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(if (analysis.type == net.wastu.artha.core.model.TransactionType.INCOME) (if (canGoNext) "Income" else "Income to date") else if (canGoNext) "Spending" else "Spending to date", style = MaterialTheme.typography.labelMedium)
+                        Text(if (analysis.type == TransactionType.INCOME) (if (canGoNext) "Income" else "Income to date") else if (canGoNext) "Spending" else "Spending to date", style = MaterialTheme.typography.labelMedium)
                         Text("Rp0", style = MaterialTheme.typography.headlineMediumEmphasized, )
-                        Text(if (analysis.type == net.wastu.artha.core.model.TransactionType.INCOME) "No income this month" else "No confirmed spending this month", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (analysis.type == TransactionType.INCOME) "No income this month" else "No confirmed spending this month", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -269,14 +275,14 @@ fun AnalysisScreen(
         }
         if (slices.isEmpty()) {
             item(key = "empty_categories") {
-                val income = analysis.type == net.wastu.artha.core.model.TransactionType.INCOME
+                val income = analysis.type == TransactionType.INCOME
                 Column(
                     Modifier.fillMaxWidth().padding(vertical = 32.dp, horizontal = 24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    net.wastu.artha.ui.components.ShapeBadge(
+                    ShapeBadge(
                         icon = Icons.Default.PieChart,
-                        polygon = androidx.compose.material3.MaterialShapes.Cookie12Sided,
+                        polygon = MaterialShapes.Cookie12Sided,
                         size = 80.dp,
                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                         iconColor = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -285,7 +291,7 @@ fun AnalysisScreen(
                     Text(
                         if (income) "No income to break down" else "Nothing to break down yet",
                         style = MaterialTheme.typography.titleMedium,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        textAlign = TextAlign.Center,
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -293,7 +299,7 @@ fun AnalysisScreen(
                         else "Categories appear here once this month's spending is categorized.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        textAlign = TextAlign.Center,
                     )
                 }
             }
@@ -345,7 +351,7 @@ private fun MonthHeader(
     onNextMonth: () -> Unit,
 ) {
     val monthTitle = remember(month) { month.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)) }
-    val canGoNext = month < YearMonth.now(net.wastu.artha.core.model.AccountingTime.clock)
+    val canGoNext = month < YearMonth.now(AccountingTime.clock)
     var showMenu by remember { mutableStateOf(false) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
     Row(

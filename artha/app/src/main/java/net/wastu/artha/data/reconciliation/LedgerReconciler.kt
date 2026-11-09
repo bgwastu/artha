@@ -1,10 +1,15 @@
 package net.wastu.artha.data.reconciliation
 
+import java.math.BigDecimal
+import java.math.BigInteger
+import java.time.Duration
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.util.Locale
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Provider
+import net.wastu.artha.core.model.TransactionClassifier
 import net.wastu.artha.core.model.UnifiedTransaction
-import java.time.Duration
-import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -17,7 +22,7 @@ object LedgerReconciler {
         val order = payload.optString("orderNumber").ifBlank { payload.optString("orderId") }.ifBlank { payload.optString("order_id") }
         val origin = payload.optString("origin")
         val merchant = payload.optString("counterpart").ifBlank { tx.description }.trim().lowercase(Locale.ROOT)
-        val internal = code !in net.wastu.artha.core.model.TransactionClassifier.INTEREST_CODES &&
+        val internal = code !in TransactionClassifier.INTEREST_CODES &&
             (code in setOf("SAD01", "SAD02", "SAC01", "SAC02", "TDD02", "TDC02", "TDC03", "TDC08", "TDC12") ||
                 payload.optJSONObject("fields")?.optString("f22") == "INTERNAL")
         val refund = tx.isReversal || payload.optBoolean("verifiedRefund") || payload.optString("serviceTier").endsWith("REFUND") || code.endsWith("-R", true) || code == "GPC02" ||
@@ -26,35 +31,35 @@ object LedgerReconciler {
             item.optString("status") == "COMPLETED" && item.optString("currency") == "IDR" &&
                 ((item.optString("txType") == "BOOKING_CHARGE" && item.optString("coreTxType") == "BookingCharge") ||
                     (item.optString("txType") == "TIPPING_CHARGE" && item.optString("coreTxType") == "TippingCharge")) &&
-                runCatching { Math.multiplyExact(item.getLong("amount"), 100L) == tx.money.amountMinor && java.time.Instant.ofEpochSecond(item.getLong("timestamp")) == tx.occurredAt }.getOrDefault(false)
+                runCatching { Math.multiplyExact(item.getLong("amount"), 100L) == tx.money.amountMinor && Instant.ofEpochSecond(item.getLong("timestamp")) == tx.occurredAt }.getOrDefault(false)
         } == true
         // Older Grab imports guessed DEBIT. Keep those rows, but require source direction
         // evidence before treating an old wallet row as a confirmed payment.
         private val settled = payload.optString("paymentStatus") == "COMPLETED" &&
             payload.optString("paymentDirection") == tx.direction.name && payload.optString("paymentCurrency") == tx.money.currencyCode &&
             payload.optLong("paymentAmountMinor", -1L) == tx.money.amountMinor &&
-            runCatching { java.time.Instant.parse(payload.getString("paymentTimestamp")) == tx.occurredAt }.getOrDefault(false)
+            runCatching { Instant.parse(payload.getString("paymentTimestamp")) == tx.occurredAt }.getOrDefault(false)
         private val legacyGoPay = payload.optJSONObject("item")?.let { item ->
             item.optString("status") == "COMPLETED" && item.optString("payment_type") == tx.direction.name &&
                 item.optJSONObject("amount")?.optString("currency") == tx.money.currencyCode &&
-                runCatching { item.getJSONObject("amount").get("value").toString().toBigDecimal().movePointRight(2).longValueExact() == tx.money.amountMinor && java.time.OffsetDateTime.parse(item.getString("order_timestamp")).toInstant() == tx.occurredAt }.getOrDefault(false)
+                runCatching { item.getJSONObject("amount").get("value").toString().toBigDecimal().movePointRight(2).longValueExact() == tx.money.amountMinor && OffsetDateTime.parse(item.getString("order_timestamp")).toInstant() == tx.occurredAt }.getOrDefault(false)
         } == true
         private val savedShopeePayment = tx.provider == Provider.SHOPEE && tx.direction == Direction.DEBIT &&
             origin in setOf("shopee-order-api", "shopeefood-order-api", "shopee-digital-api") &&
             payload.optBoolean("paymentDetailVerified") && tx.money.currencyCode == "IDR" && runCatching {
-                val paid = payload.get("sourceAmountPaid").toString().toBigDecimal().divide(java.math.BigDecimal(1000)).longValueExact()
+                val paid = payload.get("sourceAmountPaid").toString().toBigDecimal().divide(BigDecimal(1000)).longValueExact()
                 paid == tx.money.amountMinor && when (origin) {
                     "shopee-order-api" -> {
                         val time = payload.get("sourcePaymentTime").toString().toBigDecimal().longValueExact()
-                        java.time.Instant.ofEpochSecond(time) == tx.occurredAt
+                        Instant.ofEpochSecond(time) == tx.occurredAt
                     }
                     "shopee-digital-api" -> {
                         val time = payload.get("sourcePaidTime").toString().toBigDecimal().longValueExact()
-                        java.time.Instant.ofEpochSecond(time) == tx.occurredAt
+                        Instant.ofEpochSecond(time) == tx.occurredAt
                     }
                     else -> {
                         val time = payload.get("sourcePaymentTime").toString().toBigDecimal().longValueExact()
-                        java.time.Instant.ofEpochMilli(time) == tx.occurredAt
+                        Instant.ofEpochMilli(time) == tx.occurredAt
                     }
                 }
             }.getOrDefault(false)
@@ -84,8 +89,8 @@ object LedgerReconciler {
         (a.pocket == null || b.pocket == null || a.pocket?.providerPocketId == b.pocket?.providerPocketId) &&
         (a.cardLast4 == null || b.cardLast4 == null || a.cardLast4 == b.cardLast4)
 
-    private fun within(sorted: List<Evidence>, time: java.time.Instant, seconds: Long): List<Evidence> {
-        fun lowerBound(bound: java.time.Instant): Int {
+    private fun within(sorted: List<Evidence>, time: Instant, seconds: Long): List<Evidence> {
+        fun lowerBound(bound: Instant): Int {
             var low = 0; var high = sorted.size
             while (low < high) {
                 val middle = (low + high) ushr 1
@@ -337,7 +342,7 @@ object LedgerReconciler {
         } ?: return null
         return runCatching { evidence(tx.copy(provider = Provider.JAGO, providerTransactionId = group.getString("providerTransactionId"),
             description = group.getString("description"), rawPayload = group.getString("rawPayload"),
-            occurredAt = java.time.Instant.ofEpochMilli(group.getLong("occurredAtEpochMillis")))) }.getOrNull()
+            occurredAt = Instant.ofEpochMilli(group.getLong("occurredAtEpochMillis")))) }.getOrNull()
     }
 
     private fun reconcilePartialRefunds(transactions: List<UnifiedTransaction>): List<UnifiedTransaction> {
@@ -370,8 +375,8 @@ object LedgerReconciler {
         val used = mutableSetOf<String>()
         val adjusted = transactions.map { debit ->
             val credits = grouped[debit.key].orEmpty()
-            val refunded = credits.fold(java.math.BigInteger.ZERO) { sum, credit -> sum + java.math.BigInteger.valueOf(credit.money.amountMinor) }
-            if (credits.isEmpty() || refunded > java.math.BigInteger.valueOf(debit.money.amountMinor)) debit else {
+            val refunded = credits.fold(BigInteger.ZERO) { sum, credit -> sum + BigInteger.valueOf(credit.money.amountMinor) }
+            if (credits.isEmpty() || refunded > BigInteger.valueOf(debit.money.amountMinor)) debit else {
                 used += credits.map { it.key }
                 val payload = evidence(debit).payload.put("grossPaidAmountMinor", debit.money.amountMinor).put("refundedAmountMinor", refunded.toLong())
                 val groups = payload.optJSONArray("groupedTransactions") ?: JSONArray().put(buildGroupEntry(debit, "Original Charge"))

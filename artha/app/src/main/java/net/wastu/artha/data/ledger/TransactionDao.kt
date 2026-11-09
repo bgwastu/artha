@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import java.time.Instant
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -28,7 +29,7 @@ interface TransactionDao {
             transactions.maxOfOrNull { it.ingestedAtEpochMillis } ?: 0L) else emptyList()
         val original = append(transactions)
         val inserted = original.count { it != -1L }
-        val updates = append(observations.map { TransactionEntity.fromDomain(it, java.time.Instant.ofEpochMilli(transactions.maxOf { row -> row.ingestedAtEpochMillis })) })
+        val updates = append(observations.map { TransactionEntity.fromDomain(it, Instant.ofEpochMilli(transactions.maxOf { row -> row.ingestedAtEpochMillis })) })
             .count { it != -1L }
         return AppendResult(inserted, original.size - inserted, updates)
     }

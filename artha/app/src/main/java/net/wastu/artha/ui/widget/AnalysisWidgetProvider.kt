@@ -1,28 +1,32 @@
 package net.wastu.artha.ui.widget
 
-import androidx.core.net.toUri
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
-import net.wastu.artha.MainActivity
-import net.wastu.artha.R
-import net.wastu.artha.core.model.Money
-import net.wastu.artha.data.analysis.BudgetAnalyzer
-import net.wastu.artha.ui.formatMoney
+import android.widget.RemoteViewsService
+import androidx.core.net.toUri
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import android.os.Build
-import android.widget.RemoteViewsService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import net.wastu.artha.ArthaApplication
+import net.wastu.artha.MainActivity
+import net.wastu.artha.R
+import net.wastu.artha.core.model.AccountingTime
+import net.wastu.artha.core.model.Money
+import net.wastu.artha.data.analysis.BudgetAnalyzer
 import net.wastu.artha.data.analysis.CategorySpending
+import net.wastu.artha.ui.formatMoney
 
 class AnalysisWidgetProvider : AppWidgetProvider() {
 
@@ -34,7 +38,7 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
             val ids = appWidgetManager.getAppWidgetIds(ComponentName(context, AnalysisWidgetProvider::class.java))
             if (ids.isNotEmpty()) {
                 updateWidgets(context, appWidgetManager, ids)
-                (context.applicationContext as? net.wastu.artha.ArthaApplication)?.syncInBackgroundIfStale()
+                (context.applicationContext as? ArthaApplication)?.syncInBackgroundIfStale()
             }
         }
     }
@@ -46,7 +50,7 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
         }
         if (targetIds.isNotEmpty()) {
             updateWidgets(context, appWidgetManager, targetIds)
-            (context.applicationContext as? net.wastu.artha.ArthaApplication)?.syncInBackgroundIfStale()
+            (context.applicationContext as? ArthaApplication)?.syncInBackgroundIfStale()
         }
     }
 
@@ -82,14 +86,14 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
         }
         status()
         WidgetRefresh.schedule("analysis", pendingResult, onFailure = { status(failed = true) }) {
-            val month = YearMonth.now(net.wastu.artha.core.model.AccountingTime.clock)
+            val month = YearMonth.now(AccountingTime.clock)
             val analysis = BudgetAnalyzer.analyzeMonth(month, widgetSpending(context).transactions)
             val amounts = analysisWidgetAmounts(analysis)
             val updatedAt = System.currentTimeMillis()
             for (id in appWidgetIds) {
                 val options = appWidgetManager.getAppWidgetOptions(id)
                 val fontScale = context.resources.configuration.fontScale
-                val isLandscape = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+                val isLandscape = context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
                 val width = if (isLandscape) options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 180)
                     else options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 180)
                 val height = if (isLandscape) options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110)
@@ -186,10 +190,10 @@ private class AnalysisRemoteViewsFactory(
     override fun onDataSetChanged() {
         runBlocking(Dispatchers.IO) {
             try {
-                val month = YearMonth.now(net.wastu.artha.core.model.AccountingTime.clock)
+                val month = YearMonth.now(AccountingTime.clock)
                 val analysis = BudgetAnalyzer.analyzeMonth(month, widgetSpending(context).transactions)
                 categories = analysis.categories
-            } catch (e: Exception) { android.util.Log.w("ArthaWidget", "Analysis widget refresh failed", e) }
+            } catch (e: Exception) { Log.w("ArthaWidget", "Analysis widget refresh failed", e) }
         }
     }
 

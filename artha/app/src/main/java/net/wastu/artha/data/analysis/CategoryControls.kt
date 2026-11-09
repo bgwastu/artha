@@ -1,6 +1,8 @@
 package net.wastu.artha.data.analysis
 
 import java.time.YearMonth
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 enum class CategoryConfidence {
     HIGH, MEDIUM, LOW;
@@ -58,7 +60,7 @@ fun recategorizeConfirmation(scope: RecategorizeScope, count: Int, monthLabel: S
 
 /** Process-wide in-flight keys so home-screen widgets can show "Categorizing" without the ViewModel. */
 object CategoryActivity {
-    private val _keys = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
-    val keys: kotlinx.coroutines.flow.StateFlow<Set<String>> = _keys
+    private val _keys = MutableStateFlow<Set<String>>(emptySet())
+    val keys: StateFlow<Set<String>> = _keys
     fun publish(keys: Set<String>) { _keys.value = keys }
 }

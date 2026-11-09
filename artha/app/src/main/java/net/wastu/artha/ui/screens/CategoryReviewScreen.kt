@@ -66,16 +66,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.wastu.artha.core.model.AccountingTime
+import net.wastu.artha.core.model.Money
+import net.wastu.artha.core.model.TransactionType
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.analysis.RecategorizeScope
 import net.wastu.artha.data.analysis.UNCATEGORIZED_LABEL
 import net.wastu.artha.ui.ArthaViewModel
+import net.wastu.artha.ui.LedgerState
 import net.wastu.artha.ui.categoryIconFor
 import net.wastu.artha.ui.components.ConnectedChoiceRow
 import net.wastu.artha.ui.components.PageScaffold
@@ -91,23 +96,23 @@ private data class ReviewData(val order: List<String>, val items: Map<String, Re
 fun CategoryReviewScreen(
     viewModel: ArthaViewModel,
     onBack: () -> Unit,
-    month: java.time.YearMonth,
+    month: YearMonth,
     onOpenTransaction: (UnifiedTransaction) -> Unit = {},
 ) {
     var mode by rememberSaveable { mutableStateOf(ReviewMode.NEEDS_REVIEW) }
     var browsedMonth by rememberSaveable { mutableStateOf(month.toString()) }
-    var wholeType by rememberSaveable { mutableStateOf(net.wastu.artha.core.model.TransactionType.EXPENSE) }
+    var wholeType by rememberSaveable { mutableStateOf(TransactionType.EXPENSE) }
     val snackbar = remember { SnackbarHostState() }
-    val monthValue = remember(browsedMonth) { java.time.YearMonth.parse(browsedMonth) }
+    val monthValue = remember(browsedMonth) { YearMonth.parse(browsedMonth) }
     PageScaffold(
-        title = monthValue.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.US)),
+        title = monthValue.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)),
         onBack = onBack,
         snackbarHost = snackbar,
         actions = {
                     if (mode == ReviewMode.WHOLE_MONTH) {
                         IconButton(onClick = { browsedMonth = monthValue.minusMonths(1).toString() }) { Icon(Icons.Default.ChevronLeft, "Previous month") }
                         IconButton(
-                            enabled = monthValue < java.time.YearMonth.now(AccountingTime.clock),
+                            enabled = monthValue < YearMonth.now(AccountingTime.clock),
                             onClick = { browsedMonth = monthValue.plusMonths(1).toString() },
                         ) { Icon(Icons.Default.ChevronRight, "Next month") }
                     }
@@ -134,7 +139,7 @@ fun CategoryReviewScreen(
 @Composable
 private fun NeedsReviewPane(
     viewModel: ArthaViewModel,
-    month: java.time.YearMonth,
+    month: YearMonth,
     snackbar: SnackbarHostState,
     onDone: () -> Unit,
     onOpenTransaction: (UnifiedTransaction) -> Unit,
@@ -147,7 +152,7 @@ private fun NeedsReviewPane(
 
     val data by produceState<ReviewData?>(null, month) {
         // A restored screen opens before the saved ledger loads; an empty first read would freeze an empty queue.
-        viewModel.ledgerState.first { it !is net.wastu.artha.ui.LedgerState.Loading }
+        viewModel.ledgerState.first { it !is LedgerState.Loading }
         value = withContext(Dispatchers.Default) {
             val rows = viewModel.allTransactions.value
             val current = viewModel.analysisSnapshot.value
@@ -317,9 +322,9 @@ private fun NeedsReviewPane(
 @Composable
 private fun WholeMonthPane(
     viewModel: ArthaViewModel,
-    month: java.time.YearMonth,
-    type: net.wastu.artha.core.model.TransactionType,
-    onType: (net.wastu.artha.core.model.TransactionType) -> Unit,
+    month: YearMonth,
+    type: TransactionType,
+    onType: (TransactionType) -> Unit,
     onOpenTransaction: (UnifiedTransaction) -> Unit,
 ) {
     val snapshot by viewModel.analysisSnapshot.collectAsStateWithLifecycle()
@@ -341,10 +346,10 @@ private fun WholeMonthPane(
     LazyColumn(Modifier.widthIn(max = 600.dp).fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         item {
             ConnectedChoiceRow(
-                options = listOf(net.wastu.artha.core.model.TransactionType.EXPENSE, net.wastu.artha.core.model.TransactionType.INCOME),
+                options = listOf(TransactionType.EXPENSE, TransactionType.INCOME),
                 selected = type,
                 onSelect = onType,
-                label = { if (it == net.wastu.artha.core.model.TransactionType.INCOME) "Income" else "Expenses" },
+                label = { if (it == TransactionType.INCOME) "Income" else "Expenses" },
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
         }
@@ -367,7 +372,7 @@ private fun WholeMonthPane(
                             val count = group.transactions.size
                             Text("$count ${if (count == 1) "payment" else "payments"}, $status")
                         },
-                        trailingContent = { Text(formatMoney(net.wastu.artha.core.model.Money(group.totalMinor))) },
+                        trailingContent = { Text(formatMoney(Money(group.totalMinor))) },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     )
                     FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

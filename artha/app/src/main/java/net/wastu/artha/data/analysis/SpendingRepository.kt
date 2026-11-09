@@ -3,9 +3,11 @@ package net.wastu.artha.data.analysis
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import net.wastu.artha.core.model.*
 import net.wastu.artha.data.ledger.LedgerRepository
+import net.wastu.artha.data.ledger.ProviderObservations
 import net.wastu.artha.data.reconciliation.LedgerReconciler
 import org.json.JSONObject
 
@@ -30,7 +32,7 @@ class SpendingProjector(private val reconcile: (List<UnifiedTransaction>) -> Lis
         if (facts == raw && snapshot == lastSnapshot) lastProjection?.let { return it }
         if (facts != raw) {
             rowCache.clear()
-            matched = reconcile(net.wastu.artha.data.ledger.ProviderObservations.resolve(raw))
+            matched = reconcile(ProviderObservations.resolve(raw))
             facts = raw
             aliases = matched.associate { tx ->
                 val sources = mutableListOf(tx.key, "${tx.provider.name}:${tx.providerTransactionId}")
@@ -58,7 +60,7 @@ class SpendingProjector(private val reconcile: (List<UnifiedTransaction>) -> Lis
                 classificationIsManual = manual != null,
                 aiReasoning = edit.reason ?: "").also { rowCache[tx.key] = edit to it }
         }
-        return SpendingState.Ready(rows, raw.filterNot(net.wastu.artha.data.ledger.ProviderObservations::isObservation).groupingBy { it.provider }.eachCount()).also {
+        return SpendingState.Ready(rows, raw.filterNot(ProviderObservations::isObservation).groupingBy { it.provider }.eachCount()).also {
             lastSnapshot = snapshot; lastProjection = it
         }
     }
@@ -85,7 +87,7 @@ fun spendingFlow(ledger: LedgerRepository, analysis: StateFlow<AnalysisSnapshot>
     }.flowOn(dispatcher).catch { emit(SpendingState.Failed) }
 }
 
-@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 class SpendingRepository(ledger: LedgerRepository, store: AnalysisStore, scope: CoroutineScope) {
     private val retryGeneration = MutableStateFlow(0L)
     private val _lastReady = MutableStateFlow<SpendingState.Ready?>(null)

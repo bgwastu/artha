@@ -1,5 +1,6 @@
 package net.wastu.artha.ui.screens
 
+import androidx.compose.runtime.saveable.Saver
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -91,7 +92,7 @@ internal data class ReviewSession(
             )
         }.getOrNull()
 
-        val Saver = androidx.compose.runtime.saveable.Saver<ReviewSession?, String>(
+        val Saver = Saver<ReviewSession?, String>(
             save = { it?.toJson() },
             restore = { fromJson(it) },
         )

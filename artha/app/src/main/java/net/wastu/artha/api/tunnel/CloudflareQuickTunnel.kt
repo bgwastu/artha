@@ -1,6 +1,13 @@
 package net.wastu.artha.api.tunnel
 
 import android.content.Context
+import android.util.Log
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.Inet4Address
+import java.net.InetAddress
+import java.net.URL
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -10,11 +17,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
-import java.io.File
-import java.net.HttpURLConnection
-import java.net.Inet4Address
-import java.net.InetAddress
-import java.net.URL
 
 sealed interface TunnelState {
     data object Inactive : TunnelState
@@ -57,7 +59,7 @@ class CloudflareQuickTunnel(
             try {
                 run(localPort)
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Tunnel failed", e)
+                Log.e(TAG, "Tunnel failed", e)
                 destroyProcess()
                 _state.value = TunnelState.Failed(e.message ?: "Could not start the share link")
             }
@@ -110,11 +112,11 @@ class CloudflareQuickTunnel(
         process = proc
 
         val tail = ArrayDeque<String>()
-        val connected = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val connected = CompletableDeferred<Unit>()
         val reader = scope.launch(Dispatchers.IO) {
             // Reading throws when stop() closes the stream; that is expected.
             runCatching { proc.inputStream.bufferedReader().forEachLine { line ->
-                android.util.Log.d(TAG, line)
+                Log.d(TAG, line)
                 synchronized(tail) {
                     tail.addLast(line)
                     if (tail.size > 6) tail.removeFirst()

@@ -1,9 +1,10 @@
 package net.wastu.artha.data.analysis
 
-import java.time.YearMonth
-import net.wastu.artha.core.model.UnifiedTransaction
 
+import java.time.YearMonth
 import java.util.Locale
+import net.wastu.artha.core.model.AccountingTime
+import net.wastu.artha.core.model.UnifiedTransaction
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -134,7 +135,7 @@ fun attentionSource(tx: UnifiedTransaction, snapshot: AnalysisSnapshot): Categor
     }
 
 fun inMonth(tx: UnifiedTransaction, month: YearMonth?): Boolean =
-    month == null || YearMonth.from(tx.occurredAt.atZone(net.wastu.artha.core.model.AccountingTime.zone)) == month
+    month == null || YearMonth.from(tx.occurredAt.atZone(AccountingTime.zone)) == month
 
 fun categoryAttention(rows: List<UnifiedTransaction>, snapshot: AnalysisSnapshot, month: YearMonth?): CategoryAttention {
     var review = 0

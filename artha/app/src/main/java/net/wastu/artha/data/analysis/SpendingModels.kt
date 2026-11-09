@@ -1,7 +1,8 @@
 package net.wastu.artha.data.analysis
 
-import net.wastu.artha.core.model.UnifiedTransaction
 import java.time.YearMonth
+import net.wastu.artha.core.model.TransactionType
+import net.wastu.artha.core.model.UnifiedTransaction
 
 data class CategorySpending(
     val category: String?,
@@ -15,7 +16,7 @@ data class CategorySpending(
 
 data class MonthSpendingAnalysis(
     val month: YearMonth,
-    val type: net.wastu.artha.core.model.TransactionType = net.wastu.artha.core.model.TransactionType.EXPENSE,
+    val type: TransactionType = TransactionType.EXPENSE,
     val totalMinor: Long,
     val previousMonthTotalMinor: Long,
     val totalDeltaPercent: Float?,

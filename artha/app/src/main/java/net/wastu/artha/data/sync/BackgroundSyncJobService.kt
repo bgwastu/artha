@@ -8,12 +8,15 @@ import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import net.wastu.artha.ArthaApplication
+import net.wastu.artha.core.model.Provider
+import net.wastu.artha.core.update.AppUpdateScheduler
 import net.wastu.artha.ui.widget.AnalysisWidgetProvider
 import net.wastu.artha.ui.widget.TransactionsWidgetProvider
 
@@ -33,7 +36,7 @@ class BackgroundSyncJobService : JobService() {
             try {
                 if (app.rootAccess.verify()) {
                     val gojekImportEnabled = app.providerPreferences.importEnabled.value
-                        .contains(net.wastu.artha.core.model.Provider.GOJEK)
+                        .contains(Provider.GOJEK)
                     app.gojekFlash.run(gojekImportEnabled)
                     val summaries = app.transactionAlerts.around { app.ingestion.ingestAll(force = false) }
                     allProvidersHealthy = summaries.values.none { it.startsWith("Unavailable") }
@@ -50,7 +53,7 @@ class BackgroundSyncJobService : JobService() {
                 for (provider in app.providerPreferences.importEnabled.value) {
                     app.providerPreferences.recordSyncError(provider, message)
                 }
-                android.util.Log.w(TAG, "background sync failed: ${t.javaClass.simpleName}: $message")
+                Log.w(TAG, "background sync failed: ${t.javaClass.simpleName}: $message")
             } finally {
                 jobFinished(jobParams, !allProvidersHealthy)
             }
@@ -90,7 +93,7 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
             BackgroundSyncScheduler.schedule(context)
-            net.wastu.artha.core.update.AppUpdateScheduler.schedule(context)
+            AppUpdateScheduler.schedule(context)
         }
     }
 }

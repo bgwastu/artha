@@ -12,6 +12,7 @@ import net.wastu.artha.core.model.AccountingTime
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.Provider
+import net.wastu.artha.core.model.TransactionClassifier
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.ui.formatMoney
 import org.json.JSONArray
@@ -36,8 +37,8 @@ enum class PaymentMethod(val label: String) {
                 payload?.optBoolean("isWalletFunding") == true ||
                 payload?.optBoolean("isOwnTransfer") == true ||
                 payload?.optString("paymentMethod") in setOf("Transfer", "Top Up", "Pocket", "Savings") ||
-                payload?.optString("code") in net.wastu.artha.core.model.TransactionClassifier.INTERNAL_TRANSFER_CODES ||
-                payload?.optString("code") in net.wastu.artha.core.model.TransactionClassifier.WALLET_FUNDING_CODES ||
+                payload?.optString("code") in TransactionClassifier.INTERNAL_TRANSFER_CODES ||
+                payload?.optString("code") in TransactionClassifier.WALLET_FUNDING_CODES ||
                 payload?.optString("code") in setOf("OTD10", "TFD70", "TFC51", "WTD01", "WTC01") ||
                 transaction.description.startsWith("Pocket Transfer:", ignoreCase = true) ||
                 transaction.description.startsWith("Transfer ", ignoreCase = true) ||

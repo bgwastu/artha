@@ -1,21 +1,50 @@
 package net.wastu.artha
 
+import android.app.Activity
 import android.app.Application
+import android.os.Bundle
 import android.os.PowerManager
+import android.util.Log
 import androidx.core.content.edit
+import java.time.Instant
+import java.time.LocalDate
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.launch
+import net.wastu.artha.core.model.AccountingTime
+import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.root.LibsuRootAccess
+import net.wastu.artha.core.update.AppUpdateScheduler
+import net.wastu.artha.core.update.AppUpdater
+import net.wastu.artha.core.update.SessionUpdateInstaller
+import net.wastu.artha.data.analysis.AiConfig
+import net.wastu.artha.data.analysis.AnalysisStore
+import net.wastu.artha.data.analysis.SpendingRepository
+import net.wastu.artha.data.analysis.SpendingState
+import net.wastu.artha.data.attention.AttentionRepository
+import net.wastu.artha.data.demo.DemoLedger
+import net.wastu.artha.data.ingestion.GojekProviderAdapter
+import net.wastu.artha.data.ingestion.GrabProviderAdapter
 import net.wastu.artha.data.ingestion.IngestionCoordinator
+import net.wastu.artha.data.ingestion.JagoProviderAdapter
+import net.wastu.artha.data.ingestion.JagoTransactionReader
+import net.wastu.artha.data.ingestion.RootFileReader
+import net.wastu.artha.data.ingestion.ShopeeProviderAdapter
 import net.wastu.artha.data.ledger.LedgerDatabase
 import net.wastu.artha.data.ledger.RoomLedgerRepository
-import kotlinx.coroutines.flow.distinctUntilChangedBy
-import kotlinx.coroutines.flow.filterIsInstance
-import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.launch
-import net.wastu.artha.core.model.Provider
-import net.wastu.artha.data.analysis.SpendingState
+import net.wastu.artha.data.providers.JagoPinStatus
+import net.wastu.artha.data.providers.ProviderImportWindow
+import net.wastu.artha.data.providers.ProviderPreferences
+import net.wastu.artha.data.sync.AppSessionWakeSync
 import net.wastu.artha.data.sync.BackgroundSyncScheduler
 import net.wastu.artha.data.sync.GojekFlashController
-import net.wastu.artha.data.providers.JagoPinStatus
 import net.wastu.artha.data.sync.GojekScreenSync
 import net.wastu.artha.data.sync.JagoScreenSync
 import net.wastu.artha.notifications.NotificationAccess
@@ -26,18 +55,18 @@ import net.wastu.artha.ui.widget.TransactionsWidgetProvider
 class ArthaApplication : Application() {
     val rootAccess by lazy { LibsuRootAccess(applicationContext) }
 
-    val applicationScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+    val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     // Stored history is readable independently of root; imports still require root.
     private val database by lazy { LedgerDatabase.create(applicationContext) }
     val ledger by lazy { RoomLedgerRepository(database.transactions()) }
-    val spending by lazy { net.wastu.artha.data.analysis.SpendingRepository(ledger, analysisStore, applicationScope) }
-    val providerPreferences by lazy { net.wastu.artha.data.providers.ProviderPreferences(applicationContext) }
-    val attention by lazy { net.wastu.artha.data.attention.AttentionRepository(providerPreferences, applicationScope) }
-    val analysisStore by lazy { net.wastu.artha.data.analysis.AnalysisStore(applicationContext) }
-    private val rootFiles by lazy { net.wastu.artha.data.ingestion.RootFileReader(applicationContext) }
+    val spending by lazy { SpendingRepository(ledger, analysisStore, applicationScope) }
+    val providerPreferences by lazy { ProviderPreferences(applicationContext) }
+    val attention by lazy { AttentionRepository(providerPreferences, applicationScope) }
+    val analysisStore by lazy { AnalysisStore(applicationContext) }
+    private val rootFiles by lazy { RootFileReader(applicationContext) }
     val ingestion by lazy {
         val files = rootFiles
-        val reader = net.wastu.artha.data.ingestion.JagoTransactionReader(files)
+        val reader = JagoTransactionReader(files)
         val isInteractive = { getSystemService(PowerManager::class.java)?.isInteractive == true }
         val jagoSync = JagoScreenSync(
             files,
@@ -45,9 +74,9 @@ class ArthaApplication : Application() {
             { false },
             { providerPreferences.getJagoPin() },
         )
-        val sessionWake = net.wastu.artha.data.sync.AppSessionWakeSync(files, isInteractive, { false })
+        val sessionWake = AppSessionWakeSync(files, isInteractive, { false })
         val adapters = listOf(
-            net.wastu.artha.data.ingestion.JagoProviderAdapter(reader, jagoSync) { result ->
+            JagoProviderAdapter(reader, jagoSync) { result ->
                 when (result) {
                     JagoScreenSync.Result.SYNCED, JagoScreenSync.Result.QUIET ->
                         providerPreferences.recordJagoPinCheck(JagoPinStatus.VERIFIED, "Bank Jago accepted the PIN")
@@ -58,9 +87,9 @@ class ArthaApplication : Application() {
                     else -> Unit
                 }
             },
-            net.wastu.artha.data.ingestion.ShopeeProviderAdapter(files, sessionWake),
-            net.wastu.artha.data.ingestion.GojekProviderAdapter(files),
-            net.wastu.artha.data.ingestion.GrabProviderAdapter(files, sessionWake),
+            ShopeeProviderAdapter(files, sessionWake),
+            GojekProviderAdapter(files),
+            GrabProviderAdapter(files, sessionWake),
         )
         IngestionCoordinator(rootAccess, { ledger }, adapters, reader::invalidate, preferences = providerPreferences)
     }
@@ -77,16 +106,16 @@ class ArthaApplication : Application() {
     val transactionAlerts by lazy { TransactionAlerts(this, ledger) { isAppInForeground } }
 
     val updater by lazy {
-        net.wastu.artha.core.update.AppUpdater(
+        AppUpdater(
             this,
-            net.wastu.artha.core.update.SessionUpdateInstaller(this),
+            SessionUpdateInstaller(this),
         )
     }
 
     private var startedActivities = 0
     val isAppInForeground: Boolean get() = startedActivities > 0
 
-    fun syncInBackground(provider: Provider? = null, force: Boolean = false): kotlinx.coroutines.Job =
+    fun syncInBackground(provider: Provider? = null, force: Boolean = false): Job =
         applicationScope.launch {
             if (BuildConfig.DEMO) return@launch
             try {
@@ -96,7 +125,7 @@ class ArthaApplication : Application() {
                 }
                 AnalysisWidgetProvider.triggerUpdate(this@ArthaApplication)
                 TransactionsWidgetProvider.triggerUpdate(this@ArthaApplication)
-            } catch (e: kotlinx.coroutines.CancellationException) {
+            } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 val message = e.message?.takeIf { it.isNotBlank() } ?: "Sync failed"
@@ -106,7 +135,7 @@ class ArthaApplication : Application() {
             }
         }
 
-    private val pendingNotificationSyncs = java.util.concurrent.ConcurrentHashMap<Provider, kotlinx.coroutines.Job>()
+    private val pendingNotificationSyncs = ConcurrentHashMap<Provider, Job>()
 
     /**
      * A provider app just posted a payment notification: import it after a short pause (so the app can
@@ -143,20 +172,20 @@ class ArthaApplication : Application() {
                 GojekScreenSync.Result.BUSY -> "A GoPay refresh is already running"
                 GojekScreenSync.Result.SKIPPED_COOLDOWN -> "GoPay already refreshed recently"
             }
-        } catch (e: kotlinx.coroutines.CancellationException) {
+        } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            android.util.Log.w("Artha", "GoPay refresh failed", e)
+            Log.w("Artha", "GoPay refresh failed", e)
             "GoPay refresh failed. Try again"
         }
     }
-    private suspend fun joinThenSummary(job: kotlinx.coroutines.Job): String? {
+    private suspend fun joinThenSummary(job: Job): String? {
         job.join()
         return try {
             getSharedPreferences("provider_visibility", MODE_PRIVATE)
                 .getString("GOJEK_last_summary", null)
         } catch (e: Exception) {
-            android.util.Log.w("Artha", "Could not read the GoPay refresh summary", e)
+            Log.w("Artha", "Could not read the GoPay refresh summary", e)
             null
         }
     }
@@ -172,13 +201,13 @@ class ArthaApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
-            override fun onActivityStarted(activity: android.app.Activity) { startedActivities++ }
-            override fun onActivityStopped(activity: android.app.Activity) { startedActivities-- }
-            override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) {}
-            override fun onActivityResumed(activity: android.app.Activity) {}
-            override fun onActivityPaused(activity: android.app.Activity) {}
-            override fun onActivitySaveInstanceState(activity: android.app.Activity, outState: android.os.Bundle) {}
-            override fun onActivityDestroyed(activity: android.app.Activity) {}
+            override fun onActivityStarted(activity: Activity) { startedActivities++ }
+            override fun onActivityStopped(activity: Activity) { startedActivities-- }
+            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+            override fun onActivityResumed(activity: Activity) {}
+            override fun onActivityPaused(activity: Activity) {}
+            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+            override fun onActivityDestroyed(activity: Activity) {}
         })
         if (BuildConfig.DEMO) {
             resetDemoIfNewDay()
@@ -186,9 +215,9 @@ class ArthaApplication : Application() {
         } else {
             BackgroundSyncScheduler.schedule(this)
             applicationScope.launch { notificationAccess.ensureGranted() }
-            net.wastu.artha.core.update.AppUpdateScheduler.schedule(this)
+            AppUpdateScheduler.schedule(this)
             applicationScope.launch {
-                if (updater.isCheckDue(net.wastu.artha.core.update.AppUpdateScheduler.INTERVAL_MILLIS)) {
+                if (updater.isCheckDue(AppUpdateScheduler.INTERVAL_MILLIS)) {
                     updater.update(install = false)
                 }
             }
@@ -211,7 +240,7 @@ class ArthaApplication : Application() {
     private fun resetDemoIfNewDay() {
         val state = getSharedPreferences("demo_state", MODE_PRIVATE)
         // A new day or a new build both regenerate, so a reinstalled demo never keeps old rows.
-        val today = "${java.time.LocalDate.now(net.wastu.artha.core.model.AccountingTime.zone)}@${packageManager.getPackageInfo(packageName, 0).lastUpdateTime}"
+        val today = "${LocalDate.now(AccountingTime.zone)}@${packageManager.getPackageInfo(packageName, 0).lastUpdateTime}"
         if (state.getString("seeded_on", null) == today) return
         deleteDatabase("artha-ledger.db")
         deleteSharedPreferences("artha_analysis_store")
@@ -222,10 +251,10 @@ class ArthaApplication : Application() {
     /** Fills an empty demo ledger once, through the same append and label path as a file import. */
     private suspend fun seedDemoLedger() {
         if (analysisStore.snapshot.value.aiConfig.apiKey.isBlank()) {
-            analysisStore.setAiConfig(net.wastu.artha.data.analysis.AiConfig("https://ai.demo.example", "demo-key", "artha-demo-1"))
+            analysisStore.setAiConfig(AiConfig("https://ai.demo.example", "demo-key", "artha-demo-1"))
         }
         if (ledger.loadTransactions().isNotEmpty()) return
-        val demo = net.wastu.artha.data.demo.DemoLedger.generate(java.time.Instant.now(), net.wastu.artha.core.model.AccountingTime.zone)
+        val demo = DemoLedger.generate(Instant.now(), AccountingTime.zone)
         analysisStore.mergeImportedAnalysis(null, demo.labels)
         ledger.append(demo.transactions)
         // Every source looks connected and recently synced, as it would on a rooted phone.
@@ -234,7 +263,7 @@ class ArthaApplication : Application() {
             val times = demo.transactions.filter { it.provider == provider }.map { it.occurredAt.toEpochMilli() }
             providerPreferences.recordSyncSuccess(
                 provider, "${times.size} payments, up to date", accounts[provider],
-                importWindow = net.wastu.artha.data.providers.ProviderImportWindow(times.size, times.minOrNull(), times.maxOrNull()),
+                importWindow = ProviderImportWindow(times.size, times.minOrNull(), times.maxOrNull()),
             )
         }
     }

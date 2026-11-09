@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -19,6 +20,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -26,6 +30,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import net.wastu.artha.data.attention.NeedsAttention
+import net.wastu.artha.ui.components.Segment
+import net.wastu.artha.ui.components.SegmentGap
 import net.wastu.artha.ui.components.shape
 
 @Composable
@@ -44,17 +50,17 @@ internal fun SettingsHeading(title: String) {
 internal fun SettingsLink(
     title: String,
     summary: String?,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     enabled: Boolean = true,
     attention: List<NeedsAttention> = emptyList(),
-    segment: net.wastu.artha.ui.components.Segment? = null,
+    segment: Segment? = null,
     onClick: (() -> Unit)?,
 ) {
     val attentionText = attentionSummary(attention)
     val grouped = segment != null
-    val shape = segment?.shape() ?: androidx.compose.ui.graphics.RectangleShape
+    val shape = segment?.shape() ?: RectangleShape
     val color = if (grouped) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surface
-    val outer = if (grouped) Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = net.wastu.artha.ui.components.SegmentGap) else Modifier
+    val outer = if (grouped) Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = SegmentGap) else Modifier
     val body: @Composable () -> Unit = { ListItem(
             headlineContent = {
                 Text(
@@ -97,7 +103,7 @@ internal fun SettingsLink(
                 onClick != null -> { { Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) } }
                 else -> null
             },
-            colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             modifier = if (enabled) Modifier else Modifier.alpha(0.38f),
         ) }
     if (onClick != null) Surface(onClick = onClick, enabled = enabled, shape = shape, color = color, modifier = outer) { body() }

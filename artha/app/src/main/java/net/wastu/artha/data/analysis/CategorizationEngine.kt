@@ -1,6 +1,7 @@
 package net.wastu.artha.data.analysis
 
 import java.time.Clock
+import java.time.Instant
 import java.time.YearMonth
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -103,7 +104,7 @@ class CategorizationEngine(
         if (store == null || job?.isActive == true) return
         job = scope.launch {
             var previousConfig: AiConfig? = null
-            var previousRows: List<Pair<String, java.time.Instant>>? = null
+            var previousRows: List<Pair<String, Instant>>? = null
             combine(rows, snapshot, pump) { r, s, _ -> r to s }.collect { (rows, snapshot) ->
                 val config = snapshot.aiConfig
                 if (config != previousConfig) {

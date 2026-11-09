@@ -1,13 +1,18 @@
-@file:android.annotation.SuppressLint("SdCardPath")
+@file:SuppressLint("SdCardPath")
 
 package net.wastu.artha.data.ingestion
 
-import net.wastu.artha.core.model.UnifiedTransaction
+import android.annotation.SuppressLint
+import android.util.Log
+import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.InputStream
+import java.io.StringReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.Base64
+import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
 import javax.crypto.Mac
 import javax.crypto.SecretKeyFactory
@@ -15,11 +20,14 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 import javax.xml.parsers.DocumentBuilderFactory
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import net.wastu.artha.core.model.UnifiedTransaction
+import net.wastu.artha.data.providers.AccountStatus
 import org.json.JSONObject
 
 val GRAB_CLIENT_SALT_BYTES = byteArrayOf(
@@ -44,18 +52,18 @@ class GrabOrderReader(
         val seen = mutableSetOf<Long>()
         for (page in 0 until 30) {
             coroutineContext.ensureActive()
-            if (java.util.concurrent.TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - started) >= 45) {
+            if (TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - started) >= 45) {
                 rows.issue("Grab history time limit reached; older charges may be missing"); break
             }
             val history = try { GrabProviderParser.walletPage(request(token,
                 "/api/passenger/v2/grabpay/history/credit/?currency=IDR&pageSize=50&lastElementID=$cursor")) }
-            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { rows.issue(error); break }
             if (history.partial) rows.issue("Grab reports partially unavailable charge history")
             for (index in 0 until history.items.length()) {
                 coroutineContext.ensureActive()
                 try { GrabProviderParser.wallet(history.items.getJSONObject(index))?.let(wallet::add) }
-                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { rows.issue(error) }
             }
             val next = history.cursor ?: break
@@ -66,7 +74,7 @@ class GrabOrderReader(
         val rideRows = mutableListOf<UnifiedTransaction>()
         try {
             val history = request(token, "/api/passenger/v3/rides/bookings/list?bookingTypes=PAST")
-            val rides = history.optJSONArray("rides") ?: throw ProviderReadException(net.wastu.artha.data.providers.AccountStatus.ERROR, "Grab ride list schema changed")
+            val rides = history.optJSONArray("rides") ?: throw ProviderReadException(AccountStatus.ERROR, "Grab ride list schema changed")
             val receiptIndices = GrabProviderParser.receiptIndices(rides)
             val receiptCache = loadReceiptCache()
             var newReceiptsCount = 0
@@ -96,11 +104,11 @@ class GrabOrderReader(
                                         }
                                         fetched
                                     }
-                                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                                } catch (cancelled: CancellationException) { throw cancelled }
                                 catch (error: Exception) { warning = error }
                             }
                             Result.success(GrabProviderParser.ride(ride, receipt) to warning)
-                        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                        } catch (cancelled: CancellationException) { throw cancelled }
                         catch (error: Exception) { Result.failure<Pair<UnifiedTransaction?, Exception?>>(error) }
                     } }.map { it.await() }
                 }
@@ -113,7 +121,7 @@ class GrabOrderReader(
             }
             // Recent ride enrichment has no cursor. Its scope belongs in coverage,
             // rather than making every otherwise successful payment import an error.
-        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { rows.issue(error) }
 
         // Exact booking identity enriches an authoritative charge; it never replaces charge amount/date.
@@ -142,7 +150,7 @@ class GrabOrderReader(
     }
 
     private fun loadReceiptCache(): MutableMap<String, JSONObject> {
-        val file = java.io.File(files.context.cacheDir, "grab_receipts_cache.json")
+        val file = File(files.context.cacheDir, "grab_receipts_cache.json")
         if (!file.exists()) return mutableMapOf()
         return try {
             val json = JSONObject(file.readText(Charsets.UTF_8))
@@ -154,11 +162,11 @@ class GrabOrderReader(
 
     private fun saveReceiptCache(cache: Map<String, JSONObject>) {
         try {
-            val file = java.io.File(files.context.cacheDir, "grab_receipts_cache.json")
+            val file = File(files.context.cacheDir, "grab_receipts_cache.json")
             val json = JSONObject()
             cache.entries.toList().takeLast(200).forEach { (k, v) -> json.put(k, v) }
             file.writeText(json.toString(), Charsets.UTF_8)
-        } catch (e: Exception) { android.util.Log.w("ArthaGrab", "Could not save receipt cache", e) }
+        } catch (e: Exception) { Log.w("ArthaGrab", "Could not save receipt cache", e) }
     }
 
     private suspend fun request(token: String, path: String, allowRateLimitRetry: Boolean = true): JSONObject {
@@ -201,11 +209,11 @@ class GrabOrderReader(
         ): ByteArray {
             fun remainingMillis(): Int {
                 val remaining = deadlineNanos - nanoTime()
-                if (remaining <= 0) throw ProviderReadException(net.wastu.artha.data.providers.AccountStatus.ERROR,
+                if (remaining <= 0) throw ProviderReadException(AccountStatus.ERROR,
                     "Grab history request time limit reached")
-                return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(remaining).coerceIn(1L, 10_000L).toInt()
+                return TimeUnit.NANOSECONDS.toMillis(remaining).coerceIn(1L, 10_000L).toInt()
             }
-            val output = java.io.ByteArrayOutputStream()
+            val output = ByteArrayOutputStream()
             val buffer = ByteArray(8192)
             while (true) {
                 kotlin.coroutines.coroutineContext.ensureActive()
@@ -274,7 +282,7 @@ class GrabOrderReader(
             val builder = factory.newDocumentBuilder()
             val bytes = input.readBytes()
             require(!bytes.toString(Charsets.UTF_8).contains("<!DOCTYPE", ignoreCase = true)) { "Unsupported Grab preferences XML" }
-            builder.setEntityResolver { _, _ -> org.xml.sax.InputSource(java.io.StringReader("")) }
+            builder.setEntityResolver { _, _ -> org.xml.sax.InputSource(StringReader("")) }
             val doc = builder.parse(bytes.inputStream())
             val nodes = doc.getElementsByTagName("string")
             for (i in 0 until nodes.length) {

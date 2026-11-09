@@ -1,11 +1,9 @@
 package net.wastu.artha.ui.screens
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import net.wastu.artha.ui.components.PageScaffold
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,20 +23,22 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
-import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -51,6 +51,7 @@ import java.util.Date
 import kotlinx.coroutines.launch
 import net.wastu.artha.ArthaApplication
 import net.wastu.artha.core.update.UpdateState
+import net.wastu.artha.ui.components.PageScaffold
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -90,7 +91,7 @@ internal fun UpdatesScreen(onBack: () -> Unit) {
                             color = MaterialTheme.colorScheme.primaryContainer,
                             modifier = Modifier.size(40.dp),
                         ) {
-                            androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center) {
+                            Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     Icons.Default.SystemUpdate,
                                     contentDescription = null,

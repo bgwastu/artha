@@ -1,6 +1,8 @@
 package net.wastu.artha.data.ingestion
 
+import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
 import android.os.Process
 import android.os.UserHandle
@@ -8,15 +10,15 @@ import android.util.Base64
 import com.topjohnwu.superuser.Shell
 import java.io.File
 import java.util.UUID
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import net.wastu.artha.data.providers.AccountStatus
 
 /** Fixed paths, read-only source access, and no logging of provider contents or credentials. */
-@android.annotation.SuppressLint("SdCardPath")
+@SuppressLint("SdCardPath")
 class RootFileReader(val context: Context) {
     fun packageFirstInstallTime(packageName: String): Long =
         runCatching { context.packageManager.getPackageInfo(packageName, 0).firstInstallTime }.getOrDefault(0L)
@@ -26,7 +28,7 @@ class RootFileReader(val context: Context) {
         if (path.startsWith("/data/data/")) {
             val packageName = path.removePrefix("/data/data/").substringBefore('/')
             try { context.packageManager.getPackageInfo(packageName, 0) }
-            catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+            catch (_: PackageManager.NameNotFoundException) {
                 throw ProviderReadException(AccountStatus.APP_NOT_INSTALLED, "Provider app is not installed.")
             }
         }

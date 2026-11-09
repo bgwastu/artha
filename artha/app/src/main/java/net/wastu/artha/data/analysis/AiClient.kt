@@ -1,15 +1,18 @@
 package net.wastu.artha.data.analysis
 
+import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
 import java.net.URI
 import java.net.URL
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.*
+import net.wastu.artha.BuildConfig
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal class AiHttpException(val status: Int) : java.io.IOException("AI service returned HTTP $status")
+internal class AiHttpException(val status: Int) : IOException("AI service returned HTTP $status")
 internal class EmptyAiResponseException : IllegalStateException()
 
 internal fun aiConnectionFailure(error: Exception): String = when (error) {
@@ -19,8 +22,8 @@ internal fun aiConnectionFailure(error: Exception): String = when (error) {
         429 -> "Rate limited. Try again"
         else -> "Provider unavailable. Try again"
     }
-    is java.net.SocketTimeoutException -> "Connection timed out. Try again"
-    is java.io.IOException -> "Couldn’t connect. Try again"
+    is SocketTimeoutException -> "Connection timed out. Try again"
+    is IOException -> "Couldn’t connect. Try again"
     is EmptyAiResponseException -> "The model returned no reply"
     is org.json.JSONException, is IllegalArgumentException, is IllegalStateException -> "The model returned an unusable reply. Try again"
     else -> "Test failed. Try again"
@@ -39,7 +42,7 @@ object AiClient {
     /** Exercises generation with the draft configuration; no ledger, notes or settings are sent or saved. */
     suspend fun testConnection(config: AiConfig) {
         require(aiConfigValidation(config) == null)
-        if (net.wastu.artha.BuildConfig.DEMO) { delay(1_200); return }
+        if (BuildConfig.DEMO) { delay(1_200); return }
         if (call(config, "Reply only with OK.").isBlank()) throw EmptyAiResponseException()
     }
 

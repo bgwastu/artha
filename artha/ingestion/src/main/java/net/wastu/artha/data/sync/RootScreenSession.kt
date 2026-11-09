@@ -1,5 +1,6 @@
 package net.wastu.artha.data.sync
 
+import android.util.Log
 import java.io.BufferedWriter
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
@@ -7,9 +8,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import net.wastu.artha.walk.GojekScreenHelper
 
 /**
- * Drives [net.wastu.artha.walk.GojekScreenHelper] in a root `app_process` started from Artha's
+ * Drives [GojekScreenHelper] in a root `app_process` started from Artha's
  * own APK. One request line, one reply line; a reply that does not arrive in time ends the session.
  */
 class RootScreenSession private constructor(private val process: Process) : GojekScreenWalk.Screen, AutoCloseable {
@@ -56,7 +58,7 @@ class RootScreenSession private constructor(private val process: Process) : Goje
             val line = replies.poll(left.coerceAtLeast(0), TimeUnit.NANOSECONDS)
             if (line == null || line == CLOSED) {
                 if (line == CLOSED) replies.put(CLOSED)
-                android.util.Log.w(TAG, "$command: no reply")
+                Log.w(TAG, "$command: no reply")
                 process.destroy()
                 return@withContext null
             }
@@ -64,7 +66,7 @@ class RootScreenSession private constructor(private val process: Process) : Goje
                 line == "ok" -> return@withContext ""
                 line.startsWith("ok ") -> return@withContext line.substring(3)
                 line.startsWith("err") -> {
-                    android.util.Log.w(TAG, "$command: $line")
+                    Log.w(TAG, "$command: $line")
                     return@withContext null
                 }
                 // Anything else is runtime noise on stdout, not a reply.
@@ -97,6 +99,6 @@ class RootScreenSession private constructor(private val process: Process) : Goje
             require(apkPath.matches(Regex("/[A-Za-z0-9._~=+/-]+\\.apk"))) { "unexpected APK path" }
             val command = "CLASSPATH=$apkPath exec app_process /system/bin $HELPER 2>/dev/null"
             RootScreenSession(ProcessBuilder("su", "-M", "-c", command).start())
-        }.onFailure { android.util.Log.w(TAG, "helper did not start", it) }.getOrNull()
+        }.onFailure { Log.w(TAG, "helper did not start", it) }.getOrNull()
     }
 }

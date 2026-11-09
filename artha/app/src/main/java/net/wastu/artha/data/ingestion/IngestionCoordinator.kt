@@ -4,9 +4,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import net.wastu.artha.core.model.Provider
@@ -14,8 +14,8 @@ import net.wastu.artha.core.root.RootAccess
 import net.wastu.artha.data.ledger.AppendResult
 import net.wastu.artha.data.ledger.LedgerRepository
 import net.wastu.artha.data.providers.AccountStatus
-import net.wastu.artha.data.providers.ProviderPreferences
 import net.wastu.artha.data.providers.ProviderImportWindow
+import net.wastu.artha.data.providers.ProviderPreferences
 
 class IngestionCoordinator(
     private val rootAccess: RootAccess,
@@ -105,13 +105,13 @@ class IngestionCoordinator(
     }
 
     /** The account state a read failure points to. */
-    private fun statusFor(error: Exception): net.wastu.artha.data.providers.AccountStatus {
+    private fun statusFor(error: Exception): AccountStatus {
         (error as? ProviderReadException)?.let { return it.status }
         val lower = error.message.orEmpty().lowercase()
         return when {
-            "login" in lower || "cookie" in lower || "session" in lower -> net.wastu.artha.data.providers.AccountStatus.NEEDS_LOGIN
-            "not installed" in lower -> net.wastu.artha.data.providers.AccountStatus.APP_NOT_INSTALLED
-            else -> net.wastu.artha.data.providers.AccountStatus.ERROR
+            "login" in lower || "cookie" in lower || "session" in lower -> AccountStatus.NEEDS_LOGIN
+            "not installed" in lower -> AccountStatus.APP_NOT_INSTALLED
+            else -> AccountStatus.ERROR
         }
     }
 }

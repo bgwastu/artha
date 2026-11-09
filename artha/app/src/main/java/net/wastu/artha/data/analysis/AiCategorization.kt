@@ -1,8 +1,11 @@
 package net.wastu.artha.data.analysis
 
-import java.time.YearMonth
-import kotlin.math.roundToInt
 import java.security.MessageDigest
+import java.time.YearMonth
+import java.util.Collections
+import java.util.Locale
+import kotlin.math.roundToInt
+import net.wastu.artha.core.model.AccountingTime
 import net.wastu.artha.core.model.TransactionType
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.core.model.toLowerHex
@@ -32,7 +35,7 @@ object AiCategorization {
     // Reasoning models need ~3 s per payment; small batches finish well inside the read timeout.
     private const val TARGET_BATCH_BYTES = 48 * 1024
     const val MAX_BATCH = 8
-    private val unsupportedSchemaConfigs = java.util.Collections.synchronizedSet(mutableSetOf<AiConfig>())
+    private val unsupportedSchemaConfigs = Collections.synchronizedSet(mutableSetOf<AiConfig>())
 
     internal fun clearUnsupportedSchemaConfigs() {
         unsupportedSchemaConfigs.clear()
@@ -105,7 +108,7 @@ object AiCategorization {
         rows: List<UnifiedTransaction>,
         snapshot: AnalysisSnapshot,
     ): Set<String> {
-        fun month(tx: UnifiedTransaction) = YearMonth.from(tx.occurredAt.atZone(net.wastu.artha.core.model.AccountingTime.zone))
+        fun month(tx: UnifiedTransaction) = YearMonth.from(tx.occurredAt.atZone(AccountingTime.zone))
         fun keys(include: (UnifiedTransaction) -> Boolean) =
             rows.filter { isEligible(it, snapshot) && include(it) }.mapTo(mutableSetOf()) { it.key }
         return when (scope) {
@@ -182,7 +185,7 @@ object AiCategorization {
         }
         val response = json.getJSONArray("classifications")
         val validIds = candidates.indices.associate { "p$it" to candidates[it].transaction.key }
-        val allowedCategoryMap = allowedCategories.associateBy { it.trim().lowercase(java.util.Locale.ROOT) }
+        val allowedCategoryMap = allowedCategories.associateBy { it.trim().lowercase(Locale.ROOT) }
         return buildMap {
             for (i in 0 until response.length()) {
                 val item = response.optJSONObject(i) ?: continue
@@ -191,7 +194,7 @@ object AiCategorization {
                 if (key in this) continue
 
                 val rawCat = (item.opt("category") as? String)?.trim() ?: continue
-                val canonicalCategory = allowedCategoryMap[rawCat.lowercase(java.util.Locale.ROOT)] ?: continue
+                val canonicalCategory = allowedCategoryMap[rawCat.lowercase(Locale.ROOT)] ?: continue
 
                 val rawReason = (item.opt("reason") as? String)?.trim().orEmpty()
                 val reason = if (rawReason.length > 240) rawReason.take(240) else rawReason
@@ -221,7 +224,7 @@ object AiCategorization {
             val scaled = if (percent > 0.0 && percent <= 1.0 && raw !is String) percent * 100 else percent
             return scaled.roundToInt().coerceIn(0, 100)
         }
-        return when ((raw as? String)?.lowercase(java.util.Locale.ROOT)) {
+        return when ((raw as? String)?.lowercase(Locale.ROOT)) {
             "high" -> 95
             "medium" -> 77
             else -> 50
