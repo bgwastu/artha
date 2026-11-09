@@ -244,12 +244,6 @@ class CategorizationEngine(
             .mapNotNull { candidate -> MerchantMemory.merchantKey(candidate.transaction)?.let { it to candidate.transaction.key } }
             .filter { (merchant, _) -> merchant !in perPayment && merchant !in probing }
         probing.putAll(probes)
-        fun requeue(entries: List<ManualEntry>) {
-            if (entries.isEmpty()) return
-            val requeued = entries.mapTo(mutableSetOf()) { it.key }
-            manualQueue.removeAll { it.key in requeued }
-            manualQueue.addAll(0, entries)
-        }
         val batchJob = scope.launch {
             try {
                 publish(snapshot.value)
@@ -257,74 +251,11 @@ class CategorizationEngine(
                     categorize?.invoke(config, input, batch) ?: AiCategorization.classify(config, input, batch, rows.value)
                 }
                 ensureActive()
-                val latest = snapshot.value
-                val byKey = batch.associate { it.transaction.key to it.transaction }
-                fun answered(key: String) = byKey[key]?.let { AiCategorization.isValidFor(latest, it, suggestions[key]?.category) } == true
-
-                val replacing = keys.filterTo(mutableSetOf()) { it in replaceManual }
-                if (replacing.isNotEmpty()) withContext(ioDispatcher) {
-                    for (key in replacing) {
-                        replaceManual.remove(key)
-                        store?.removeManualCategory(key)
-                        val suggestion = suggestions[key]
-                        if (suggestion != null && answered(key)) {
-                            store?.setClassification(key, suggestion.category, suggestion.reason, manual = false)
-                            noteCommitted(key, suggestion)
-                        } else {
-                            store?.recordCategoryFailures(setOf(key), "AI did not return a valid category")
-                            if (key in run) runFailed.add(key)
-                        }
-                        settle(key)
-                    }
-                }
-
-                val standard = batch.filter { it.transaction.key !in replacing }
-                val (good, missing) = standard.partition { answered(it.transaction.key) }
-                if (missing.isNotEmpty()) {
-                    markFailed(missing.mapTo(mutableSetOf()) { it.transaction.key }, "AI did not return a valid category")
-                }
-                if (good.isNotEmpty()) {
-                    val current = rows.value.associateBy { it.key }
-                    val now = snapshot.value
-                    val unchanged = good.filter { candidate ->
-                        current[candidate.transaction.key]?.let { AiCategorization.fingerprint(it, now) == candidate.fingerprint } == true
-                    }
-                    val committed = withContext(ioDispatcher) { store?.commitCategorySuggestionKeys(unchanged, suggestions, input).orEmpty() }
-                    val retry = mutableListOf<ManualEntry>()
-                    for (candidate in good) {
-                        val key = candidate.transaction.key
-                        if (key in committed) {
-                            noteCommitted(key, suggestions.getValue(key))
-                            noteMerchantAnswer(candidate.transaction, suggestions.getValue(key))
-                            settle(key)
-                        } else if (key in run) {
-                            // The payment changed while the model was thinking: ask once more with the new evidence.
-                            if (requeuedForInputChange.add(key)) retry += ManualEntry(key, key in replaceManual)
-                            else requeuedForInputChange.remove(key)
-                        }
-                    }
-                    requeue(retry)
-                }
+                commitAnswers(batch, keys, suggestions, input)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (e: Exception) {
-                val http = (e as? AiHttpException) ?: (e.cause as? AiHttpException)
-                when {
-                    http != null && http.status in setOf(401, 403, 404) -> {
-                        fatalError = aiConnectionFailure(e)
-                        for (other in batches.keys.toList()) if (other !== coroutineContext[Job]) other.cancel()
-                    }
-                    http != null && http.status == 400 && batch.size > 1 -> {
-                        sendAlone.addAll(keys)
-                        requeue(manualInBatch)
-                    }
-                    http != null && http.status == 400 -> markFailed(keys, aiConnectionFailure(e))
-                    http != null && http.status == 429 -> {
-                        lanes = (lanes / 2).coerceAtLeast(1)
-                        scheduleRetry(keys, manualInBatch, aiConnectionFailure(e))
-                    }
-                    else -> scheduleRetry(keys, manualInBatch, aiConnectionFailure(e))
-                }
+                handleBatchFailure(e, keys, manualInBatch, batch.size, coroutineContext[Job])
             } finally {
                 inFlight.removeAll(keys)
                 // An unanswered probe hands its merchant to the next waiting payment.
@@ -334,6 +265,106 @@ class CategorizationEngine(
             }
         }
         batches[batchJob] = keys
+    }
+
+    /** Stores what the model answered: manual overrides first, then the rest of the batch unless the payment moved on. */
+    private suspend fun commitAnswers(
+        batch: List<CategoryCandidate>,
+        keys: Set<String>,
+        suggestions: Map<String, CategorySuggestion>,
+        input: AnalysisSnapshot,
+    ) {
+        val latest = snapshot.value
+        val byKey = batch.associate { it.transaction.key to it.transaction }
+        val answered = { key: String -> byKey[key]?.let { AiCategorization.isValidFor(latest, it, suggestions[key]?.category) } == true }
+
+        val replacing = keys.filterTo(mutableSetOf()) { it in replaceManual }
+        commitReplacements(replacing, suggestions, answered)
+
+        val (good, missing) = batch.filter { it.transaction.key !in replacing }.partition { answered(it.transaction.key) }
+        if (missing.isNotEmpty()) {
+            markFailed(missing.mapTo(mutableSetOf()) { it.transaction.key }, "AI did not return a valid category")
+        }
+        if (good.isNotEmpty()) commitGood(good, suggestions, input)
+    }
+
+    /** Payments the user asked to re-categorize over a manual choice: the answer replaces it, or the attempt is recorded as failed. */
+    private suspend fun commitReplacements(
+        replacing: Set<String>,
+        suggestions: Map<String, CategorySuggestion>,
+        answered: (String) -> Boolean,
+    ) {
+        if (replacing.isEmpty()) return
+        withContext(ioDispatcher) {
+            for (key in replacing) {
+                replaceManual.remove(key)
+                store?.removeManualCategory(key)
+                val suggestion = suggestions[key]
+                if (suggestion != null && answered(key)) {
+                    store?.setClassification(key, suggestion.category, suggestion.reason, manual = false)
+                    noteCommitted(key, suggestion)
+                } else {
+                    store?.recordCategoryFailures(setOf(key), "AI did not return a valid category")
+                    if (key in run) runFailed.add(key)
+                }
+                settle(key)
+            }
+        }
+    }
+
+    private suspend fun commitGood(good: List<CategoryCandidate>, suggestions: Map<String, CategorySuggestion>, input: AnalysisSnapshot) {
+        val current = rows.value.associateBy { it.key }
+        val now = snapshot.value
+        val unchanged = good.filter { candidate ->
+            current[candidate.transaction.key]?.let { AiCategorization.fingerprint(it, now) == candidate.fingerprint } == true
+        }
+        val committed = withContext(ioDispatcher) { store?.commitCategorySuggestionKeys(unchanged, suggestions, input).orEmpty() }
+        val retry = mutableListOf<ManualEntry>()
+        for (candidate in good) {
+            val key = candidate.transaction.key
+            if (key in committed) {
+                noteCommitted(key, suggestions.getValue(key))
+                noteMerchantAnswer(candidate.transaction, suggestions.getValue(key))
+                settle(key)
+            } else if (key in run) {
+                // The payment changed while the model was thinking: ask once more with the new evidence.
+                if (requeuedForInputChange.add(key)) retry += ManualEntry(key, key in replaceManual)
+                else requeuedForInputChange.remove(key)
+            }
+        }
+        requeueManual(retry)
+    }
+
+    /**
+     * Bad credentials stop the whole run. A rejected multi-payment request is split into single ones, a rate
+     * limit halves the parallel lanes, and everything else backs off and tries again later.
+     */
+    private suspend fun handleBatchFailure(e: Exception, keys: Set<String>, manualInBatch: List<ManualEntry>, batchSize: Int, self: Job?) {
+        val http = (e as? AiHttpException) ?: (e.cause as? AiHttpException)
+        when {
+            http != null && http.status in setOf(401, 403, 404) -> {
+                fatalError = aiConnectionFailure(e)
+                for (other in batches.keys.toList()) if (other !== self) other.cancel()
+            }
+            http != null && http.status == 400 && batchSize > 1 -> {
+                sendAlone.addAll(keys)
+                requeueManual(manualInBatch)
+            }
+            http != null && http.status == 400 -> markFailed(keys, aiConnectionFailure(e))
+            http != null && http.status == 429 -> {
+                lanes = (lanes / 2).coerceAtLeast(1)
+                scheduleRetry(keys, manualInBatch, aiConnectionFailure(e))
+            }
+            else -> scheduleRetry(keys, manualInBatch, aiConnectionFailure(e))
+        }
+    }
+
+    /** Puts [entries] back at the front of the manual queue, replacing any copies already there. */
+    private fun requeueManual(entries: List<ManualEntry>) {
+        if (entries.isEmpty()) return
+        val requeued = entries.mapTo(mutableSetOf()) { it.key }
+        manualQueue.removeAll { it.key in requeued }
+        manualQueue.addAll(0, entries)
     }
 
     private fun noteCommitted(key: String, suggestion: CategorySuggestion) {
@@ -405,9 +436,7 @@ class CategorizationEngine(
         }
         for ((wait, waiting) in byDelay) {
             backedOff.addAll(waiting)
-            val requeued = manualInBatch.filter { it.key in waiting }
-            manualQueue.removeAll { entry -> requeued.any { it.key == entry.key } }
-            manualQueue.addAll(0, requeued)
+            requeueManual(manualInBatch.filter { it.key in waiting })
             val timer = scope.launch {
                 delay(wait)
                 backedOff.removeAll(waiting)
