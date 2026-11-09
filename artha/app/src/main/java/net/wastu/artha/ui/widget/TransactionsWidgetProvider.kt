@@ -25,8 +25,10 @@ import net.wastu.artha.core.model.AccountingTime
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.core.model.iconRes
+import net.wastu.artha.ui.GroupBadge
 import net.wastu.artha.ui.TransactionTag
 import net.wastu.artha.ui.TransactionTagKind
+import net.wastu.artha.ui.groupBadgeInfo
 import net.wastu.artha.ui.paymentRowAmount
 import net.wastu.artha.ui.transactionHumanLine
 import net.wastu.artha.ui.transactionTags
@@ -164,7 +166,10 @@ internal fun buildTransactionItemView(
     val title = transactionHumanLine(tx)
     views.setTextViewText(R.id.widget_item_description, title)
     val tags = transactionTags(tx)
-    bindWidgetTags(views, tags)
+    // As on the app's rows, a readable group shows its second source on the icon instead of a Grouped pill.
+    val groupBadge = groupBadgeInfo(tx).takeIf { tags.any { it.kind == TransactionTagKind.GROUPED } }
+    bindWidgetTags(views, tags, showGroupedPill = groupBadge == null)
+    bindGroupBadge(views, groupBadge)
 
     val zone = AccountingTime.zone
     val localDate = tx.occurredAt.atZone(zone).toLocalDate()
@@ -200,7 +205,7 @@ internal fun buildTransactionItemView(
 }
 
 /** RemoteViews cannot draw inline pills, so a fixed set of tag views is shown or hidden. */
-private fun bindWidgetTags(views: RemoteViews, tags: List<TransactionTag>) {
+private fun bindWidgetTags(views: RemoteViews, tags: List<TransactionTag>, showGroupedPill: Boolean) {
     val status = tags.firstOrNull { it.kind != TransactionTagKind.CARD }
     val returned = status?.kind in setOf(TransactionTagKind.REVERSED, TransactionTagKind.REFUND, TransactionTagKind.PARTIAL_REFUND)
     fun bind(id: Int, text: String?) {
@@ -208,10 +213,20 @@ private fun bindWidgetTags(views: RemoteViews, tags: List<TransactionTag>) {
         if (text != null) views.setTextViewText(id, text)
     }
     // The Grouped chip carries its own text, separate from the status chips.
-    views.setViewVisibility(R.id.widget_item_tag_grouped, if (status?.kind == TransactionTagKind.GROUPED) View.VISIBLE else View.GONE)
+    views.setViewVisibility(R.id.widget_item_tag_grouped, if (showGroupedPill && status?.kind == TransactionTagKind.GROUPED) View.VISIBLE else View.GONE)
     bind(R.id.widget_item_tag_status_secondary, status?.label?.takeIf { !returned && status?.kind != TransactionTagKind.GROUPED })
     bind(R.id.widget_item_tag_status_tertiary, status?.label?.takeIf { returned })
     bind(R.id.widget_item_tag_card, tags.firstOrNull { it.kind == TransactionTagKind.CARD }?.label)
+}
+
+/** The second source's icon on a grouped row, or "+N" when more than two sources joined. */
+private fun bindGroupBadge(views: RemoteViews, badge: GroupBadge?) {
+    val extra = badge?.extraCount ?: 0
+    views.setViewVisibility(R.id.widget_item_icon_badge, if (badge != null && extra == 0) View.VISIBLE else View.GONE)
+    views.setViewVisibility(R.id.widget_item_icon_more, if (badge != null && extra > 0) View.VISIBLE else View.GONE)
+    if (badge == null) return
+    if (extra == 0) views.setImageViewResource(R.id.widget_item_icon_badge, badge.secondProvider.iconRes)
+    else views.setTextViewText(R.id.widget_item_icon_more, "+$extra")
 }
 
 class TransactionsWidgetService : RemoteViewsService() {
