@@ -1,6 +1,12 @@
 package net.wastu.artha.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -300,8 +306,18 @@ fun HomeScreen(
                 )
             }
         }
-        if (viewModel != null) pages.top?.let { page ->
-            Surface(Modifier.fillMaxSize()) {
+        val motion = MaterialTheme.motionScheme
+        AnimatedContent(
+            targetState = pages.top,
+            transitionSpec = {
+                val deeper = targetState != null && (initialState == null || targetState!!.ordinal >= initialState!!.ordinal)
+                val direction = if (deeper) 1 else -1
+                (slideInHorizontally(motion.defaultSpatialSpec()) { direction * it / 4 } + fadeIn(motion.defaultEffectsSpec()))
+                    .togetherWith(slideOutHorizontally(motion.defaultSpatialSpec()) { -direction * it / 4 } + fadeOut(motion.defaultEffectsSpec()))
+            },
+            label = "page",
+        ) { page ->
+            if (page != null && viewModel != null) Surface(Modifier.fillMaxSize()) {
                 when (page) {
                     Page.SOURCES -> SourcesScreen(
                         enabled = enabledProviders,

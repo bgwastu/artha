@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="artha_background">@android:color/system_neutral1_900</color>
     <color name="widget_background">@android:color/system_neutral1_900</color>
     <color name="widget_background_stroke">@android:color/system_neutral2_700</color>
     <color name="widget_text_primary">@android:color/system_neutral1_100</color>
