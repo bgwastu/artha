@@ -18,6 +18,8 @@ import net.wastu.artha.data.sync.GojekFlashController
 import net.wastu.artha.data.providers.JagoPinStatus
 import net.wastu.artha.data.sync.GojekScreenSync
 import net.wastu.artha.data.sync.JagoScreenSync
+import net.wastu.artha.notifications.NotificationAccess
+import net.wastu.artha.notifications.TransactionAlerts
 import net.wastu.artha.ui.widget.AnalysisWidgetProvider
 import net.wastu.artha.ui.widget.TransactionsWidgetProvider
 
@@ -32,8 +34,9 @@ class ArthaApplication : Application() {
     val providerPreferences by lazy { net.wastu.artha.data.providers.ProviderPreferences(applicationContext) }
     val attention by lazy { net.wastu.artha.data.attention.AttentionRepository(providerPreferences, applicationScope) }
     val analysisStore by lazy { net.wastu.artha.data.analysis.AnalysisStore(applicationContext) }
+    private val rootFiles by lazy { net.wastu.artha.data.ingestion.RootFileReader(applicationContext) }
     val ingestion by lazy {
-        val files = net.wastu.artha.data.ingestion.RootFileReader(applicationContext)
+        val files = rootFiles
         val reader = net.wastu.artha.data.ingestion.JagoTransactionReader(files)
         val isInteractive = { getSystemService(PowerManager::class.java)?.isInteractive == true }
         val jagoSync = JagoScreenSync(
@@ -64,12 +67,15 @@ class ArthaApplication : Application() {
 
     val gojekFlash by lazy {
         GojekFlashController(
-            net.wastu.artha.data.ingestion.RootFileReader(this),
+            rootFiles,
             providerPreferences,
             { getSystemService(PowerManager::class.java)?.isInteractive == true },
             { ledger.loadTransactions() },
         )
     }
+    private val notificationAccess by lazy { NotificationAccess(this, rootFiles) }
+    val transactionAlerts by lazy { TransactionAlerts(this, ledger) { isAppInForeground } }
+
     val updater by lazy {
         net.wastu.artha.core.update.AppUpdater(
             this,
@@ -85,7 +91,9 @@ class ArthaApplication : Application() {
             if (BuildConfig.DEMO) return@launch
             try {
                 if (!rootAccess.verify()) return@launch
-                if (provider != null) ingestion.syncProvider(provider) else ingestion.ingestAll(force = force)
+                transactionAlerts.around {
+                    if (provider != null) ingestion.syncProvider(provider) else ingestion.ingestAll(force = force)
+                }
                 AnalysisWidgetProvider.triggerUpdate(this@ArthaApplication)
                 TransactionsWidgetProvider.triggerUpdate(this@ArthaApplication)
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -97,6 +105,23 @@ class ArthaApplication : Application() {
                 }
             }
         }
+
+    private val pendingNotificationSyncs = java.util.concurrent.ConcurrentHashMap<Provider, kotlinx.coroutines.Job>()
+
+    /**
+     * A provider app just posted a payment notification: import it after a short pause (so the app can
+     * write its own history first), at most once every couple of minutes per source.
+     */
+    fun syncAfterProviderNotification(provider: Provider) {
+        if (BuildConfig.DEMO || provider !in providerPreferences.importEnabled.value) return
+        val lastAttempt = providerPreferences.diagnostics.value[provider]?.lastAttemptEpochMillis ?: 0L
+        if (System.currentTimeMillis() - lastAttempt < NOTIFICATION_SYNC_MIN_GAP_MILLIS) return
+        pendingNotificationSyncs.remove(provider)?.cancel()
+        pendingNotificationSyncs[provider] = applicationScope.launch {
+            kotlinx.coroutines.delay(NOTIFICATION_SYNC_DELAY_MILLIS)
+            syncInBackground(provider, force = true).join()
+        }
+    }
 
     /**
      * Manual GOJEK refresh: reads new payments from GoPay's history screens on an invisible
@@ -160,6 +185,7 @@ class ArthaApplication : Application() {
             applicationScope.launch { seedDemoLedger() }
         } else {
             BackgroundSyncScheduler.schedule(this)
+            applicationScope.launch { notificationAccess.ensureGranted() }
             net.wastu.artha.core.update.AppUpdateScheduler.schedule(this)
             applicationScope.launch {
                 if (updater.isCheckDue(net.wastu.artha.core.update.AppUpdateScheduler.INTERVAL_MILLIS)) {
@@ -211,5 +237,10 @@ class ArthaApplication : Application() {
                 importWindow = net.wastu.artha.data.providers.ProviderImportWindow(times.size, times.minOrNull(), times.maxOrNull()),
             )
         }
+    }
+
+    private companion object {
+        const val NOTIFICATION_SYNC_DELAY_MILLIS = 4_000L
+        const val NOTIFICATION_SYNC_MIN_GAP_MILLIS = 2 * 60_000L
     }
 }

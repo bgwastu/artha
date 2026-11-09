@@ -35,7 +35,7 @@ class BackgroundSyncJobService : JobService() {
                     val gojekImportEnabled = app.providerPreferences.importEnabled.value
                         .contains(net.wastu.artha.core.model.Provider.GOJEK)
                     app.gojekFlash.run(gojekImportEnabled)
-                    val summaries = app.ingestion.ingestAll(force = false)
+                    val summaries = app.transactionAlerts.around { app.ingestion.ingestAll(force = false) }
                     allProvidersHealthy = summaries.values.none { it.startsWith("Unavailable") }
                     AnalysisWidgetProvider.triggerUpdate(app)
                     TransactionsWidgetProvider.triggerUpdate(app)
