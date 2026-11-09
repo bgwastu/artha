@@ -26,11 +26,11 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -150,7 +150,7 @@ internal fun UpdatesScreen(onBack: () -> Unit) {
                         }
                         is UpdateState.Checking -> {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                LoadingIndicator(modifier = Modifier.size(20.dp),)
                                 Spacer(Modifier.width(12.dp))
                                 Text("Checking GitHub for updates...")
                             }
@@ -174,7 +174,7 @@ internal fun UpdatesScreen(onBack: () -> Unit) {
                         }
                         is UpdateState.Downloading -> {
                             Text("Downloading update ${s.versionName}...", fontWeight = FontWeight.Medium)
-                            LinearProgressIndicator(
+                            LinearWavyProgressIndicator(
                                 progress = { s.progress },
                                 modifier = Modifier.fillMaxWidth(),
                             )
@@ -196,7 +196,7 @@ internal fun UpdatesScreen(onBack: () -> Unit) {
                         }
                         is UpdateState.Installing -> {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                LoadingIndicator(modifier = Modifier.size(20.dp),)
                                 Spacer(Modifier.width(12.dp))
                                 Text("Installing version ${s.versionName}...")
                             }

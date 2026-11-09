@@ -37,7 +37,7 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.AssistChip
 import androidx.compose.material.icons.outlined.AutoAwesome
@@ -1073,9 +1073,8 @@ fun TransactionRow(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
-                                CircularProgressIndicator(
+                                LoadingIndicator(
                                     modifier = Modifier.size(12.dp),
-                                    strokeWidth = 1.5.dp,
                                 )
                                 Text(
                                     text = busyLabel,

@@ -41,8 +41,8 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingBag
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -432,10 +432,8 @@ private fun TransactionDetailsBody(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         ) {
-                                            CircularProgressIndicator(
+                                            LoadingIndicator(
                                                 modifier = Modifier.size(13.dp),
-                                                strokeWidth = 1.5.dp,
-                                                color = MaterialTheme.colorScheme.primary,
                                             )
                                             Text(
                                                 busyLabel,
@@ -499,10 +497,8 @@ private fun TransactionDetailsBody(
                                         label = { Text(if (isBusy) "Categorizing" else "Re-categorize") },
                                         leadingIcon = {
                                             if (isBusy) {
-                                                CircularProgressIndicator(
+                                                LoadingIndicator(
                                                     modifier = Modifier.size(AssistChipDefaults.IconSize),
-                                                    strokeWidth = 1.5.dp,
-                                                    color = MaterialTheme.colorScheme.primary,
                                                 )
                                             } else {
                                                 Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize))
@@ -958,7 +954,7 @@ private fun CategoryPickerView(
             )
         }
         if (saving) {
-            LinearProgressIndicator(
+            LinearWavyProgressIndicator(
                 modifier = Modifier.fillMaxWidth().height(2.dp),
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -1099,7 +1095,7 @@ private fun EditorActions(saving: Boolean, onCancel: () -> Unit, onSave: () -> U
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = onCancel, enabled = !saving) { Text("Cancel") }
         FilledTonalButton(onClick = onSave, enabled = !saving) { Text(if (saving) "Saving" else "Save") }
-        if (saving) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        if (saving) LoadingIndicator(Modifier.size(20.dp),)
     }
 }
 

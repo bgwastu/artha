@@ -44,7 +44,7 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material3.LoadingIndicator
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -535,7 +535,7 @@ private fun SourcePageContent(
 private fun SyncHeaderAction(importing: Boolean, enabled: Boolean, onSync: () -> Unit) {
     IconButton(onClick = onSync, enabled = enabled && !importing) {
         if (importing) {
-            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            LoadingIndicator(Modifier.size(20.dp),)
         } else {
             Icon(Icons.Default.Sync, contentDescription = "Sync history")
         }

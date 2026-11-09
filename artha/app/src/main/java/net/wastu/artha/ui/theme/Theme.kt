@@ -2,10 +2,12 @@ package net.wastu.artha.ui.theme
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MotionScheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -16,6 +18,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 
 internal val LightColors = lightColorScheme(
     primary = Color(0xFF006D40),
@@ -75,6 +78,15 @@ internal val DarkColors = darkColorScheme(
     outlineVariant = Color(0xFF404943),
 )
 
+/** Rounder corners than the M3 baseline, matching the Expressive shape language. */
+internal val ArthaShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(32.dp),
+)
+
 @Composable
 fun ArthaTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -82,31 +94,17 @@ fun ArthaTheme(
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
-    val accents = when {
+    val colors = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         darkTheme -> DarkColors
         else -> LightColors
     }
     MaterialExpressiveTheme(
-        colorScheme = neutralSurfaces(accents, darkTheme),
+        colorScheme = colors,
+        shapes = ArthaShapes,
         motionScheme = MotionScheme.expressive(),
         content = content,
-    )
-}
-
-/** Keep page backgrounds calm while retaining wallpaper-derived action and selection accents. */
-internal fun neutralSurfaces(accents: ColorScheme, dark: Boolean): ColorScheme {
-    val neutral = if (dark) DarkColors else LightColors
-    return accents.copy(
-        background = neutral.background, onBackground = neutral.onBackground,
-        surface = neutral.surface, onSurface = neutral.onSurface, surfaceTint = neutral.surfaceTint,
-        surfaceVariant = neutral.surfaceVariant, onSurfaceVariant = neutral.onSurfaceVariant,
-        surfaceBright = neutral.surfaceBright, surfaceDim = neutral.surfaceDim,
-        surfaceContainer = neutral.surfaceContainer, surfaceContainerLow = neutral.surfaceContainerLow,
-        surfaceContainerHigh = neutral.surfaceContainerHigh, surfaceContainerLowest = neutral.surfaceContainerLowest,
-        surfaceContainerHighest = neutral.surfaceContainerHighest,
-        outline = neutral.outline, outlineVariant = neutral.outlineVariant,
     )
 }
 
