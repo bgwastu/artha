@@ -61,6 +61,9 @@ android {
         }
     }
 
+    // Only English and Indonesian are used; drop the other locales bundled by libraries.
+    androidResources { localeFilters += listOf("en", "id") }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
