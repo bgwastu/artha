@@ -67,29 +67,15 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
 
     private fun updateWidgets(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         val pendingResult = goAsync()
-
-        val openAppIntent = PendingIntent.getActivity(
-            context,
-            100,
-            Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra("extra_destination", "TRANSACTIONS")
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        val openApp = PendingIntent.getActivity(
+            context, 100, openAppIntent(context, "TRANSACTIONS"), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-
-        val itemTemplateFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
-        } else {
-            PendingIntent.FLAG_UPDATE_CURRENT
-        }
-        val itemTemplatePendingIntent = PendingIntent.getActivity(
+        val itemTemplate = PendingIntent.getActivity(
             context,
             101,
-            Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            },
-            itemTemplateFlags,
+            openAppIntent(context),
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+            else PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
         fun status(failed: Boolean = false) {
@@ -97,47 +83,33 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
                 val previous = WidgetUpdatedAt.read(context, id)
                 val views = RemoteViews(context.packageName, R.layout.widget_transactions)
                 views.setTextViewText(R.id.widget_transactions_status, widgetFreshness(previous, System.currentTimeMillis(), updating = !failed, failed = failed))
-                views.setOnClickPendingIntent(R.id.widget_transactions_header, openAppIntent)
+                views.setOnClickPendingIntent(R.id.widget_transactions_header, openApp)
                 appWidgetManager.partiallyUpdateAppWidget(id, views)
             }
         }
         status()
         WidgetRefresh.schedule("transactions", pendingResult, onFailure = { status(failed = true) }) {
-                val app = context.applicationContext as ArthaApplication
-                val enabled = app.providerPreferences.enabled.value
-                val allPayments = widgetSpending(context).transactions.filter { it.isConfirmed && it.provider in enabled && it.direction == Direction.DEBIT }
-                val rows = groupedWidgetPayments(allPayments, enabled)
-                val updatedAt = System.currentTimeMillis()
+            val app = context.applicationContext as ArthaApplication
+            val enabled = app.providerPreferences.enabled.value
+            val allPayments = widgetSpending(context).transactions.filter { it.isConfirmed && it.provider in enabled && it.direction == Direction.DEBIT }
+            val rows = groupedWidgetPayments(allPayments, enabled)
+            val updatedAt = System.currentTimeMillis()
 
-                for (appWidgetId in appWidgetIds) {
-                    val views = RemoteViews(context.packageName, R.layout.widget_transactions)
-                    views.setTextViewText(R.id.widget_transactions_status, widgetFreshness(updatedAt, updatedAt))
-                    views.setViewVisibility(R.id.widget_transactions_list, View.VISIBLE)
-                    views.setTextViewText(R.id.widget_transactions_empty, "No saved payments")
-                    views.setOnClickPendingIntent(R.id.widget_transactions_header, openAppIntent)
-                    views.setPendingIntentTemplate(R.id.widget_transactions_list, itemTemplatePendingIntent)
-                    views.setEmptyView(R.id.widget_transactions_list, R.id.widget_transactions_empty)
-
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        val builder = RemoteViews.RemoteCollectionItems.Builder().setViewTypeCount(2).setHasStableIds(true)
-                        for (row in rows) {
-                            builder.addItem(widgetRowId(row), buildWidgetRowView(context, row))
-                        }
-                        views.setRemoteAdapter(R.id.widget_transactions_list, builder.build())
-                        appWidgetManager.updateAppWidget(appWidgetId, views)
-                    } else {
-                        val serviceIntent = Intent(context, TransactionsWidgetService::class.java).apply {
-                            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-                            data = toUri(Intent.URI_INTENT_SCHEME).toUri()
-                        }
-                        @Suppress("DEPRECATION")
-                        views.setRemoteAdapter(R.id.widget_transactions_list, serviceIntent)
-                        appWidgetManager.updateAppWidget(appWidgetId, views)
-                    }
-                    @Suppress("DEPRECATION")
-                    appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.widget_transactions_list)
-                    WidgetUpdatedAt.save(context, appWidgetId, updatedAt)
+            for (id in appWidgetIds) {
+                val views = RemoteViews(context.packageName, R.layout.widget_transactions).apply {
+                    setTextViewText(R.id.widget_transactions_status, widgetFreshness(updatedAt, updatedAt))
+                    setViewVisibility(R.id.widget_transactions_list, View.VISIBLE)
+                    setTextViewText(R.id.widget_transactions_empty, "No saved payments")
+                    setOnClickPendingIntent(R.id.widget_transactions_header, openApp)
+                    setPendingIntentTemplate(R.id.widget_transactions_list, itemTemplate)
+                    setEmptyView(R.id.widget_transactions_list, R.id.widget_transactions_empty)
                 }
+                setPaymentList(context, views, id, rows)
+                appWidgetManager.updateAppWidget(id, views)
+                @Suppress("DEPRECATION")
+                appWidgetManager.notifyAppWidgetViewDataChanged(id, R.id.widget_transactions_list)
+                WidgetUpdatedAt.save(context, id, updatedAt)
+            }
         }
     }
 
@@ -151,6 +123,27 @@ class TransactionsWidgetProvider : AppWidgetProvider() {
             }
             context.sendBroadcast(intent)
         }
+    }
+}
+
+private fun openAppIntent(context: Context, destination: String? = null) = Intent(context, MainActivity::class.java).apply {
+    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+    if (destination != null) putExtra("extra_destination", destination)
+}
+
+/** Android 12+ ships the rows inline; older versions go through [TransactionsWidgetService]. */
+private fun setPaymentList(context: Context, views: RemoteViews, widgetId: Int, rows: List<WidgetPaymentRow>) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val builder = RemoteViews.RemoteCollectionItems.Builder().setViewTypeCount(2).setHasStableIds(true)
+        for (row in rows) builder.addItem(widgetRowId(row), buildWidgetRowView(context, row))
+        views.setRemoteAdapter(R.id.widget_transactions_list, builder.build())
+    } else {
+        val serviceIntent = Intent(context, TransactionsWidgetService::class.java).apply {
+            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
+            data = toUri(Intent.URI_INTENT_SCHEME).toUri()
+        }
+        @Suppress("DEPRECATION")
+        views.setRemoteAdapter(R.id.widget_transactions_list, serviceIntent)
     }
 }
 

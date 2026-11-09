@@ -56,6 +56,7 @@ import java.util.Locale
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.launch
 import net.wastu.artha.data.analysis.AiClient
+import net.wastu.artha.data.analysis.AiConfig
 import net.wastu.artha.data.analysis.CategoryAutomationState
 import net.wastu.artha.data.analysis.CategoryProgress
 import net.wastu.artha.data.analysis.RecategorizeScope
@@ -118,16 +119,7 @@ fun AiScreen(
         if (invalid != null) { say(invalid); return }
         testing = true
         coroutineScope.launch {
-            val message = try {
-                AiClient.testConnection(config)
-                "Connected"
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: Exception) {
-                aiConnectionFailure(failure)
-            } finally {
-                testing = false
-            }
+            val message = try { connectionTestMessage(config) } finally { testing = false }
             snackbar.showSnackbar(message)
         }
     }
@@ -168,6 +160,16 @@ fun AiScreen(
     pendingScope?.let { scope ->
         RecategorizeConfirmation(viewModel, scope, selectedMonth, onDismiss = { pendingScope = null })
     }
+}
+
+/** "Connected", or why the provider can't be used. */
+private suspend fun connectionTestMessage(config: AiConfig): String = try {
+    AiClient.testConnection(config)
+    "Connected"
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (failure: Exception) {
+    aiConnectionFailure(failure)
 }
 
 /** Reports each finished categorization run in the snackbar, with a Review shortcut when something needs a look. */

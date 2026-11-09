@@ -26,6 +26,7 @@ import net.wastu.artha.core.model.AccountingTime
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.data.analysis.BudgetAnalyzer
 import net.wastu.artha.data.analysis.CategorySpending
+import net.wastu.artha.data.analysis.MonthSpendingAnalysis
 import net.wastu.artha.ui.formatMoney
 
 class AnalysisWidgetProvider : AppWidgetProvider() {
@@ -64,15 +65,8 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
 
     private fun updateWidgets(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         val pendingResult = goAsync()
-
-        val pendingIntent = PendingIntent.getActivity(
-            context,
-            0,
-            Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra("extra_destination", "ANALYSIS")
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        val openAnalysis = PendingIntent.getActivity(
+            context, 0, openAnalysisIntent(context), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
         fun status(failed: Boolean = false) {
@@ -80,7 +74,7 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
                 val previous = WidgetUpdatedAt.read(context, id)
                 val views = RemoteViews(context.packageName, R.layout.widget_analysis)
                 views.setTextViewText(R.id.widget_status, widgetFreshness(previous, System.currentTimeMillis(), updating = !failed, failed = failed))
-                views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
+                views.setOnClickPendingIntent(R.id.widget_root, openAnalysis)
                 appWidgetManager.partiallyUpdateAppWidget(id, views)
             }
         }
@@ -91,60 +85,11 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
             val amounts = analysisWidgetAmounts(analysis)
             val updatedAt = System.currentTimeMillis()
             for (id in appWidgetIds) {
-                val options = appWidgetManager.getAppWidgetOptions(id)
-                val fontScale = context.resources.configuration.fontScale
-                val isLandscape = context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-                val width = if (isLandscape) options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 180)
-                    else options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 180)
-                val height = if (isLandscape) options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110)
-                    else options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110))
-                val detailed = showAnalysisDetails(width, height, fontScale)
-                val views = RemoteViews(context.packageName, R.layout.widget_analysis)
-                val monthTitle = month.format(DateTimeFormatter.ofPattern(if (width < 240 * fontScale) "MMM yyyy" else "MMMM yyyy", Locale.US))
-                views.setTextViewText(R.id.widget_month_title, monthTitle)
-                views.setTextViewText(R.id.widget_total_amount, amounts.total)
-                views.setTextViewText(R.id.widget_status, widgetFreshness(updatedAt, updatedAt))
-                views.setViewVisibility(R.id.widget_details, if (detailed) View.VISIBLE else View.GONE)
-                // The current month is incomplete. Compare amounts with an explicitly full prior month.
-                views.setViewVisibility(R.id.widget_delta_text, if (amounts.previous == null) View.GONE else View.VISIBLE)
-                views.setTextViewText(R.id.widget_delta_text, amounts.previous?.let { "Last month $it" }.orEmpty())
-                val categories = analysis.categories
-                views.setViewVisibility(R.id.widget_categories_list, if (categories.isEmpty()) View.GONE else View.VISIBLE)
-                views.setViewVisibility(R.id.widget_empty_text, if (categories.isEmpty() && detailed) View.VISIBLE else View.GONE)
-                views.setTextViewText(R.id.widget_empty_text, "No spending this month")
-
-                val openAnalysisTemplate = PendingIntent.getActivity(
-                    context,
-                    102,
-                    Intent(context, MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                        putExtra("extra_destination", "ANALYSIS")
-                    },
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
-                    } else {
-                        PendingIntent.FLAG_UPDATE_CURRENT
-                    },
-                )
-                views.setPendingIntentTemplate(R.id.widget_categories_list, openAnalysisTemplate)
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    val builder = RemoteViews.RemoteCollectionItems.Builder().setViewTypeCount(1).setHasStableIds(true)
-                    for ((index, cat) in categories.withIndex()) {
-                        builder.addItem(index.toLong(), buildCategoryRowView(context, cat))
-                    }
-                    views.setRemoteAdapter(R.id.widget_categories_list, builder.build())
-                } else {
-                    val serviceIntent = Intent(context, AnalysisWidgetService::class.java).apply {
-                        putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
-                        data = toUri(Intent.URI_INTENT_SCHEME).toUri()
-                    }
-                    @Suppress("DEPRECATION")
-                    views.setRemoteAdapter(R.id.widget_categories_list, serviceIntent)
-                }
+                val views = analysisViews(context, appWidgetManager.getAppWidgetOptions(id), month, analysis, amounts, updatedAt)
+                setCategoryList(context, views, id, analysis.categories)
                 @Suppress("DEPRECATION")
                 appWidgetManager.notifyAppWidgetViewDataChanged(id, R.id.widget_categories_list)
-                views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
+                views.setOnClickPendingIntent(R.id.widget_root, openAnalysis)
                 appWidgetManager.updateAppWidget(id, views)
                 WidgetUpdatedAt.save(context, id, updatedAt)
             }
@@ -162,6 +107,73 @@ class AnalysisWidgetProvider : AppWidgetProvider() {
             context.sendBroadcast(intent)
             TransactionsWidgetProvider.triggerUpdate(context)
         }
+    }
+}
+
+private fun openAnalysisIntent(context: Context) = Intent(context, MainActivity::class.java).apply {
+    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+    putExtra("extra_destination", "ANALYSIS")
+}
+
+/** The widget's size in dp, from the portrait or landscape bounds the launcher reports. */
+private fun widgetSize(context: Context, options: Bundle): Pair<Int, Int> {
+    val landscape = context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val minHeight = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110)
+    val width = options.getInt(
+        if (landscape) AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH else AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 180,
+    )
+    val height = if (landscape) minHeight else options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, minHeight)
+    return width to height
+}
+
+/** Title, total, freshness and the details section; the category list is attached by [setCategoryList]. */
+private fun analysisViews(
+    context: Context,
+    options: Bundle,
+    month: YearMonth,
+    analysis: MonthSpendingAnalysis,
+    amounts: AnalysisWidgetAmounts,
+    updatedAt: Long,
+): RemoteViews {
+    val fontScale = context.resources.configuration.fontScale
+    val (width, height) = widgetSize(context, options)
+    val detailed = showAnalysisDetails(width, height, fontScale)
+    val noCategories = analysis.categories.isEmpty()
+    return RemoteViews(context.packageName, R.layout.widget_analysis).apply {
+        setTextViewText(R.id.widget_month_title, month.format(DateTimeFormatter.ofPattern(if (width < 240 * fontScale) "MMM yyyy" else "MMMM yyyy", Locale.US)))
+        setTextViewText(R.id.widget_total_amount, amounts.total)
+        setTextViewText(R.id.widget_status, widgetFreshness(updatedAt, updatedAt))
+        setViewVisibility(R.id.widget_details, if (detailed) View.VISIBLE else View.GONE)
+        // The current month is incomplete. Compare amounts with an explicitly full prior month.
+        setViewVisibility(R.id.widget_delta_text, if (amounts.previous == null) View.GONE else View.VISIBLE)
+        setTextViewText(R.id.widget_delta_text, amounts.previous?.let { "Last month $it" }.orEmpty())
+        setViewVisibility(R.id.widget_categories_list, if (noCategories) View.GONE else View.VISIBLE)
+        setViewVisibility(R.id.widget_empty_text, if (noCategories && detailed) View.VISIBLE else View.GONE)
+        setTextViewText(R.id.widget_empty_text, "No spending this month")
+    }
+}
+
+/** Android 12+ ships the rows inline; older versions go through [AnalysisWidgetService]. */
+private fun setCategoryList(context: Context, views: RemoteViews, widgetId: Int, categories: List<CategorySpending>) {
+    val template = PendingIntent.getActivity(
+        context,
+        102,
+        openAnalysisIntent(context),
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        else PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+    views.setPendingIntentTemplate(R.id.widget_categories_list, template)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val builder = RemoteViews.RemoteCollectionItems.Builder().setViewTypeCount(1).setHasStableIds(true)
+        for ((index, category) in categories.withIndex()) builder.addItem(index.toLong(), buildCategoryRowView(context, category))
+        views.setRemoteAdapter(R.id.widget_categories_list, builder.build())
+    } else {
+        val serviceIntent = Intent(context, AnalysisWidgetService::class.java).apply {
+            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
+            data = toUri(Intent.URI_INTENT_SCHEME).toUri()
+        }
+        @Suppress("DEPRECATION")
+        views.setRemoteAdapter(R.id.widget_categories_list, serviceIntent)
     }
 }
 
