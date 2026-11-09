@@ -52,8 +52,8 @@ internal val jagoPinRule: AttentionRule = { inputs ->
             id = "jago-pin",
             scope = AttentionScope.Source(Provider.JAGO),
             title = "Background PIN not set",
-            message = "Without it, Bank Jago only syncs when you open the app on the bridge phone. " +
-                "Set the PIN and Artha Bridge fetches new transactions on its own.",
+            message = "Without it, Bank Jago only syncs when you open its app. " +
+                "Set the PIN and Artha fetches new transactions on its own.",
             action = AttentionAction.SET_JAGO_PIN,
             actionLabel = "Set PIN",
         )
@@ -66,7 +66,7 @@ internal val jagoPinWrongRule: AttentionRule = { inputs ->
             id = "jago-wrong-pin",
             scope = AttentionScope.Source(Provider.JAGO),
             title = "Incorrect background PIN",
-            message = "Artha Bridge was unable to unlock Bank Jago with this PIN. Update your 6-digit PIN so background syncing can resume.",
+            message = "Artha was unable to unlock Bank Jago with this PIN. Update your 6-digit PIN so background syncing can resume.",
             action = AttentionAction.SET_JAGO_PIN,
             actionLabel = "Update PIN",
         )

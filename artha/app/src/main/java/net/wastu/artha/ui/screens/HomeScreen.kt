@@ -104,11 +104,7 @@ fun HomeScreen(
     val context = LocalContext.current
     val saveableStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     var transactionFilters by rememberSaveable(stateSaver = TransactionFiltersSaver) { mutableStateOf(TransactionFilters()) }
-    var destination by rememberSaveable(stateSaver = Destination.Saver) {
-        val unpaired = !net.wastu.artha.BuildConfig.DEMO &&
-            (context.applicationContext as? net.wastu.artha.ArthaApplication)?.bridgePreferences?.hasPairing() == false
-        mutableStateOf(if (unpaired) Destination.SETTINGS else Destination.TRANSACTIONS)
-    }
+    var destination by rememberSaveable(stateSaver = Destination.Saver) { mutableStateOf(Destination.TRANSACTIONS) }
     val pages = rememberSaveable(saver = PageStack.Saver) { PageStack() }
 
     var showSearch by rememberSaveable { mutableStateOf(false) }
@@ -145,24 +141,8 @@ fun HomeScreen(
             viewModel?.setTargetDestination(null)
         }
     }
-    // Artha is locked to Settings (Artha Bridge header) until a bridge is paired.
-    val bridgePrefs = (context.applicationContext as? net.wastu.artha.ArthaApplication)?.bridgePreferences
-    val bridgePaired by bridgePrefs?.paired?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(true) }
-    val bridgeReady = net.wastu.artha.BuildConfig.DEMO || bridgePaired
-    androidx.compose.runtime.LaunchedEffect(bridgeReady, destination) {
-        if (!bridgeReady) {
-            destination = Destination.SETTINGS
-            showSearch = false
-            showFilter = false
-            selectedKey = null
-            selectedFallback = null
-            while (pages.top != null && pages.top != Page.BRIDGE) pages.back()
-        }
-    }
-    fun destinationEnabled(item: Destination) = bridgeReady || item == Destination.SETTINGS
     BackHandler(
-        enabled = bridgeReady &&
-            destination != Destination.TRANSACTIONS &&
+        enabled = destination != Destination.TRANSACTIONS &&
             selectedKey == null &&
             pages.top == null &&
             !showSearch &&
@@ -232,7 +212,6 @@ fun HomeScreen(
                         Destination.entries.forEach { item ->
                             ShortNavigationBarItem(
                                 selected = destination == item,
-                                enabled = destinationEnabled(item),
                                 onClick = { destination = item },
                                 icon = { Icon(item.icon, contentDescription = null) },
                                 label = { Text(navigationLabel(item), maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -249,7 +228,6 @@ fun HomeScreen(
                             NavigationRailItem(
                                 modifier = Modifier.fillMaxWidth(),
                                 selected = destination == item,
-                                enabled = destinationEnabled(item),
                                 onClick = { destination = item },
                                 icon = { Icon(item.icon, contentDescription = null) },
                                 label = { Text(navigationLabel(item), maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -304,7 +282,7 @@ fun HomeScreen(
                                     )
                                 }
                             }
-                            Destination.SETTINGS -> SettingsScreen(viewModel, onOpen = pages::open, bridgeReady = bridgeReady)
+                            Destination.SETTINGS -> SettingsScreen(viewModel, onOpen = pages::open)
                         }
                     }
                     }
@@ -343,7 +321,6 @@ fun HomeScreen(
                         month = viewModel.selectedMonth.collectAsStateWithLifecycle().value,
                         onOpenTransaction = { selectedKey = it.key; selectedFallback = it },
                     )
-                    Page.BRIDGE -> BridgeScreen(viewModel, onBack = pages::back)
                     Page.UPDATES -> UpdatesScreen(onBack = pages::back)
                 }
             }

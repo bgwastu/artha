@@ -450,24 +450,17 @@ private fun SourcePageContent(
     // SettingsHeading "History"
     SettingsHeading("History")
 
-    val bridgeWindow = diagnostic?.lastImportWindow?.takeIf { diagnostic.fromBridge }
-    val expenseCount = remember(allTransactions, provider, providerCounts, bridgeWindow) {
-        if (bridgeWindow != null) {
-            bridgeWindow.paymentCount
-        } else if (allTransactions.isNotEmpty()) {
-            countExpenses(allTransactions, provider)
-        } else {
-            providerCounts[provider] ?: 0
-        }
+    val expenseCount = remember(allTransactions, provider, providerCounts) {
+        if (allTransactions.isNotEmpty()) countExpenses(allTransactions, provider) else providerCounts[provider] ?: 0
     }
     ListItem(
-        headlineContent = { Text(if (bridgeWindow != null) "Payments" else "Expenses") },
+        headlineContent = { Text("Expenses") },
         trailingContent = { Text(expenseCount.toString()) },
     )
 
-    val coversText = remember(coverage, bridgeWindow) {
-        val early = bridgeWindow?.earliestMillis?.let(Instant::ofEpochMilli) ?: coverage?.earliest
-        val late = bridgeWindow?.latestMillis?.let(Instant::ofEpochMilli) ?: coverage?.latest
+    val coversText = remember(coverage) {
+        val early = coverage?.earliest
+        val late = coverage?.latest
         when {
             early != null && late != null -> {
                 val e = formatSavedDay(early)

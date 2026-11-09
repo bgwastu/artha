@@ -122,7 +122,6 @@ import androidx.compose.material.icons.filled.Widgets
 internal fun SettingsScreen(
     viewModel: ArthaViewModel?,
     onOpen: (Page) -> Unit,
-    bridgeReady: Boolean = true,
 ) {
     val snapshot by viewModel?.analysisSnapshot?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
     val tunnelState by net.wastu.artha.api.service.ApiServerController.tunnelState.collectAsStateWithLifecycle()
@@ -147,30 +146,25 @@ internal fun SettingsScreen(
         is net.wastu.artha.core.update.UpdateState.UpToDate -> "Up to date"
         else -> updater?.installedVersionName?.ifBlank { null }?.let { "v$it" } ?: "Check for updates"
     }
-    val locked = !bridgeReady
-    // Nothing to fix while Artha is locked; pairing comes first.
-    val attention = rememberAttentionItems().takeUnless { locked }.orEmpty()
+    val attention = rememberAttentionItems()
     val sourcesAttention = attention.filter { it.scope is net.wastu.artha.data.attention.AttentionScope.Source }
     LazyColumn(Modifier.widthIn(max = 600.dp).fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
-        item { BridgeHeader(paired = bridgeReady) { onOpen(Page.BRIDGE) } }
-        item { Spacer(Modifier.height(8.dp)) }
         item {
             SettingsLink(
                 "Sources",
                 "Choose which apps to import",
                 Icons.Default.AccountBalanceWallet,
-                enabled = !locked,
                 attention = sourcesAttention,
                 segment = Segment.First,
             ) { onOpen(Page.SOURCES) }
         }
-        item { SettingsLink("Categories", "Expense and income categories", Icons.Default.Category, enabled = !locked, segment = Segment.Middle) { onOpen(Page.CATEGORIES) } }
+        item { SettingsLink("Categories", "Expense and income categories", Icons.Default.Category, segment = Segment.Middle) { onOpen(Page.CATEGORIES) } }
         if (viewModel != null) {
-            item { SettingsLink("AI categorization", aiSummary, Icons.Default.SettingsSuggest, enabled = !locked, segment = Segment.Last) { onOpen(Page.AI) } }
+            item { SettingsLink("AI categorization", aiSummary, Icons.Default.SettingsSuggest, segment = Segment.Last) { onOpen(Page.AI) } }
             item { Spacer(Modifier.height(16.dp)) }
-            item { SettingsLink("Remote access", remoteSummary, Icons.Default.Link, enabled = !locked, segment = Segment.First) { onOpen(Page.REMOTE) } }
-            item { SettingsLink("Export and import", "Back up or restore your data", Icons.Default.FileDownload, enabled = !locked, segment = Segment.Middle) { onOpen(Page.DATA) } }
-            item { SettingsLink("Updates", updateSummary, Icons.Default.SystemUpdate, enabled = !locked, segment = Segment.Last) { onOpen(Page.UPDATES) } }
+            item { SettingsLink("Remote access", remoteSummary, Icons.Default.Link, segment = Segment.First) { onOpen(Page.REMOTE) } }
+            item { SettingsLink("Export and import", "Back up or restore your data", Icons.Default.FileDownload, segment = Segment.Middle) { onOpen(Page.DATA) } }
+            item { SettingsLink("Updates", updateSummary, Icons.Default.SystemUpdate, segment = Segment.Last) { onOpen(Page.UPDATES) } }
             item { Spacer(Modifier.height(16.dp)) }
         }
         item {
@@ -178,77 +172,8 @@ internal fun SettingsScreen(
                 "Widgets",
                 "Add from your home screen",
                 Icons.Default.Widgets,
-                enabled = !locked,
                 segment = Segment.Single,
                 onClick = null,
-            )
-        }
-    }
-}
-
-/** Status card pinned to the top of Settings. Artha is unusable until the bridge is paired. */
-@Composable
-private fun BridgeHeader(paired: Boolean, onClick: () -> Unit) {
-    val colors = MaterialTheme.colorScheme
-    val context = LocalContext.current
-    val bridgePrefs = (context.applicationContext as? net.wastu.artha.ArthaApplication)?.bridgePreferences
-    val app = context.applicationContext as? net.wastu.artha.ArthaApplication
-    val isSyncing by app?.bridgeCoordinator?.isSyncing?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
-    val lastConnected by bridgePrefs?.bridgeLastSeen?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
-    val bridgeDeviceName by bridgePrefs?.bridgeDeviceName?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
-    val title = (bridgeDeviceName?.takeIf { paired }) ?: "Artha Bridge"
-    val status = when {
-        !paired -> "Not connected · pair to start using Artha"
-        isSyncing -> "Syncing with bridge..."
-        else -> bridgeLastConnectedLabel(lastConnected)
-    }
-    Surface(
-        onClick = onClick,
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
-        color = if (paired) colors.surfaceContainer else colors.errorContainer.copy(alpha = 0.45f),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-    ) {
-        Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Surface(
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
-                color = if (paired) colors.primaryContainer else colors.error.copy(alpha = 0.18f),
-                modifier = Modifier.size(44.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    if (isSyncing) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(22.dp),
-                            strokeWidth = 2.dp,
-                            color = colors.onPrimaryContainer,
-                        )
-                    } else {
-                        Icon(
-                            Icons.Default.Devices,
-                            contentDescription = null,
-                            tint = if (paired) colors.onPrimaryContainer else colors.error,
-                            modifier = Modifier.size(22.dp),
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                    color = colors.onSurface,
-                )
-                Text(
-                    status,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (paired) colors.onSurfaceVariant else colors.error,
-                )
-            }
-            Icon(
-                Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = if (paired) colors.onSurfaceVariant else colors.onErrorContainer,
             )
         }
     }

@@ -6,7 +6,7 @@ import org.json.JSONObject
 data class UpdateAsset(val url: String, val sha256: String, val size: Long)
 
 /**
- * A published release of Artha and Artha Bridge. CI attaches `update.json` to every
+ * A published release of Artha. CI attaches `update.json` to every
  * GitHub release; both apps read it from the latest release to learn what to install.
  */
 data class UpdateRelease(

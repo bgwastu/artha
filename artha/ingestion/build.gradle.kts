@@ -3,8 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
 }
 
-// Reads Jago, GoPay, Shopee and Grab on a rooted phone. Shared by Artha and Artha Bridge,
-// so the bridge phone imports by itself and Artha only needs to run on the main phone.
+// Reads Jago, GoPay, Shopee and Grab on a rooted phone.
 android {
     namespace = "net.wastu.artha.ingestion"
     compileSdk = 36

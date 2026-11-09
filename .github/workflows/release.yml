@@ -7,7 +7,6 @@ on:
       - 'artha/app/src/release/**'
       - 'artha/app/*.gradle*'
       - 'artha/app/proguard*.pro'
-      - 'artha/bridge/**'
       - 'artha/ingestion/**'
       - 'artha/*.gradle*'
       - 'artha/gradle.properties'
@@ -63,10 +62,7 @@ jobs:
           import os, re, subprocess
           signer = os.path.join(os.environ['ANDROID_HOME'], 'build-tools', '36.0.0', 'apksigner')
           expected = re.sub(r'[:\s]', '', os.environ['ARTHA_ANDROID_CERTIFICATE_SHA256']).lower()
-          apks = [
-              'artha/app/build/outputs/apk/release/app-release.apk',
-              'artha/bridge/build/outputs/apk/release/bridge-release.apk'
-          ]
+          apks = ['artha/app/build/outputs/apk/release/app-release.apk']
           for apk in apks:
               output = subprocess.check_output([signer, 'verify', '--print-certs', apk], text=True)
               actual = re.search(r'certificate SHA-256 digest: (\w+)', output).group(1).lower()
@@ -80,7 +76,6 @@ jobs:
         run: |
           mkdir -p build/release
           cp artha/app/build/outputs/apk/release/app-release.apk "build/release/Artha-$VERSION_NAME.apk"
-          cp artha/bridge/build/outputs/apk/release/bridge-release.apk "build/release/Artha-Bridge-$VERSION_NAME.apk"
           python3 - <<'PY'
           import hashlib, json, os
 
@@ -98,8 +93,7 @@ jobs:
               "versionCode": version_code,
               "versionName": version_name,
               "apps": {
-                  "net.wastu.artha": get_info(f"build/release/Artha-{version_name}.apk", f"Artha-{version_name}.apk"),
-                  "net.wastu.artha.bridge": get_info(f"build/release/Artha-Bridge-{version_name}.apk", f"Artha-Bridge-{version_name}.apk")
+                  "net.wastu.artha": get_info(f"build/release/Artha-{version_name}.apk", f"Artha-{version_name}.apk")
               }
           }
 

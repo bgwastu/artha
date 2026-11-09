@@ -301,11 +301,12 @@ object JagoCachedHistory {
 class JagoProviderAdapter(
     private val reader: JagoTransactionReader,
     private val screenSync: net.wastu.artha.data.sync.JagoScreenSync? = null,
+    private val onScreenSync: (net.wastu.artha.data.sync.JagoScreenSync.Result) -> Unit = {},
 ) : ProviderAdapter {
     override val coverageHint = Provider.JAGO.historyCoverageHint
     override val provider = Provider.JAGO
     override suspend fun ingest(): List<UnifiedTransaction> {
-        screenSync?.run()
+        screenSync?.run()?.let(onScreenSync)
         reader.invalidate()
         return reader.transactions()
     }

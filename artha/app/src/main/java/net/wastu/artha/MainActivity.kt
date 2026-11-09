@@ -15,7 +15,6 @@ import androidx.compose.runtime.setValue
 import net.wastu.artha.ui.ArthaApp
 import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.theme.ArthaTheme
-import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private var viewModelInstance: ArthaViewModel? = null
@@ -30,7 +29,11 @@ class MainActivity : ComponentActivity() {
         if (BuildConfig.DEMO) keepAnimationsOn()
         val initialDest = intent?.getStringExtra("extra_destination")
         val application = application as ArthaApplication
-        handlePairingIntent(intent)
+        // The view model has already verified root; each import just refreshes the widgets afterwards.
+        suspend fun <T> synced(block: suspend () -> T): T = block().also {
+            net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(application)
+            net.wastu.artha.ui.widget.TransactionsWidgetProvider.triggerUpdate(application)
+        }
         setContent {
             ArthaTheme {
                 val model: ArthaViewModel = viewModel(factory = viewModelFactory {
@@ -38,51 +41,9 @@ class MainActivity : ComponentActivity() {
                         ArthaViewModel(
                             application.rootAccess,
                             { application.ledger },
-                            ingest = {
-                                if (application.bridgePreferences.hasPairing()) {
-                                    if (!application.bridgeCoordinator.sync()) throw net.wastu.artha.data.sync.bridge.BridgeNoAnswerException()
-                                    net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(application)
-                                    net.wastu.artha.ui.widget.TransactionsWidgetProvider.triggerUpdate(application)
-                                    emptyMap()
-                                } else if (application.rootAccess.verify()) {
-                                    application.ingestion.ingestAll().also {
-                                        net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(application)
-                                        net.wastu.artha.ui.widget.TransactionsWidgetProvider.triggerUpdate(application)
-                                    }
-                                } else {
-                                    emptyMap()
-                                }
-                            },
-                            ingestStale = {
-                                if (application.bridgePreferences.hasPairing()) {
-                                    if (!application.bridgeCoordinator.sync()) throw net.wastu.artha.data.sync.bridge.BridgeNoAnswerException()
-                                    net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(application)
-                                    net.wastu.artha.ui.widget.TransactionsWidgetProvider.triggerUpdate(application)
-                                    emptyMap()
-                                } else if (application.rootAccess.verify()) {
-                                    application.ingestion.ingestAll(force = false).also {
-                                        net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(application)
-                                        net.wastu.artha.ui.widget.TransactionsWidgetProvider.triggerUpdate(application)
-                                    }
-                                } else {
-                                    emptyMap()
-                                }
-                            },
-                            syncSingle = {
-                                if (application.bridgePreferences.hasPairing()) {
-                                    if (!application.bridgeCoordinator.sync()) throw net.wastu.artha.data.sync.bridge.BridgeNoAnswerException()
-                                    net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(application)
-                                    net.wastu.artha.ui.widget.TransactionsWidgetProvider.triggerUpdate(application)
-                                    "Synced with Artha Bridge"
-                                } else if (application.rootAccess.verify()) {
-                                    application.ingestion.syncProvider(it).also {
-                                        net.wastu.artha.ui.widget.AnalysisWidgetProvider.triggerUpdate(application)
-                                        net.wastu.artha.ui.widget.TransactionsWidgetProvider.triggerUpdate(application)
-                                    }
-                                } else {
-                                    "Connect to Artha Bridge in Settings to sync"
-                                }
-                            },
+                            ingest = { synced { application.ingestion.ingestAll() } },
+                            ingestStale = { synced { application.ingestion.ingestAll(force = false) } },
+                            syncSingle = { provider -> synced { application.ingestion.syncProvider(provider) } },
                             categorize = if (BuildConfig.DEMO) net.wastu.artha.data.demo.DemoAi::categorize else null,
                             preferences = application.providerPreferences,
                             syncingProvider = application.ingestion.syncingProvider,
@@ -90,27 +51,15 @@ class MainActivity : ComponentActivity() {
                             spendingState = application.spending.state,
                             retrySpending = application.spending::retry,
                             gojekFlashRefresh = application::refreshGojekNow,
-                            hasBridgePairing = { application.bridgePreferences.hasPairing() },
                         ).also {
                             if (initialDest != null) it.setTargetDestination(initialDest)
                         }
                     }
                 })
                 viewModelInstance = model
-                val prefs = application.bridgePreferences
-                // Decided once per launch: pairing mid-wizard must not tear the wizard down
-                // before it has shown whether the bridge answers.
-                var showWizard by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(!prefs.hasPairing()) }
-
-                if (showWizard) {
-                    net.wastu.artha.ui.wizard.OnboardingWizard(
-                        onFinished = { showWizard = false }
-                    )
-                } else {
-                    androidx.compose.foundation.layout.Box {
-                        ArthaApp(model)
-                        if (BuildConfig.DEMO) net.wastu.artha.ui.DemoRibbon()
-                    }
+                androidx.compose.foundation.layout.Box {
+                    ArthaApp(model)
+                    if (BuildConfig.DEMO) net.wastu.artha.ui.DemoRibbon()
                 }
             }
         }
@@ -126,21 +75,9 @@ class MainActivity : ComponentActivity() {
             view.createLifecycleAwareWindowRecomposer(fullSpeed)
         }
     }
-    private fun handlePairingIntent(intent: Intent?) {
-        val uri = intent?.data ?: return
-        if (uri.scheme == "artha" && uri.host == "pair") {
-            val app = application as? ArthaApplication ?: return
-            if (app.bridgePreferences.pairWith(uri.toString())) {
-                app.applicationScope.launch { app.bridgeCoordinator.sync() }
-                android.widget.Toast.makeText(this, "Paired with Artha Bridge", android.widget.Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handlePairingIntent(intent)
         intent.getStringExtra("extra_destination")?.let {
             viewModelInstance?.setTargetDestination(it)
         }

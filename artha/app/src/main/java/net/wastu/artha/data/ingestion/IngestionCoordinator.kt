@@ -84,9 +84,20 @@ class IngestionCoordinator(
     } catch (cancelled: CancellationException) { throw cancelled }
     catch (e: Exception) {
         val message = e.message?.takeIf { it.isNotBlank() } ?: "Unable to read ${provider.displayName} data"
-        val status = net.wastu.artha.core.bridge.BridgeSourceStatus.statusFor(e)
+        val status = statusFor(e)
         preferences?.recordSyncError(provider, message, status,
             coverageHint = adaptersByProvider[provider]?.coverageHint)
         "Unavailable: $message"
+    }
+
+    /** The account state a read failure points to. */
+    private fun statusFor(error: Exception): net.wastu.artha.data.providers.AccountStatus {
+        (error as? ProviderReadException)?.let { return it.status }
+        val lower = error.message.orEmpty().lowercase()
+        return when {
+            "login" in lower || "cookie" in lower || "session" in lower -> net.wastu.artha.data.providers.AccountStatus.NEEDS_LOGIN
+            "not installed" in lower -> net.wastu.artha.data.providers.AccountStatus.APP_NOT_INSTALLED
+            else -> net.wastu.artha.data.providers.AccountStatus.ERROR
+        }
     }
 }

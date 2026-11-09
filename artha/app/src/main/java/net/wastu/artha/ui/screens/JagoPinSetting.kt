@@ -51,8 +51,8 @@ import net.wastu.artha.ArthaApplication
 import net.wastu.artha.data.providers.JagoPinStatus
 
 /**
- * Bank Jago's background PIN. It is stored here and sent to Artha Bridge with every
- * sync, so saving it also asks the bridge to sync and verify. The dialog state is hoisted
+ * Bank Jago's background PIN. Artha types it into Bank Jago on a hidden display during
+ * syncs, and the result of the last attempt shows here. The dialog state is hoisted
  * so the page's attention card can open it too.
  */
 @Composable
@@ -63,7 +63,7 @@ internal fun JagoPinSetting(dialogOpen: Boolean, onDialogOpenChange: (Boolean) -
 
     val colors = MaterialTheme.colorScheme
 
-    SettingsHeading("Artha Bridge")
+    SettingsHeading("Background sync")
 
     val isWrong = pinSet && pinCheck.status == JagoPinStatus.WRONG
     val isVerified = pinSet && pinCheck.status == JagoPinStatus.VERIFIED
@@ -73,7 +73,7 @@ internal fun JagoPinSetting(dialogOpen: Boolean, onDialogOpenChange: (Boolean) -
         isWrong -> "Incorrect PIN · Bank Jago rejected it. Tap to fix."
         isVerified -> "Verified · Bank Jago syncs in background"
         pinCheck.detail != null -> pinCheck.detail!!
-        else -> "Set · waiting for bridge verification"
+        else -> "Set · checked on the next sync"
     }
 
     val iconColor = when {
@@ -155,17 +155,6 @@ internal fun JagoPinSetting(dialogOpen: Boolean, onDialogOpenChange: (Boolean) -
     }
 }
 
-/** Where the dialog is: typing, waiting on the bridge, or showing what Jago said. */
-private sealed interface PinPhase {
-    data object Editing : PinPhase
-    data object Verifying : PinPhase
-    data class Done(val verified: Boolean, val message: String) : PinPhase
-}
-
-/**
- * Saving sends the PIN to Artha Bridge, which opens Bank Jago and types it. The dialog
- * waits for that walk: a wrong PIN sends the user back to the field with Jago's verdict.
- */
 @Composable
 private fun JagoPinDialog(
     app: ArthaApplication,
@@ -174,124 +163,53 @@ private fun JagoPinDialog(
     onDismiss: () -> Unit,
 ) {
     var pin by remember { mutableStateOf(initial) }
-    var phase by remember { mutableStateOf<PinPhase>(PinPhase.Editing) }
     var rejected by remember { mutableStateOf(isWrongPin) }
-    val scope = rememberCoroutineScope()
     val colors = MaterialTheme.colorScheme
-    val bridgeName = remember { app.bridgePreferences.getBridgeDeviceName() ?: "the bridge phone" }
 
     fun save() {
-        val newPin = pin.ifBlank { null }
-        app.providerPreferences.setJagoPin(newPin)
-        if (newPin == null) {
-            app.applicationScope.launch { runCatching { app.bridgeCoordinator.sync() } }
-            onDismiss()
-            return
-        }
-        phase = PinPhase.Verifying
-        // The sync outlives the dialog, so closing it early still delivers the PIN.
-        val request = app.applicationScope.async { runCatching { app.bridgeCoordinator.sync() }.getOrDefault(false) }
-        scope.launch {
-            val answered = kotlinx.coroutines.withTimeoutOrNull(20_000L) {
-                request.await()
-            } ?: false
-            val check = app.providerPreferences.jagoPinCheck.value
-            phase = when {
-                check.status == JagoPinStatus.WRONG -> {
-                    rejected = true
-                    pin = ""
-                    PinPhase.Editing
-                }
-                check.status == JagoPinStatus.VERIFIED ->
-                    PinPhase.Done(true, "Bank Jago accepted the PIN. New transactions now sync in the background.")
-                check.status == JagoPinStatus.UNVERIFIED ->
-                    PinPhase.Done(false, "PIN saved, but it could not be checked: ${check.detail ?: "Bank Jago did not open"}.")
-                !answered ->
-                    PinPhase.Done(true, "PIN saved and sent to $bridgeName. It will verify on the next background sync.")
-                else ->
-                    PinPhase.Done(true, "PIN saved. It gets checked the next time Artha Bridge opens Bank Jago.")
-            }
-        }
+        app.providerPreferences.setJagoPin(pin.ifBlank { null })
+        // A new PIN is checked by the very next Bank Jago sync.
+        if (pin.isNotBlank()) app.syncInBackground(net.wastu.artha.core.model.Provider.JAGO, force = true)
+        onDismiss()
     }
 
     AlertDialog(
-        onDismissRequest = { if (phase != PinPhase.Verifying) onDismiss() },
-        icon = {
-            when (val current = phase) {
-                PinPhase.Editing -> Icon(Icons.Default.Lock, contentDescription = null)
-                PinPhase.Verifying -> LoadingIndicator(Modifier.size(40.dp))
-                is PinPhase.Done -> Icon(
-                    if (current.verified) Icons.Default.CheckCircle else Icons.Default.Schedule,
-                    contentDescription = null,
-                    tint = if (current.verified) colors.primary else colors.onSurfaceVariant,
-                )
-            }
-        },
-        title = {
-            Text(
-                when (val current = phase) {
-                    PinPhase.Editing -> "Bank Jago PIN"
-                    PinPhase.Verifying -> "Checking the PIN"
-                    is PinPhase.Done -> if (current.verified) "PIN verified" else "PIN saved"
-                },
-            )
-        },
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Lock, contentDescription = null) },
+        title = { Text("Bank Jago PIN") },
         text = {
-            when (val current = phase) {
-                PinPhase.Editing -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text(
-                        "Artha Bridge types this PIN into Bank Jago on $bridgeName to fetch new transactions. " +
-                            "Leave it empty to turn background sync off.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.onSurfaceVariant,
-                    )
-                    OutlinedTextField(
-                        value = pin,
-                        onValueChange = {
-                            if (it.length <= 6 && it.all(Char::isDigit)) {
-                                pin = it
-                                rejected = false
-                            }
-                        },
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                        singleLine = true,
-                        label = { Text("6-digit PIN") },
-                        isError = rejected,
-                        supportingText = if (rejected) {
-                            { Text("Bank Jago rejected this PIN. Check it and try again.") }
-                        } else null,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                PinPhase.Verifying -> Text(
-                    "Artha Bridge is opening Bank Jago on $bridgeName and typing the PIN. This can take a minute.",
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    "Artha types this PIN into Bank Jago on a hidden display to fetch new transactions. " +
+                        "Leave it empty to turn background sync off.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.onSurfaceVariant,
                 )
-                is PinPhase.Done -> Text(
-                    current.message,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.onSurfaceVariant,
+                OutlinedTextField(
+                    value = pin,
+                    onValueChange = {
+                        if (it.length <= 6 && it.all(Char::isDigit)) {
+                            pin = it
+                            rejected = false
+                        }
+                    },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    singleLine = true,
+                    label = { Text("6-digit PIN") },
+                    isError = rejected,
+                    supportingText = if (rejected) {
+                        { Text("Bank Jago rejected this PIN. Check it and try again.") }
+                    } else null,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         },
         confirmButton = {
-            when (phase) {
-                PinPhase.Editing -> Button(
-                    onClick = ::save,
-                    enabled = pin.isEmpty() || pin.length == 6,
-                ) { Text(if (pin.isEmpty()) "Turn off" else "Save and verify") }
-                PinPhase.Verifying -> Unit
-                is PinPhase.Done -> TextButton(onClick = onDismiss) { Text("Done") }
+            Button(onClick = ::save, enabled = pin.isEmpty() || pin.length == 6) {
+                Text(if (pin.isEmpty()) "Turn off" else "Save and verify")
             }
         },
-        dismissButton = {
-            when (phase) {
-                PinPhase.Editing -> TextButton(onClick = onDismiss) { Text("Cancel") }
-                PinPhase.Verifying -> TextButton(onClick = onDismiss) { Text("Close") }
-                is PinPhase.Done -> Unit
-            }
-        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

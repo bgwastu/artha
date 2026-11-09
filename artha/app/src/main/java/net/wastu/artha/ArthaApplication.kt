@@ -15,7 +15,9 @@ import net.wastu.artha.core.model.Provider
 import net.wastu.artha.data.analysis.SpendingState
 import net.wastu.artha.data.sync.BackgroundSyncScheduler
 import net.wastu.artha.data.sync.GojekFlashController
+import net.wastu.artha.data.providers.JagoPinStatus
 import net.wastu.artha.data.sync.GojekScreenSync
+import net.wastu.artha.data.sync.JagoScreenSync
 import net.wastu.artha.ui.widget.AnalysisWidgetProvider
 import net.wastu.artha.ui.widget.TransactionsWidgetProvider
 
@@ -34,7 +36,7 @@ class ArthaApplication : Application() {
         val files = net.wastu.artha.data.ingestion.RootFileReader(applicationContext)
         val reader = net.wastu.artha.data.ingestion.JagoTransactionReader(files)
         val isInteractive = { getSystemService(PowerManager::class.java)?.isInteractive == true }
-        val jagoSync = net.wastu.artha.data.sync.JagoScreenSync(
+        val jagoSync = JagoScreenSync(
             files,
             isInteractive,
             { false },
@@ -42,7 +44,17 @@ class ArthaApplication : Application() {
         )
         val sessionWake = net.wastu.artha.data.sync.AppSessionWakeSync(files, isInteractive, { false })
         val adapters = listOf(
-            net.wastu.artha.data.ingestion.JagoProviderAdapter(reader, jagoSync),
+            net.wastu.artha.data.ingestion.JagoProviderAdapter(reader, jagoSync) { result ->
+                when (result) {
+                    JagoScreenSync.Result.SYNCED, JagoScreenSync.Result.QUIET ->
+                        providerPreferences.recordJagoPinCheck(JagoPinStatus.VERIFIED, "Bank Jago accepted the PIN")
+                    JagoScreenSync.Result.WRONG_PIN ->
+                        providerPreferences.recordJagoPinCheck(JagoPinStatus.WRONG, "Bank Jago rejected the PIN")
+                    JagoScreenSync.Result.UNLOCK_FAILED ->
+                        providerPreferences.recordJagoPinCheck(JagoPinStatus.UNVERIFIED, "Could not reach Bank Jago's PIN screen")
+                    else -> Unit
+                }
+            },
             net.wastu.artha.data.ingestion.ShopeeProviderAdapter(files, sessionWake),
             net.wastu.artha.data.ingestion.GojekProviderAdapter(files),
             net.wastu.artha.data.ingestion.GrabProviderAdapter(files, sessionWake),
@@ -58,24 +70,6 @@ class ArthaApplication : Application() {
             { ledger.loadTransactions() },
         )
     }
-    val bridgePreferences by lazy { net.wastu.artha.data.sync.bridge.BridgePreferences(applicationContext) }
-    val bridgeCoordinator by lazy {
-        net.wastu.artha.data.sync.bridge.BridgeSyncCoordinator(
-            bridgePreferences = bridgePreferences,
-            providerPreferences = providerPreferences,
-            ingestion = ingestion,
-            loadLedgerTransactions = { ledger.loadTransactions() },
-            jagoScreenSync = null,
-            sessionWake = null,
-            gojekFlash = gojekFlash,
-            onNewTransactions = { transactions ->
-                ledger.appendProviderImport(transactions)
-                AnalysisWidgetProvider.triggerUpdate(this@ArthaApplication)
-                TransactionsWidgetProvider.triggerUpdate(this@ArthaApplication)
-            },
-        )
-    }
-
     val updater by lazy {
         net.wastu.artha.core.update.AppUpdater(
             this,
@@ -89,35 +83,18 @@ class ArthaApplication : Application() {
     fun syncInBackground(provider: Provider? = null, force: Boolean = false): kotlinx.coroutines.Job =
         applicationScope.launch {
             if (BuildConfig.DEMO) return@launch
-            var readsLocally = false
             try {
-                if (rootAccess.verify()) {
-                    readsLocally = true
-                    val result = if (provider != null) {
-                        mapOf(provider to ingestion.syncProvider(provider))
-                    } else {
-                        ingestion.ingestAll(force = force)
-                    }
-                    if (bridgePreferences.hasPairing()) {
-                        bridgeCoordinator.sync()
-                    }
-                } else if (bridgePreferences.hasPairing()) {
-                    bridgeCoordinator.sync()
-                } else {
-                    return@launch
-                }
+                if (!rootAccess.verify()) return@launch
+                if (provider != null) ingestion.syncProvider(provider) else ingestion.ingestAll(force = force)
                 AnalysisWidgetProvider.triggerUpdate(this@ArthaApplication)
                 TransactionsWidgetProvider.triggerUpdate(this@ArthaApplication)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 val message = e.message?.takeIf { it.isNotBlank() } ?: "Sync failed"
-                // A paired phone shows the bridge's source state; a relay hiccup here says nothing about the sources.
-                if (readsLocally || !bridgePreferences.hasPairing()) {
-                    for (p in provider?.let { listOf(it) } ?: providerPreferences.importEnabled.value) {
-                        providerPreferences.recordSyncError(p, message)
-                    }
-                } else android.util.Log.w("ArthaBridgeSync", "Bridge sync failed: ${e.javaClass.simpleName}")
+                for (p in provider?.let { listOf(it) } ?: providerPreferences.importEnabled.value) {
+                    providerPreferences.recordSyncError(p, message)
+                }
             }
         }
 

@@ -4,7 +4,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.saveable.listSaver
 
 /** Full-screen pages opened above the three tabs. */
-internal enum class Page { SOURCES, CATEGORIES, AI, REMOTE, DATA, REVIEW, BRIDGE, UPDATES }
+internal enum class Page { SOURCES, CATEGORIES, AI, REMOTE, DATA, REVIEW, UPDATES }
 
 /** Saveable back stack for [Page]s; empty means the tab content is showing. */
 internal class PageStack(initial: List<Page> = emptyList()) {
