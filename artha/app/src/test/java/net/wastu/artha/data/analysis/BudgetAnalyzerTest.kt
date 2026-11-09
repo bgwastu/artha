@@ -9,6 +9,7 @@ import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BudgetAnalyzerTest {
@@ -111,5 +112,15 @@ class BudgetAnalyzerTest {
         assertEquals(10_008_000_00L, income.totalMinor)
         assertEquals(listOf<String?>("Salary", null), income.categories.map { it.category })
         assertEquals(8_000_00L, income.categories.last().amountMinor)
+    }
+
+    @Test
+    fun uncategorizedSpendingIsNamedInTheLocalSummaryAndWidgetLabel() {
+        val analysis = BudgetAnalyzer.analyzeMonth(YearMonth.of(2026, 10), listOf(tx("plain", Direction.DEBIT, 50_000_00L)))
+        val largest = analysis.categories.single()
+        assertEquals(null, largest.category)
+        assertEquals("Uncategorized", largest.label)
+        assertTrue(analysis.localSummary.contains("Largest category: Uncategorized,"))
+        assertFalse(analysis.localSummary.contains("null"))
     }
 }

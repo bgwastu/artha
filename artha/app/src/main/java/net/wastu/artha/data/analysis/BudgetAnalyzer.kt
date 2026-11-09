@@ -67,7 +67,7 @@ object BudgetAnalyzer {
         if (analysis.totalMinor == 0L) return if (analysis.type == TransactionType.INCOME) "- No income recorded for this month." else "- No spending recorded for this month."
         return buildString {
             append("- ${if (analysis.type == TransactionType.INCOME) "Income" else "Spending"}: ${rupiah(analysis.totalMinor)}.\n")
-            analysis.categories.firstOrNull()?.let { append("- Largest category: ${it.category}, ${rupiah(it.amountMinor)} (${it.sharePercent.toInt()}%).\n") }
+            analysis.categories.firstOrNull()?.let { append("- Largest category: ${it.label}, ${rupiah(it.amountMinor)} (${it.sharePercent.toInt()}%).\n") }
             if (analysis.previousMonthTotalMinor > 0) append("- Previous recorded month: ${rupiah(analysis.previousMonthTotalMinor)}.\n")
             val largest = analysis.categories.flatMap { it.transactions }.maxByOrNull { it.money.amountMinor }
             largest?.let { append("- Largest payment: ${it.description}, ${rupiah(it.money.amountMinor)}.") }

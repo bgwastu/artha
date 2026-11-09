@@ -27,6 +27,7 @@ import net.wastu.artha.core.model.Money
 import net.wastu.artha.data.analysis.BudgetAnalyzer
 import net.wastu.artha.data.analysis.CategorySpending
 import net.wastu.artha.data.analysis.MonthSpendingAnalysis
+import net.wastu.artha.data.analysis.label
 import net.wastu.artha.ui.formatMoney
 
 class AnalysisWidgetProvider : AppWidgetProvider() {
@@ -179,7 +180,7 @@ private fun setCategoryList(context: Context, views: RemoteViews, widgetId: Int,
 
 internal fun buildCategoryRowView(context: Context, cat: CategorySpending): RemoteViews {
     val rowView = RemoteViews(context.packageName, R.layout.widget_category_item)
-    rowView.setTextViewText(R.id.widget_category_name, cat.category)
+    rowView.setTextViewText(R.id.widget_category_name, cat.label)
     rowView.setTextViewText(R.id.widget_category_amount, formatMoney(Money(cat.amountMinor)))
     val fillInIntent = Intent().apply { putExtra("extra_destination", "ANALYSIS") }
     rowView.setOnClickFillInIntent(R.id.widget_category_item_root, fillInIntent)
