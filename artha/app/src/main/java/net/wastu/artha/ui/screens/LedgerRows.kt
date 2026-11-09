@@ -105,7 +105,6 @@ fun TransactionRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     highlightQuery: String = "",
-    showCategory: Boolean = true,
     categoryState: PaymentCategoryState = PaymentCategoryState.IDLE,
 ) {
     val reversed = transaction.isReversedRecord
@@ -157,7 +156,7 @@ fun TransactionRow(
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(formatTime(transaction.occurredAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (showCategory && !movedMoney) {
+                    if (!movedMoney) {
                         val busyLabel = paymentCategoryStateLabel(categoryState)
                         if (categoryState != PaymentCategoryState.IDLE && busyLabel != null) {
                             Row(

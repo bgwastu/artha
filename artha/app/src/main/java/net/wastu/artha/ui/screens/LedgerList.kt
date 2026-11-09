@@ -66,6 +66,7 @@ import net.wastu.artha.ui.components.ShapeBadge
 import net.wastu.artha.ui.theme.expenseColor
 import net.wastu.artha.ui.theme.incomeColor
 
+/** The day-grouped payment list with its optional summary, active-filter chips, result count and empty states. */
 @Composable
 internal fun TransactionList(
     transactions: List<UnifiedTransaction>,
@@ -77,7 +78,6 @@ internal fun TransactionList(
     emptyTitle: String? = null,
     resultCount: Int? = null,
     isPopulating: Boolean = false,
-    showCategory: Boolean = true,
     categoryProgress: CategoryProgress = CategoryProgress(),
     periodSummary: PeriodSummary? = null,
     onFilterDates: ((Long, Long) -> Unit)? = null,
@@ -127,107 +127,34 @@ internal fun TransactionList(
         }
         if (activeFilters.isNotEmpty()) {
             item(key = "active_filters") {
-                FlowRow(
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .padding(top = if (periodSummary != null) 8.dp else 0.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    activeFilters.forEach { filter ->
-                        FilterChip(selected = true, onClick = filter.clear, label = { Text(filter.label) },
-                            trailingIcon = { Icon(Icons.Default.Clear, "Remove ${filter.label} filter") })
-                    }
-                    TextButton(onClick = onClearFilters) { Text("Clear all") }
-                }
+                ActiveFilterChips(activeFilters, onClearFilters, Modifier.padding(horizontal = 16.dp).padding(top = if (periodSummary != null) 8.dp else 0.dp))
             }
         }
-        resultCount?.let { count -> item(key = "results") {
-            Text("$count results", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } }
+        resultCount?.let { count ->
+            item(key = "results") {
+                Text(
+                    "$count results",
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         if (transactions.isEmpty()) {
             item(key = "empty") {
-                if (isPopulating) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 64.dp, horizontal = 24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        LoadingIndicator(Modifier.size(64.dp))
-                        Spacer(Modifier.height(16.dp))
-                        Text(
-                            text = "Syncing transactions",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = "Checking connected accounts for new activity",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-                } else {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 56.dp, horizontal = 24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        ShapeBadge(
-                            icon = if (activeFilters.isNotEmpty()) Icons.Default.FilterList else Icons.Default.ReceiptLong,
-                            polygon = if (activeFilters.isNotEmpty()) MaterialShapes.Cookie6Sided else MaterialShapes.SoftBurst,
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        Text(
-                            text = emptyTitle ?: if (activeFilters.isNotEmpty()) "No matching transactions" else "No transactions yet",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            textAlign = TextAlign.Center,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = if (activeFilters.isNotEmpty())
-                                "Try adjusting or clearing your filters to see more results."
-                            else
-                                "Your transactions will appear here once your bank accounts and e-wallets sync.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                        )
-                        if (activeFilters.isNotEmpty()) {
-                            Spacer(Modifier.height(16.dp))
-                            FilledTonalButton(
-                                onClick = onClearFilters,
-                                shapes = ButtonDefaults.shapes(),
-                            ) {
-                                Text("Clear filters")
-                            }
-                        }
-                    }
-                }
+                if (isPopulating) SyncingNotice() else EmptyLedger(emptyTitle, activeFilters.isNotEmpty(), onClearFilters)
             }
         }
         groupedByDay.forEach { group ->
             stickyHeader(key = "day_${group.date}") {
                 DateGroupHeader(date = group.date, onClick = { openDay = group.date })
             }
-            items(
-                group.transactions,
-                key = { it.key },
-                contentType = { "transaction" },
-            ) { transaction ->
+            items(group.transactions, key = { it.key }, contentType = { "transaction" }) { transaction ->
                 TransactionRow(
                     transaction = transaction,
                     modifier = if (transaction.type == TransactionType.TRANSFER) Modifier.alpha(0.6f) else Modifier,
                     onClick = { onTransaction(transaction) },
                     highlightQuery = highlightQuery,
-                    showCategory = showCategory,
                     categoryState = paymentCategoryState(transaction.key, categoryProgress),
                 )
                 HorizontalDivider(
@@ -239,6 +166,83 @@ internal fun TransactionList(
     }
     openDay?.let { day ->
         groupedByDay.firstOrNull { it.date == day }?.let { DayTotalsSheet(it, activeRange, onFilterDates) { openDay = null } }
+    }
+}
+
+@Composable
+private fun ActiveFilterChips(filters: List<ActiveTransactionFilter>, onClearAll: () -> Unit, modifier: Modifier = Modifier) {
+    FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        filters.forEach { filter ->
+            FilterChip(
+                selected = true,
+                onClick = filter.clear,
+                label = { Text(filter.label) },
+                trailingIcon = { Icon(Icons.Default.Clear, "Remove ${filter.label} filter") },
+            )
+        }
+        TextButton(onClick = onClearAll) { Text("Clear all") }
+    }
+}
+
+@Composable
+private fun SyncingNotice() {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 64.dp, horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        LoadingIndicator(Modifier.size(64.dp))
+        Spacer(Modifier.height(16.dp))
+        Text(
+            text = "Syncing transactions",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "Checking connected accounts for new activity",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/** Nothing saved yet, or nothing matching the active filters (with a way to clear them). */
+@Composable
+private fun EmptyLedger(title: String?, filtered: Boolean, onClearFilters: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 56.dp, horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        ShapeBadge(
+            icon = if (filtered) Icons.Default.FilterList else Icons.Default.ReceiptLong,
+            polygon = if (filtered) MaterialShapes.Cookie6Sided else MaterialShapes.SoftBurst,
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(
+            text = title ?: if (filtered) "No matching transactions" else "No transactions yet",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = if (filtered) {
+                "Try adjusting or clearing your filters to see more results."
+            } else {
+                "Your transactions will appear here once your bank accounts and e-wallets sync."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+        if (filtered) {
+            Spacer(Modifier.height(16.dp))
+            FilledTonalButton(onClick = onClearFilters, shapes = ButtonDefaults.shapes()) { Text("Clear filters") }
+        }
     }
 }
 

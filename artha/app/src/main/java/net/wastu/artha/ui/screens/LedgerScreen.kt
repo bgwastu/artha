@@ -6,10 +6,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.LocalDate
 import net.wastu.artha.core.model.AccountingTime
 import net.wastu.artha.core.model.Provider
@@ -36,7 +34,6 @@ fun LedgerScreen(
     val refreshing by viewModel?.refreshing.collectOrDefault(false)
     val category by viewModel?.categoryFilter.collectOrDefault(null)
     val categoryProgress by viewModel?.categoryProgress.collectOrDefault(CategoryProgress())
-    val showCategory = true
     // Category drill-down is all-source confirmed spending; prior browsing choices stay intact for Back.
     val effectiveFilters = if (category == null) filters.copy(direction = null) else TransactionFilters()
     val visibleProviders = Provider.entries.filter { it in enabledProviders }
@@ -78,7 +75,6 @@ fun LedgerScreen(
             activeFilters = active, onClearFilters = ::clearAll,
             emptyTitle = if (active.isNotEmpty()) "No matching transactions" else "No saved payments",
             isPopulating = refreshing,
-            showCategory = showCategory,
             categoryProgress = categoryProgress,
             periodSummary = periodSummary,
             onFilterDates = viewModel?.let { vm -> { start, end -> vm.setDateRangeFilter(start, end) } },
