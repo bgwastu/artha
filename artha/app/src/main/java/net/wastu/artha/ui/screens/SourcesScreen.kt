@@ -100,6 +100,25 @@ fun SourcesScreen(
         if (target == Provider.GOJEK) viewModel?.requestGojekRefresh() else viewModel?.syncProvider(target)
     }
 
+    @Composable
+    fun detailPage(provider: Provider, onBackFromPage: (() -> Unit)?) = SourcePage(
+        provider = provider,
+        enabled = provider in enabled,
+        importEnabled = provider in importEnabled,
+        diagnostic = diagnostics[provider],
+        coverage = coverage[provider],
+        importing = isImporting(provider),
+        allTransactions = allTransactions,
+        providerCounts = providerCounts,
+        onEnabled = { onEnabled(provider, it) },
+        onImportEnabled = { viewModel?.setImportEnabled(provider, it) },
+        onImport = { syncAction(provider) },
+        busy = importBusy && !automaticImport,
+        feedback = feedback(provider),
+        flash = gojekFlash.takeIf { provider == Provider.GOJEK },
+        onBack = onBackFromPage,
+    )
+
     BoxWithConstraints(Modifier.widthIn(max = 1320.dp).fillMaxSize()) {
         val expanded = maxWidth >= 840.dp && maxHeight >= 480.dp
         Row(Modifier.fillMaxSize()) {
@@ -175,55 +194,18 @@ fun SourcesScreen(
 
             if (expanded) {
                 Box(Modifier.weight(1f).fillMaxHeight()) {
-                    val provider = selectedProvider ?: Provider.entries.first()
-                    SourcePage(
-                        provider = provider,
-                        enabled = provider in enabled,
-                        importEnabled = provider in importEnabled,
-                        diagnostic = diagnostics[provider],
-                        coverage = coverage[provider],
-                        importing = isImporting(provider),
-                        allTransactions = allTransactions,
-                        providerCounts = providerCounts,
-                        onEnabled = { onEnabled(provider, it) },
-                        onImportEnabled = { viewModel?.setImportEnabled(provider, it) },
-                        onImport = { syncAction(provider) },
-                        busy = importBusy && !automaticImport,
-                        feedback = feedback(provider),
-                        flash = gojekFlash.takeIf { provider == Provider.GOJEK },
-                        onBack = null,
-                    )
+                    detailPage(selectedProvider ?: Provider.entries.first(), null)
                 }
             }
         }
 
         if (!expanded) {
             BackHandler(enabled = selectedProvider != null) { selectedProvider = null }
+            selectedProvider?.let { provider -> detailPage(provider) { selectedProvider = null } }
         }
-        selectedProvider?.takeIf { !expanded }?.let { provider ->
-            SourcePage(
-                provider = provider,
-                enabled = provider in enabled,
-                importEnabled = provider in importEnabled,
-                diagnostic = diagnostics[provider],
-                coverage = coverage[provider],
-                importing = isImporting(provider),
-                allTransactions = allTransactions,
-                providerCounts = providerCounts,
-                onEnabled = { onEnabled(provider, it) },
-                onImportEnabled = { viewModel?.setImportEnabled(provider, it) },
-                onImport = { syncAction(provider) },
-                busy = importBusy && !automaticImport,
-                feedback = feedback(provider),
-                flash = gojekFlash.takeIf { provider == Provider.GOJEK },
-                onBack = { selectedProvider = null },
-            )
-        }
-
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SourcePage(
     provider: Provider,

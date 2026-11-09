@@ -79,6 +79,7 @@ import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.TransactionType
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.analysis.CategoryAttention
+import net.wastu.artha.data.analysis.CategoryProgress
 import net.wastu.artha.data.analysis.CategoryAutomationState
 import net.wastu.artha.data.analysis.RecategorizeScope
 import net.wastu.artha.data.analysis.categoryAttention
@@ -191,118 +192,31 @@ fun AnalysisScreen(
                 )
             }
         } else {
-            item(key = "empty_spending") {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                ) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(if (analysis.type == TransactionType.INCOME) (if (canGoNext) "Income" else "Income to date") else if (canGoNext) "Spending" else "Spending to date", style = MaterialTheme.typography.labelMedium)
-                        Text("Rp0", style = MaterialTheme.typography.headlineMediumEmphasized, )
-                        Text(if (analysis.type == TransactionType.INCOME) "No income this month" else "No confirmed spending this month", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
+            item(key = "empty_spending") { EmptySpendingCard(analysis.type, canGoNext) }
         }
         item(key = "category_header") {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp, bottom = 2.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "Categories",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.semantics { heading() },
-                    )
-                    Spacer(Modifier.weight(1f))
-                    AssistChip(
-                        onClick = {
-                            when {
-                                working -> viewModel.stopCategorization()
-                                !aiConfigured -> onOpenAiCategories()
-                                pendingCount > 0 -> viewModel.recategorize(monthPendingScope)
-                                else -> showRecategorizeMonth = true
-                            }
-                        },
-                        label = {
-                            Text(when {
-                                working -> "Stop"
-                                !aiConfigured || pendingCount > 0 -> if (pendingCount > 0) "Categorize $pendingCount" else "Categorize"
-                                else -> "Re-categorize"
-                            })
-                        },
-                        leadingIcon = {
-                            Icon(if (working) Icons.Default.Stop else Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp))
-                        },
-                    )
-                }
-                if (categoryProgress.state == CategoryAutomationState.WORKING) {
-                    val run = categoryProgress.runTotal > 0
-                    val fraction = if (run) AiCardLogic.categoryProgressFraction(categoryProgress.runDone, categoryProgress.runTotal)
-                        else AiCardLogic.categoryProgressFraction(categoryProgress.labeled, categoryProgress.total)
-                    Text(
-                        categoryProgressLabel(categoryProgress) ?: "Categorizing",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
-                    )
-                    LinearWavyProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
-                } else if (attention.total > 0) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            buildList {
-                                if (attention.review > 0) add("${attention.review} need review")
-                                if (attention.failed > 0) add("${attention.failed} failed")
-                            }.joinToString(", "),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (attention.failed > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        TextButton(onClick = onOpenCategoryReview) { Text("Review") }
+            CategoriesHeader(
+                progress = categoryProgress,
+                attention = attention,
+                actionLabel = when {
+                    working -> "Stop"
+                    pendingCount > 0 -> "Categorize $pendingCount"
+                    !aiConfigured -> "Categorize"
+                    else -> "Re-categorize"
+                },
+                onAction = {
+                    when {
+                        working -> viewModel.stopCategorization()
+                        !aiConfigured -> onOpenAiCategories()
+                        pendingCount > 0 -> viewModel.recategorize(monthPendingScope)
+                        else -> showRecategorizeMonth = true
                     }
-                }
-            }
+                },
+                onOpenReview = onOpenCategoryReview,
+            )
         }
         if (slices.isEmpty()) {
-            item(key = "empty_categories") {
-                val income = analysis.type == TransactionType.INCOME
-                Column(
-                    Modifier.fillMaxWidth().padding(vertical = 32.dp, horizontal = 24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    ShapeBadge(
-                        icon = Icons.Default.PieChart,
-                        polygon = MaterialShapes.Cookie12Sided,
-                        size = 80.dp,
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        iconColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        if (income) "No income to break down" else "Nothing to break down yet",
-                        style = MaterialTheme.typography.titleMedium,
-                        textAlign = TextAlign.Center,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        if (income) "Categories appear here once income for this month is confirmed."
-                        else "Categories appear here once this month's spending is categorized.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-            }
+            item(key = "empty_categories") { EmptyCategories(analysis.type == TransactionType.INCOME) }
         } else {
             items(slices.size, key = { slices[it].name }) { index ->
                 val slice = slices[index]
@@ -459,3 +373,111 @@ fun IconPickerDialog(currentKey: String?, onDismiss: () -> Unit, onSelect: (Stri
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
+
+@Composable
+private fun EmptySpendingCard(type: TransactionType, canGoNext: Boolean) {
+    val income = type == TransactionType.INCOME
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                when {
+                    income -> if (canGoNext) "Income" else "Income to date"
+                    else -> if (canGoNext) "Spending" else "Spending to date"
+                },
+                style = MaterialTheme.typography.labelMedium,
+            )
+            Text("Rp0", style = MaterialTheme.typography.headlineMediumEmphasized)
+            Text(
+                if (income) "No income this month" else "No confirmed spending this month",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CategoriesHeader(
+    progress: CategoryProgress,
+    attention: CategoryAttention,
+    actionLabel: String,
+    onAction: () -> Unit,
+    onOpenReview: () -> Unit,
+) {
+    val working = progress.state == CategoryAutomationState.WORKING
+    Column(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 2.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "Categories",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.semantics { heading() },
+            )
+            Spacer(Modifier.weight(1f))
+            AssistChip(
+                onClick = onAction,
+                label = { Text(actionLabel) },
+                leadingIcon = {
+                    Icon(if (working) Icons.Default.Stop else Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp))
+                },
+            )
+        }
+        if (working) {
+            val fraction = if (progress.runTotal > 0) AiCardLogic.categoryProgressFraction(progress.runDone, progress.runTotal)
+                else AiCardLogic.categoryProgressFraction(progress.labeled, progress.total)
+            Text(
+                categoryProgressLabel(progress) ?: "Categorizing",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 4.dp),
+            )
+            LinearWavyProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+        } else if (attention.total > 0) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    buildList {
+                        if (attention.review > 0) add("${attention.review} need review")
+                        if (attention.failed > 0) add("${attention.failed} failed")
+                    }.joinToString(", "),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (attention.failed > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = onOpenReview) { Text("Review") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyCategories(income: Boolean) {
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 32.dp, horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        ShapeBadge(
+            icon = Icons.Default.PieChart,
+            polygon = MaterialShapes.Cookie12Sided,
+            size = 80.dp,
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            iconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(
+            if (income) "No income to break down" else "Nothing to break down yet",
+            style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            if (income) "Categories appear here once income for this month is confirmed."
+            else "Categories appear here once this month's spending is categorized.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
+}

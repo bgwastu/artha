@@ -174,6 +174,26 @@ fun AiScreen(
         }
     }
 
+    fun testConnection() {
+        val config = draft()
+        val invalid = aiConfigValidation(config)
+        if (invalid != null) { say(invalid); return }
+        testing = true
+        coroutineScope.launch {
+            val message = try {
+                AiClient.testConnection(config)
+                "Connected"
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                aiConnectionFailure(failure)
+            } finally {
+                testing = false
+            }
+            snackbar.showSnackbar(message)
+        }
+    }
+
     val uncategorizedCount = remember(allTransactions, snapshot) { viewModel.recategorizeCount(RecategorizeScope.Uncategorized) }
     val allCount = remember(allTransactions, snapshot) { viewModel.recategorizeCount(RecategorizeScope.All) }
     val historyCount = remember(allTransactions, snapshot) { viewModel.recategorizeCount(RecategorizeScope.AllPending) }
@@ -235,61 +255,7 @@ fun AiScreen(
                 )
             }
             item { SectionHeader("Provider") }
-            item {
-                Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    OutlinedTextField(
-                        state = baseUrl,
-                        label = { Text("Endpoint URL") },
-                        labelPosition = TextFieldLabelPosition.Above(),
-                        placeholder = { Text("https://example.com/v1") },
-                        supportingText = { Text("Merchant names and amounts are sent to this endpoint") },
-                        lineLimits = TextFieldLineLimits.SingleLine, enabled = providerEnabled,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        state = apiKey,
-                        label = { Text("API key") },
-                        labelPosition = TextFieldLabelPosition.Above(),
-                        outputTransformation = { replace(0, length, "\u2022".repeat(length)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
-                        lineLimits = TextFieldLineLimits.SingleLine, enabled = providerEnabled,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        state = model,
-                        label = { Text("Model") },
-                        labelPosition = TextFieldLabelPosition.Above(),
-                        placeholder = { Text("model name") },
-                        lineLimits = TextFieldLineLimits.SingleLine, enabled = providerEnabled,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedButton(
-                        enabled = providerEnabled,
-                        onClick = {
-                            val config = draft()
-                            val invalid = aiConfigValidation(config)
-                            if (invalid != null) { say(invalid); return@OutlinedButton }
-                            testing = true
-                            coroutineScope.launch {
-                                val message = try {
-                                    AiClient.testConnection(config)
-                                    "Connected"
-                                } catch (cancelled: CancellationException) {
-                                    throw cancelled
-                                } catch (failure: Exception) {
-                                    aiConnectionFailure(failure)
-                                } finally {
-                                    testing = false
-                                }
-                                snackbar.showSnackbar(message)
-                            }
-                        },
-                    ) { Text("Test connection") }
-                }
-            }
+            item { ProviderForm(baseUrl, apiKey, model, enabled = providerEnabled, onTest = ::testConnection) }
             item {
                 ListItem(
                     headlineContent = { Text("Auto-categorize") },
@@ -341,3 +307,39 @@ private fun SectionHeader(title: String) {
     )
 }
 
+
+@Composable
+private fun ProviderForm(baseUrl: TextFieldState, apiKey: TextFieldState, model: TextFieldState, enabled: Boolean, onTest: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        OutlinedTextField(
+            state = baseUrl,
+            label = { Text("Endpoint URL") },
+            labelPosition = TextFieldLabelPosition.Above(),
+            placeholder = { Text("https://example.com/v1") },
+            supportingText = { Text("Merchant names and amounts are sent to this endpoint") },
+            lineLimits = TextFieldLineLimits.SingleLine, enabled = enabled,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            state = apiKey,
+            label = { Text("API key") },
+            labelPosition = TextFieldLabelPosition.Above(),
+            outputTransformation = { replace(0, length, "\u2022".repeat(length)) },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+            lineLimits = TextFieldLineLimits.SingleLine, enabled = enabled,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            state = model,
+            label = { Text("Model") },
+            labelPosition = TextFieldLabelPosition.Above(),
+            placeholder = { Text("model name") },
+            lineLimits = TextFieldLineLimits.SingleLine, enabled = enabled,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedButton(enabled = enabled, onClick = onTest) { Text("Test connection") }
+    }
+}
