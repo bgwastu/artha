@@ -1,12 +1,6 @@
 package net.wastu.artha.ui.screens
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -16,28 +10,14 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Analytics
-import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingToolbarDefaults
-import androidx.compose.material3.HorizontalFloatingToolbar
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.LinearWavyProgressIndicator
-import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.ShortNavigationBar
-import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -45,41 +25,33 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.WideNavigationRail
-import androidx.compose.material3.WideNavigationRailItem
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
-import net.wastu.artha.data.analysis.categoryRunMessage
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
-import net.wastu.artha.core.root.RootGateState
+import net.wastu.artha.data.analysis.categoryRunMessage
 import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.LedgerState
 import net.wastu.artha.ui.Page
 import net.wastu.artha.ui.PageStack
-import net.wastu.artha.ui.screens.TransactionFilters
-import net.wastu.artha.ui.screens.TransactionFiltersSaver
+import net.wastu.artha.ui.components.collectOrDefault
 
 internal enum class Destination(val label: String, val icon: ImageVector) {
     TRANSACTIONS("Transactions", Icons.AutoMirrored.Filled.List),
@@ -87,10 +59,9 @@ internal enum class Destination(val label: String, val icon: ImageVector) {
     SETTINGS("Settings", Icons.Default.Settings);
 
     companion object {
-        val Saver = Saver<Destination, String>(
-            save = { it.name },
-            restore = { name -> entries.firstOrNull { it.name == name } ?: TRANSACTIONS }
-        )
+        fun named(name: String?): Destination = entries.firstOrNull { it.name == name } ?: TRANSACTIONS
+
+        val Saver = Saver<Destination, String>(save = { it.name }, restore = ::named)
     }
 }
 
@@ -107,7 +78,6 @@ fun HomeScreen(
     onProviderEnabled: (Provider, Boolean) -> Unit = { _, _ -> },
     viewModel: ArthaViewModel? = null,
 ) {
-    val context = LocalContext.current
     val saveableStateHolder = rememberSaveableStateHolder()
     var transactionFilters by rememberSaveable(stateSaver = TransactionFiltersSaver) { mutableStateOf(TransactionFilters()) }
     var destination by rememberSaveable(stateSaver = Destination.Saver) { mutableStateOf(Destination.TRANSACTIONS) }
@@ -117,59 +87,37 @@ fun HomeScreen(
     var showFilter by rememberSaveable { mutableStateOf(false) }
     var selectedKey by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedFallback by remember { mutableStateOf<UnifiedTransaction?>(null) }
+    val openTransaction = { transaction: UnifiedTransaction -> selectedKey = transaction.key; selectedFallback = transaction }
 
     val snackbarHost = remember { SnackbarHostState() }
-    val importFeedback by viewModel?.importFeedback?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
-    val automaticImport by viewModel?.automaticImportActive?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
-    LaunchedEffect(importFeedback?.sequence) {
-        importFeedback?.let { snackbarHost.showSnackbar(it.message) }
-    }
-    LaunchedEffect(viewModel, pages.top) {
-        if (pages.top != Page.AI) viewModel?.categoryRunResults?.collect {
-            val result = snackbarHost.showSnackbar(
-                categoryRunMessage(it),
-                actionLabel = if (it.review > 0 || it.failed > 0) "Review" else null,
-            )
-            if (result == SnackbarResult.ActionPerformed) pages.open(Page.REVIEW)
-        }
-    }
-    val ledgerLoadFailed by viewModel?.ledgerLoadFailed?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
-    val rootGate by viewModel?.rootGate?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(RootGateState.LOCKED) }
-    val categoryFilter by viewModel?.categoryFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<String?>(null) }
-    val targetDest by viewModel?.targetDestination?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
-    LaunchedEffect(targetDest) {
-        targetDest?.let {
-            when (it) {
-                "ANALYSIS" -> destination = Destination.ANALYSIS
-                "SETTINGS" -> destination = Destination.SETTINGS
-                else -> destination = Destination.TRANSACTIONS
-            }
+    HomeFeedbackEffects(viewModel, snackbarHost, pages)
+
+    val automaticImport by viewModel?.automaticImportActive.collectOrDefault(false)
+    val ledgerLoadFailed by viewModel?.ledgerLoadFailed.collectOrDefault(false)
+    val categoryFilter by viewModel?.categoryFilter.collectOrDefault(null)
+    val targetDestination by viewModel?.targetDestination.collectOrDefault(null)
+    LaunchedEffect(targetDestination) {
+        targetDestination?.let {
+            destination = Destination.named(it)
             viewModel?.setTargetDestination(null)
         }
     }
-    BackHandler(
-        enabled = destination != Destination.TRANSACTIONS &&
-            selectedKey == null &&
-            pages.top == null &&
-            !showSearch &&
-            !showFilter
-    ) {
+
+    val nothingOpen = selectedKey == null && !showSearch && !showFilter
+    BackHandler(enabled = destination != Destination.TRANSACTIONS && nothingOpen && pages.top == null) {
         destination = Destination.TRANSACTIONS
     }
-
-    BackHandler(enabled = destination == Destination.TRANSACTIONS && categoryFilter != null && selectedKey == null && !showSearch && !showFilter) {
+    BackHandler(enabled = destination == Destination.TRANSACTIONS && categoryFilter != null && nothingOpen) {
         viewModel?.closeCategoryTransactions()
     }
-
     BackHandler(enabled = pages.top != null) { pages.back() }
 
-    val latestTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyList<UnifiedTransaction>()) }
+    val latestTransactions by viewModel?.allTransactions.collectOrDefault(emptyList())
     val selected = latestTransactions.firstOrNull { it.key == selectedKey } ?: selectedFallback?.takeIf { it.key == selectedKey }
     val closeDetails = { selectedKey = null; selectedFallback = null }
     val detailsState = selected?.let { rememberTransactionDetailsState(it.key) }
     val largeNavigationText = LocalDensity.current.fontScale > 1.3f
-    fun navigationLabel(item: Destination) =
-        if (largeNavigationText && item == Destination.TRANSACTIONS) "Payments" else item.label
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val showDetailsPane = maxWidth >= 1080.dp && maxHeight >= 480.dp && destination == Destination.TRANSACTIONS && !showSearch && selected != null
         val showRail = maxWidth >= 600.dp && maxHeight >= 480.dp
@@ -179,82 +127,32 @@ fun HomeScreen(
             modifier = (if (showSearch) Modifier.clearAndSetSemantics {} else Modifier)
                 .nestedScroll(barBehavior.nestedScrollConnection),
             topBar = {
-                LargeFlexibleTopAppBar(
+                HomeTopBar(
+                    destination = destination,
+                    showBackToAnalysis = destination == Destination.TRANSACTIONS && categoryFilter != null,
+                    onBackToAnalysis = { viewModel?.closeCategoryTransactions() },
                     scrollBehavior = barBehavior,
-                    navigationIcon = {
-                        if (destination == Destination.TRANSACTIONS && categoryFilter != null) {
-                            IconButton(onClick = {
-                                viewModel?.closeCategoryTransactions()
-                            }) {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back to Analysis",
-                                )
-                            }
-                        }
-                    },
-                    title = { Text(destination.label, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 )
             },
             floatingActionButton = {
                 if (destination == Destination.TRANSACTIONS) {
-                    HorizontalFloatingToolbar(
-                        expanded = true,
-                        floatingActionButton = {
-                            FloatingToolbarDefaults.VibrantFloatingActionButton(onClick = { showSearch = true }) {
-                                Icon(Icons.Default.Search, contentDescription = "Search")
-                            }
-                        },
-                    ) {
-                        IconButton(onClick = onRefresh, enabled = !refreshing || automaticImport) {
-                            if (refreshing) {
-                                LoadingIndicator(modifier = Modifier.size(28.dp).semantics { contentDescription = "Syncing" })
-                            } else {
-                                Icon(Icons.Default.Sync, contentDescription = "Sync")
-                            }
-                        }
-                        IconButton(onClick = { showFilter = true }) {
-                            Icon(Icons.Default.FilterList, contentDescription = "Filter")
-                        }
-                    }
+                    LedgerActionsToolbar(
+                        refreshing = refreshing,
+                        syncEnabled = !refreshing || automaticImport,
+                        onSearch = { showSearch = true },
+                        onSync = onRefresh,
+                        onFilter = { showFilter = true },
+                    )
                 }
             },
             bottomBar = {
-                if (!showRail) {
-                    ShortNavigationBar {
-                        Destination.entries.forEach { item ->
-                            ShortNavigationBarItem(
-                                selected = destination == item,
-                                onClick = { destination = item },
-                                icon = { Icon(item.icon, contentDescription = null) },
-                                label = { Text(navigationLabel(item), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            )
-                        }
-                    }
-                }
+                if (!showRail) HomeNavigationBar(destination, largeNavigationText) { destination = it }
             },
         ) { padding ->
             Row(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
-                if (showRail) {
-                    WideNavigationRail(modifier = Modifier.width(if (largeNavigationText) 128.dp else 96.dp)) {
-                        Destination.entries.forEach { item ->
-                            WideNavigationRailItem(
-                                railExpanded = false,
-                                selected = destination == item,
-                                onClick = { destination = item },
-                                icon = { Icon(item.icon, contentDescription = null) },
-                                label = { Text(navigationLabel(item), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            )
-                        }
-                    }
-                }
+                if (showRail) HomeNavigationRail(destination, largeNavigationText) { destination = it }
                 Column(Modifier.weight(1f)) {
-                    if (ledgerLoadFailed && ledgerState is LedgerState.Ready) {
-                        Row(Modifier.padding(horizontal = 16.dp).semantics { liveRegion = LiveRegionMode.Polite }, verticalAlignment = Alignment.CenterVertically) {
-                            Text("Saved history update failed", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                            TextButton(onClick = onRetryLedger) { Text("Retry") }
-                        }
-                    }
+                    if (ledgerLoadFailed && ledgerState is LedgerState.Ready) LedgerLoadFailedBanner(onRetryLedger)
                     // The Transactions bar has its own spinner; one loader at a time.
                     if (refreshing && destination != Destination.TRANSACTIONS) {
                         LinearWavyProgressIndicator(
@@ -262,42 +160,40 @@ fun HomeScreen(
                         )
                     }
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                    saveableStateHolder.SaveableStateProvider(destination.name) {
-                        when (destination) {
-                            Destination.TRANSACTIONS -> Row(Modifier.fillMaxSize()) {
-                            Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
-                                LedgerScreen(
-                                    state = ledgerState,
-                                    enabledProviders = enabledProviders,
-                                    onTransaction = { selectedKey = it.key; selectedFallback = it },
-                                    onRetry = onRetryLedger,
-                                    showFilter = showFilter,
-                                    onDismissFilter = { showFilter = false },
-                                    viewModel = viewModel,
-                                    filters = transactionFilters,
-                                    onFiltersChanged = { transactionFilters = it },
-                                )
-                            }
-                            if (showDetailsPane) {
-                                Box(Modifier.weight(1f).fillMaxHeight()) {
-                                    if (detailsState != null) TransactionDetailsContent(selected, viewModel, onClose = closeDetails, state = detailsState)
+                        saveableStateHolder.SaveableStateProvider(destination.name) {
+                            when (destination) {
+                                Destination.TRANSACTIONS -> Row(Modifier.fillMaxSize()) {
+                                    Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
+                                        LedgerScreen(
+                                            state = ledgerState,
+                                            enabledProviders = enabledProviders,
+                                            onTransaction = openTransaction,
+                                            onRetry = onRetryLedger,
+                                            showFilter = showFilter,
+                                            onDismissFilter = { showFilter = false },
+                                            viewModel = viewModel,
+                                            filters = transactionFilters,
+                                            onFiltersChanged = { transactionFilters = it },
+                                        )
+                                    }
+                                    if (showDetailsPane) {
+                                        Box(Modifier.weight(1f).fillMaxHeight()) {
+                                            if (detailsState != null) TransactionDetailsContent(selected, viewModel, onClose = closeDetails, state = detailsState)
+                                        }
+                                    }
                                 }
-                            }
-                            }
-                            Destination.ANALYSIS -> {
-                                if (viewModel != null) {
+                                Destination.ANALYSIS -> if (viewModel != null) {
                                     AnalysisScreen(
                                         viewModel = viewModel,
-                                        onOpenTransaction = { selectedKey = it.key; selectedFallback = it },
+                                        onOpenTransaction = openTransaction,
                                         onOpenCategories = { pages.open(Page.CATEGORIES) },
                                         onOpenCategoryReview = { pages.open(Page.REVIEW) },
                                         onOpenAiCategories = { pages.open(Page.AI) },
                                     )
                                 }
+                                Destination.SETTINGS -> SettingsScreen(viewModel, onOpen = pages::open)
                             }
-                            Destination.SETTINGS -> SettingsScreen(viewModel, onOpen = pages::open)
                         }
-                    }
                     }
                 }
             }
@@ -307,49 +203,55 @@ fun HomeScreen(
                 SearchTransactionsScreen(
                     ledgerState,
                     onBack = { showSearch = false },
-                    onTransaction = { selectedKey = it.key; selectedFallback = it },
+                    onTransaction = openTransaction,
                     viewModel = viewModel,
                     onRetry = onRetryLedger,
                 )
             }
         }
-        val motion = MaterialTheme.motionScheme
-        AnimatedContent(
-            targetState = pages.top,
-            transitionSpec = {
-                val deeper = targetState != null && (initialState == null || targetState!!.ordinal >= initialState!!.ordinal)
-                val direction = if (deeper) 1 else -1
-                (slideInHorizontally(motion.defaultSpatialSpec()) { direction * it / 4 } + fadeIn(motion.defaultEffectsSpec()))
-                    .togetherWith(slideOutHorizontally(motion.defaultSpatialSpec()) { -direction * it / 4 } + fadeOut(motion.defaultEffectsSpec()))
-            },
-            label = "page",
-        ) { page ->
-            if (page != null && viewModel != null) Surface(Modifier.fillMaxSize()) {
-                when (page) {
-                    Page.SOURCES -> SourcesScreen(
-                        enabled = enabledProviders,
-                        syncingProvider = syncingProvider,
-                        providerCounts = providerCounts,
-                        onEnabled = onProviderEnabled,
-                        viewModel = viewModel,
-                        onBack = pages::back,
-                    )
-                    Page.CATEGORIES -> CategoriesScreen(viewModel, onBack = pages::back)
-                    Page.AI -> AiScreen(viewModel, onBack = pages::back, onOpenReview = { pages.open(Page.REVIEW) })
-                    Page.REMOTE -> RemoteAccessScreen(onBack = pages::back)
-                    Page.DATA -> DataScreen(viewModel, onBack = pages::back)
-                    Page.REVIEW -> CategoryReviewScreen(
-                        viewModel = viewModel,
-                        onBack = pages::back,
-                        month = viewModel.selectedMonth.collectAsStateWithLifecycle().value,
-                        onOpenTransaction = { selectedKey = it.key; selectedFallback = it },
-                    )
-                    Page.UPDATES -> UpdatesScreen(onBack = pages::back)
-                }
-            }
+        HomePages(
+            top = pages.top,
+            viewModel = viewModel,
+            enabledProviders = enabledProviders,
+            syncingProvider = syncingProvider,
+            providerCounts = providerCounts,
+            onProviderEnabled = onProviderEnabled,
+            onOpen = pages::open,
+            onBack = pages::back,
+            onOpenTransaction = openTransaction,
+        )
+        if (!showDetailsPane && selected != null && detailsState != null) {
+            TransactionDetailsSheet(selected, viewModel = viewModel, state = detailsState, onDismiss = closeDetails)
         }
-        if (!showDetailsPane && selected != null) {
-            if (detailsState != null) TransactionDetailsSheet(selected, viewModel = viewModel, state = detailsState, onDismiss = closeDetails)
+    }
+}
+
+/** Snackbars for import results and finished categorization runs. */
+@Composable
+private fun HomeFeedbackEffects(viewModel: ArthaViewModel?, snackbarHost: SnackbarHostState, pages: PageStack) {
+    val importFeedback by viewModel?.importFeedback.collectOrDefault(null)
+    LaunchedEffect(importFeedback?.sequence) {
+        importFeedback?.let { snackbarHost.showSnackbar(it.message) }
+    }
+    LaunchedEffect(viewModel, pages.top) {
+        // The AI page reports its own run, so only announce runs started elsewhere.
+        if (pages.top != Page.AI) viewModel?.categoryRunResults?.collect {
+            val result = snackbarHost.showSnackbar(
+                categoryRunMessage(it),
+                actionLabel = if (it.review > 0 || it.failed > 0) "Review" else null,
+            )
+            if (result == SnackbarResult.ActionPerformed) pages.open(Page.REVIEW)
         }
+    }
+}
+
+@Composable
+private fun LedgerLoadFailedBanner(onRetry: () -> Unit) {
+    Row(
+        Modifier.padding(horizontal = 16.dp).semantics { liveRegion = LiveRegionMode.Polite },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Saved history update failed", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        TextButton(onClick = onRetry) { Text("Retry") }
     }
 }

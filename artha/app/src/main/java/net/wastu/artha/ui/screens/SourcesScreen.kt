@@ -67,6 +67,7 @@ import net.wastu.artha.data.providers.ProviderDiagnostic
 import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.SourceCoverage
 import net.wastu.artha.ui.components.PageScaffold
+import net.wastu.artha.ui.components.collectOrDefault
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,18 +80,18 @@ fun SourcesScreen(
     onBack: () -> Unit = {},
 ) {
     var selectedProvider by rememberSaveable { mutableStateOf<Provider?>(null) }
-    val importEnabled by viewModel?.importEnabled?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(Provider.entries.toSet()) }
-    val diagnostics by viewModel?.providerDiagnostics?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap()) }
-    val importing by viewModel?.syncingProvider?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(syncingProvider) }
-    val categoryAutomation by viewModel?.categoryAutomation?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
-    val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(CategoryProgress()) }
-    val importBusy by viewModel?.refreshing?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
-    val automaticImport by viewModel?.automaticImportActive?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
-    val requestedProvider by viewModel?.requestedImportProvider?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<Provider?>(null) }
-    val importFeedback by viewModel?.importFeedback?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
-    val coverage by viewModel?.providerCoverage?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap<Provider, SourceCoverage>()) }
-    val gojekFlash by viewModel?.gojekFlash?.collectAsStateWithLifecycle() ?: remember { mutableStateOf<GojekFlashRecord?>(null) }
-    val allTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyList()) }
+    val importEnabled by viewModel?.importEnabled.collectOrDefault(Provider.entries.toSet())
+    val diagnostics by viewModel?.providerDiagnostics.collectOrDefault(emptyMap())
+    val importing by viewModel?.syncingProvider.collectOrDefault(syncingProvider)
+    val categoryAutomation by viewModel?.categoryAutomation.collectOrDefault(null)
+    val categoryProgress by viewModel?.categoryProgress.collectOrDefault(CategoryProgress())
+    val importBusy by viewModel?.refreshing.collectOrDefault(false)
+    val automaticImport by viewModel?.automaticImportActive.collectOrDefault(false)
+    val requestedProvider by viewModel?.requestedImportProvider.collectOrDefault(null)
+    val importFeedback by viewModel?.importFeedback.collectOrDefault(null)
+    val coverage by viewModel?.providerCoverage.collectOrDefault(emptyMap<Provider, SourceCoverage>())
+    val gojekFlash by viewModel?.gojekFlash.collectOrDefault(null)
+    val allTransactions by viewModel?.allTransactions.collectOrDefault(emptyList())
     val attention = rememberAttentionItems()
 
     val anyImportRunning = importBusy || importing != null || requestedProvider != null

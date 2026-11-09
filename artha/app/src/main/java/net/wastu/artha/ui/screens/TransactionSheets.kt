@@ -71,6 +71,7 @@ import net.wastu.artha.ui.transactionHumanLine
 import net.wastu.artha.ui.transactionTags
 import org.json.JSONException
 import org.json.JSONObject
+import net.wastu.artha.ui.components.collectOrDefault
 
 data class PeerPrompt(val category: String, val merchant: String, val peerCount: Int)
 class TransactionDetailsState internal constructor() {
@@ -234,7 +235,7 @@ private fun TransactionDetailsBody(
     val currentNote = if (snapshot?.updatedAt?.containsKey("note:${record.key}") == true)
         snapshot.userNotes[record.key].orEmpty() else record.userNote.orEmpty()
     val categorySource = if (snapshot != null) categorySource(record, snapshot) else CategorySource.NONE
-    val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(CategoryProgress()) }
+    val categoryProgress by viewModel?.categoryProgress.collectOrDefault(CategoryProgress())
     val paymentState = paymentCategoryState(record.key, categoryProgress)
     val isBusy = paymentState != PaymentCategoryState.IDLE
     val busyLabel = paymentCategoryStateLabel(paymentState)

@@ -57,6 +57,7 @@ import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.LedgerState
 import net.wastu.artha.ui.formatMoney
 import net.wastu.artha.ui.transactionHumanLine
+import net.wastu.artha.ui.components.collectOrDefault
 
 private data class SearchEntry(val transaction: UnifiedTransaction, val fields: List<String>)
 private data class SearchResults(val query: String, val transactions: List<UnifiedTransaction>)
@@ -81,7 +82,7 @@ fun SearchTransactionsScreen(
     var showFilter by rememberSaveable { mutableStateOf(false) }
     val dateRange = if (firstDay != null || lastDay != null) firstDay to lastDay else null
     val showCategory = true
-    val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(CategoryProgress()) }
+    val categoryProgress by viewModel?.categoryProgress.collectOrDefault(CategoryProgress())
     val allTransactions by viewModel?.allTransactions?.collectAsStateWithLifecycle()
         ?: remember(ledgerState) { mutableStateOf((ledgerState as? LedgerState.Ready)?.transactions.orEmpty()) }
     val debitTransactions = allTransactions

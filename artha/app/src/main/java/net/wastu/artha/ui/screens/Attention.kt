@@ -31,12 +31,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import net.wastu.artha.ArthaApplication
 import net.wastu.artha.data.attention.AttentionAction
 import net.wastu.artha.data.attention.NeedsAttention
+import net.wastu.artha.ui.components.collectOrDefault
 
 /** Current attention items; empty in previews. */
 @Composable
 internal fun rememberAttentionItems(): List<NeedsAttention> {
     val repository = (LocalContext.current.applicationContext as? ArthaApplication)?.attention
-    val items by repository?.items?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyList()) }
+    val items by repository?.items.collectOrDefault(emptyList())
     return items
 }
 

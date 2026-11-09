@@ -52,6 +52,7 @@ import kotlinx.coroutines.launch
 import net.wastu.artha.ArthaApplication
 import net.wastu.artha.core.update.UpdateState
 import net.wastu.artha.ui.components.PageScaffold
+import net.wastu.artha.ui.components.collectOrDefault
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,8 +62,8 @@ internal fun UpdatesScreen(onBack: () -> Unit) {
     val updater = app?.updater
     val scope = rememberCoroutineScope()
 
-    val state by updater?.state?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(UpdateState.Idle) }
-    val autoUpdate by updater?.autoUpdate?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(true) }
+    val state by updater?.state.collectOrDefault(UpdateState.Idle)
+    val autoUpdate by updater?.autoUpdate.collectOrDefault(true)
 
     var canRequestInstalls by remember {
         mutableStateOf(context.packageManager.canRequestPackageInstalls())

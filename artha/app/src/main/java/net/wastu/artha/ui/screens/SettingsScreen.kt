@@ -43,6 +43,7 @@ import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.Page
 import net.wastu.artha.ui.components.PageScaffold
 import net.wastu.artha.ui.components.Segment
+import net.wastu.artha.ui.components.collectOrDefault
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,7 +51,7 @@ internal fun SettingsScreen(
     viewModel: ArthaViewModel?,
     onOpen: (Page) -> Unit,
 ) {
-    val snapshot by viewModel?.analysisSnapshot?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val snapshot by viewModel?.analysisSnapshot.collectOrDefault(null)
     val tunnelState by ApiServerController.tunnelState.collectAsStateWithLifecycle()
     val config = snapshot?.aiConfig
     val aiSummary = if (config != null && config.baseUrl.isNotBlank() && config.apiKey.isNotBlank() && config.model.isNotBlank()) "On" else "Not set up"
@@ -62,7 +63,7 @@ internal fun SettingsScreen(
     }
     val context = LocalContext.current
     val updater = (context.applicationContext as? ArthaApplication)?.updater
-    val updateState by updater?.state?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val updateState by updater?.state.collectOrDefault(null)
     val updateSummary = when (val s = updateState) {
         is UpdateState.Ready -> "Update ready (${s.versionName})"
         is UpdateState.Downloading -> "Downloading... (${(s.progress * 100).toInt()}%)"

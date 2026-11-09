@@ -17,6 +17,7 @@ import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.analysis.CategoryProgress
 import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.LedgerState
+import net.wastu.artha.ui.components.collectOrDefault
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -31,10 +32,10 @@ fun LedgerScreen(
     filters: TransactionFilters = TransactionFilters(),
     onFiltersChanged: (TransactionFilters) -> Unit = {},
 ) {
-    val dateRange by viewModel?.dateRangeFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
-    val refreshing by viewModel?.refreshing?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
-    val category by viewModel?.categoryFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
-    val categoryProgress by viewModel?.categoryProgress?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(CategoryProgress()) }
+    val dateRange by viewModel?.dateRangeFilter.collectOrDefault(null)
+    val refreshing by viewModel?.refreshing.collectOrDefault(false)
+    val category by viewModel?.categoryFilter.collectOrDefault(null)
+    val categoryProgress by viewModel?.categoryProgress.collectOrDefault(CategoryProgress())
     val showCategory = true
     // Category drill-down is all-source confirmed spending; prior browsing choices stay intact for Back.
     val effectiveFilters = if (category == null) filters.copy(direction = null) else TransactionFilters()
@@ -54,7 +55,7 @@ fun LedgerScreen(
         dateRange?.let { add(ActiveTransactionFilter(periodLabel(it, LocalDate.now(AccountingTime.clock))) { viewModel?.clearDateRangeFilter() }) }
     }
     val today = remember { LocalDate.now(AccountingTime.clock.withZone(AccountingTime.zone)) }
-    val typeFilter by viewModel?.typeFilter?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(null) }
+    val typeFilter by viewModel?.typeFilter.collectOrDefault(null)
     val allDebitTransactions = remember(state) { (state as? LedgerState.Ready)?.transactions.orEmpty() }
     val filteredTransactions = remember(allDebitTransactions, effectiveFilters, typeFilter, category) {
         allDebitTransactions.filter { effectiveFilters.matches(it) && (category != null || typeFilter == null || it.type == typeFilter) }
