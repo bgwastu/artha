@@ -44,8 +44,8 @@ import net.wastu.artha.ui.ArthaViewModel
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.NavigationRail
-import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.WideNavigationRail
+import androidx.compose.material3.WideNavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -178,7 +178,7 @@ fun HomeScreen(
                             }
                         }
                     },
-                    title = { Text(destination.label, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    title = { Text(destination.label, style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     actions = {
                         if (destination == Destination.TRANSACTIONS) {
                             IconButton(onClick = onRefresh, enabled = !refreshing || automaticImport) {
@@ -217,10 +217,10 @@ fun HomeScreen(
         ) { padding ->
             Row(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
                 if (showRail) {
-                    NavigationRail(modifier = Modifier.width(if (largeNavigationText) 128.dp else 80.dp)) {
+                    WideNavigationRail(modifier = Modifier.width(if (largeNavigationText) 128.dp else 96.dp)) {
                         Destination.entries.forEach { item ->
-                            NavigationRailItem(
-                                modifier = Modifier.fillMaxWidth(),
+                            WideNavigationRailItem(
+                                railExpanded = false,
                                 selected = destination == item,
                                 onClick = { destination = item },
                                 icon = { Icon(item.icon, contentDescription = null) },

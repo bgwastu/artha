@@ -193,7 +193,7 @@ fun AnalysisScreen(
                 ) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(if (analysis.type == net.wastu.artha.core.model.TransactionType.INCOME) (if (canGoNext) "Income" else "Income to date") else if (canGoNext) "Spending" else "Spending to date", style = MaterialTheme.typography.labelMedium)
-                        Text("Rp0", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                        Text("Rp0", style = MaterialTheme.typography.headlineMediumEmphasized, )
                         Text(if (analysis.type == net.wastu.artha.core.model.TransactionType.INCOME) "No income this month" else "No confirmed spending this month", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }

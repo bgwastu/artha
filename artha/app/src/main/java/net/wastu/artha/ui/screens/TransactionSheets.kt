@@ -401,8 +401,7 @@ private fun TransactionDetailsBody(
                 SourceHeader(record.provider, formatDate(record.occurredAt))
                 Text(
                     paymentRowAmount(record),
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.headlineMediumEmphasized,
                     color = if (!credit && isReversal) MaterialTheme.colorScheme.onSurfaceVariant
                         else if (credit) incomeColor() else expenseColor(),
                 )
@@ -414,7 +413,7 @@ private fun TransactionDetailsBody(
                 if (feedback != null && feedback != "Category saved" && !feedback.startsWith("Updated ")) {
                     SaveFeedback(feedback, false)
                 }
-                Text(humanTitle, style = MaterialTheme.typography.titleLarge)
+                Text(humanTitle, style = MaterialTheme.typography.titleLargeEmphasized)
                 DisableSelection {
                     TagRow(tags)
                     if (records.isNotEmpty()) GroupRecordsSection(records, record.occurredAt, linkedRecordsExplanation(record)) { state.recordIndex = it }
@@ -832,7 +831,7 @@ private fun GroupRecordDetails(item: GroupRecord, minHeight: androidx.compose.ui
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to transaction") }
                 Spacer(Modifier.width(4.dp))
             }
-            Text(item.role, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+            Text(item.role, style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.semantics { heading() })
         }
     SelectionContainer {
         Column(
@@ -841,9 +840,8 @@ private fun GroupRecordDetails(item: GroupRecord, minHeight: androidx.compose.ui
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             SourceHeader(tx.provider, formatDate(tx.occurredAt))
-            Text(item.signedAmount, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
-                color = if (tx.direction == Direction.CREDIT) incomeColor() else expenseColor())
-            Text(item.title, style = MaterialTheme.typography.titleLarge)
+            Text(item.signedAmount, style = MaterialTheme.typography.headlineMediumEmphasized, color = if (tx.direction == Direction.CREDIT) incomeColor() else expenseColor())
+            Text(item.title, style = MaterialTheme.typography.titleLargeEmphasized)
             DisableSelection { TagRow(item.tags) }
             DetailRow("Reference", tx.providerTransactionId)
             (payload?.detailText("sourcePaymentMethod") ?: payload?.detailText("paymentMethod"))?.let { DetailRow("Payment method", it) }
@@ -945,7 +943,7 @@ private fun CategoryPickerView(
             }
             Text(
                 "Category",
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.titleLargeEmphasized,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
             )
@@ -1074,7 +1072,7 @@ private fun TransactionNoteEditor(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Note", style = MaterialTheme.typography.titleLarge)
+        Text("Note", style = MaterialTheme.typography.titleLargeEmphasized)
         OutlinedTextField(
             value = text, onValueChange = onTextChange, label = { Text("Personal note") },
             enabled = !saving, minLines = 3, maxLines = 8, modifier = Modifier.fillMaxWidth(),

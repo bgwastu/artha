@@ -406,7 +406,7 @@ private fun TransactionFilterSheet(
         ModalBottomSheet(onDismissRequest = onDismiss, sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
             Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).imePadding()) {
                 Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Filters", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    Text("Filters", style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.weight(1f))
                     TextButton(onClick = { draft = TransactionFilters(); dates = null; clearCategory = true }) { Text("Reset") }
                 }
                 Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
@@ -889,8 +889,7 @@ private fun TotalsSummary(
                 Text("Difference", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
                     formatNetTotal(net),
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.headlineMediumEmphasized,
                     color = when {
                         net > 0L -> incomeColor()
                         net < 0L -> expenseColor()
@@ -933,7 +932,7 @@ private fun DayTotalsSheet(
     val monthActive = activeRange == monthStart to monthEnd
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text(dayLabel(group.date), style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+            Text(dayLabel(group.date), style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.semantics { heading() })
             TotalsSummary(
                 label = group.date.format(DateTimeFormatter.ofPattern("d MMM yyyy", Locale.US)),
                 count = group.transactions.size,
