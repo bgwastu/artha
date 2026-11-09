@@ -62,15 +62,6 @@ internal fun widgetFreshness(updatedAt: Long?, now: Long, updating: Boolean = fa
     return if (state == "Updated") "$state $time" else "$state\nUpdated $time"
 }
 
-/** Fixed dark widget palette, independent of the host launcher's theme. */
-internal object WidgetPalette {
-    const val background = 0xFF1A1C1E.toInt()
-    const val text = 0xFFF1F0F4.toInt()
-    const val supporting = 0xFFC4C6CF.toInt()
-    const val income = 0xFFAACAB2.toInt()
-    const val expense = 0xFFD6ADAD.toInt()
-}
-
 /** Aggregates can be zero even though individual recorded payments must be positive. */
 internal data class AnalysisWidgetAmounts(val total: String, val previous: String?)
 internal fun analysisWidgetAmounts(analysis: MonthSpendingAnalysis): AnalysisWidgetAmounts {

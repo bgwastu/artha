@@ -19,18 +19,10 @@ class AiCategorizationTest {
     private val snapshot = AnalysisSnapshot()
     private val batch get() = AiCategorization.nextBatch(listOf(payment), snapshot)
 
-    @Test fun decorationAndSummaryChangesDoNotRestartCategoryRequests() {
-        val changed = snapshot.copy(categoryIcons = mapOf("Groceries" to "leaf"),
-            updatedAt = mapOf("icon:Groceries" to 10))
-        assertEquals(AiCategorization.requestSnapshot(snapshot), AiCategorization.requestSnapshot(changed))
-        assertNotEquals(AiCategorization.requestSnapshot(snapshot), AiCategorization.requestSnapshot(changed.copy(userNotes = mapOf(payment.key to "Context"))))
-        assertNotEquals(AiCategorization.requestSnapshot(snapshot), AiCategorization.requestSnapshot(changed.copy(manualCategories = setOf(payment.key))))
-    }
-
     @Test fun noProviderKeywordOrPersonalNoteInventsACategory() {
         for (tx in listOf(payment, payment.copy(provider = Provider.SHOPEE), payment.copy(rawPayload = """{"serviceTier":"GoFood","pickupLocation":"here"}"""))) {
             assertNull(SpendingProjector().project(listOf(tx), snapshot).transactions.single().category)
-            assertNull(TransactionMetadata.enrich(tx, snapshot.copy(userNotes = mapOf(tx.key to "groceries"))).category)
+            assertNull(SpendingProjector().project(listOf(tx), snapshot.copy(userNotes = mapOf(tx.key to "groceries"))).transactions.single().category)
         }
         val oldRules = snapshot.copy(categories = mapOf(payment.key to "Dining Out"), reasons = mapOf(payment.key to "Local provider and merchant rule; you can choose a different category."))
         assertNull(SpendingProjector().project(listOf(payment), oldRules).transactions.single().category)

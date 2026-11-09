@@ -59,7 +59,6 @@ class CategorySourceResolverTest {
             reasons = mapOf(tx.key to "AI suggestion: Morning espresso run"),
         )
         assertEquals(CategorySource.AI, categorySource(tx, snapshot))
-        assertEquals("Morning espresso run", aiCategoryReason(snapshot, tx.key))
 
         // Precedence: manual overrides AI reason
         val manualTx = spending("tx_ai", manual = true)
@@ -67,7 +66,6 @@ class CategorySourceResolverTest {
 
         val manualSnapshot = snapshot.copy(manualCategories = setOf(tx.key))
         assertEquals(CategorySource.MANUAL, categorySource(tx, manualSnapshot))
-        assertNull(aiCategoryReason(manualSnapshot, tx.key))
     }
 
     @Test
@@ -98,26 +96,6 @@ class CategorySourceResolverTest {
             reasons = mapOf(tx.key to "Rule matched"),
         )
         assertEquals(CategorySource.NONE, categorySource(tx, snapshotWithOtherReason))
-        assertNull(aiCategoryReason(snapshotWithOtherReason, tx.key))
-    }
-
-    @Test
-    fun hasItemDetailsDetection() {
-        val withItems = spending(id = "items").copy(rawPayload = """{"items":[{"name":"Coffee","qty":1}]}""")
-        val withOrderItems = spending(id = "orderItems").copy(rawPayload = """{"orderItems":[{"name":"Item"}]}""")
-        val withProducts = spending(id = "products").copy(rawPayload = """{"products":[{"name":"Item"}]}""")
-        val withMenu = spending(id = "menu").copy(rawPayload = """{"menu":[{"name":"Item"}]}""")
-        val emptyItems = spending(id = "empty").copy(rawPayload = """{"items":[]}""")
-        val noItems = spending(id = "none").copy(rawPayload = """{"description":"Coffee"}""")
-        val nestedGrouped = spending(id = "nested").copy(rawPayload = """{"groupedTransactions":[{"rawPayload":"{\"items\":[{\"name\":\"Nested Item\"}]}"}]}""")
-
-        assertTrue(hasItemDetails(withItems))
-        assertTrue(hasItemDetails(withOrderItems))
-        assertTrue(hasItemDetails(withProducts))
-        assertTrue(hasItemDetails(withMenu))
-        assertTrue(hasItemDetails(nestedGrouped))
-        assertFalse(hasItemDetails(emptyItems))
-        assertFalse(hasItemDetails(noItems))
     }
 
     @Test

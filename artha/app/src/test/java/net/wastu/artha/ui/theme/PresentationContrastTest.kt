@@ -5,7 +5,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import java.io.File
 import kotlin.math.pow
-import net.wastu.artha.ui.widget.WidgetPalette
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -57,22 +56,27 @@ class PresentationContrastTest {
         }
     }
 
-    @Test fun widgetPaletteAndActualLayoutTextColorsContrastWithItsBackground() {
-        listOf(WidgetPalette.text, WidgetPalette.supporting, WidgetPalette.income, WidgetPalette.expense).forEach {
-            assertTrue(contrastRatio(it, WidgetPalette.background) >= 4.5)
-        }
+    @Test fun widgetTextAndTagColorsContrastWithTheirBackgroundsInLightAndNight() {
         val resources = listOf(File("src/main/res"), File("app/src/main/res"), File("artha/app/src/main/res"))
             .first { it.isDirectory }
-        val drawable = File(resources, "drawable/bg_widget_analysis.xml").readText()
-        assertTrue(drawable.contains("@color/widget_background"))
+        listOf("values", "values-night").forEach { folder ->
+            val colors = Regex("<color name=\"(\\w+)\">#([0-9A-Fa-f]{6})</color>")
+                .findAll(File(resources, "$folder/colors.xml").readText())
+                .associate { it.groupValues[1] to (0xff000000L or it.groupValues[2].toLong(16)).toInt() }
+            listOf("widget_text_primary", "widget_text_secondary", "widget_amount_incoming", "widget_amount_outgoing", "widget_amount_supporting")
+                .forEach { name -> assertContrast("$folder $name", colors, name, "widget_background") }
+            assertContrast("$folder tag secondary", colors, "widget_tag_secondary_text", "widget_tag_secondary_background")
+            assertContrast("$folder tag tertiary", colors, "widget_tag_tertiary_text", "widget_tag_tertiary_background")
+        }
         listOf("widget_analysis.xml", "widget_transactions.xml", "widget_transaction_item.xml", "widget_transaction_day.xml").forEach { name ->
             val xml = File(resources, "layout/$name").readText()
-            Regex("android:textColor=\"#([0-9A-Fa-f]{6})\"").findAll(xml).forEach { match ->
-                val color = (0xff000000L or match.groupValues[1].toLong(16)).toInt()
-                assertTrue("$name ${match.value}", contrastRatio(color, WidgetPalette.background) >= 4.5)
-            }
             assertTrue("$name has placeholder money", !Regex("android:text=\"[^\"]*Rp").containsMatchIn(xml))
         }
+    }
+
+    private fun assertContrast(label: String, colors: Map<String, Int>, foreground: String, background: String) {
+        val ratio = contrastRatio(colors.getValue(foreground), colors.getValue(background))
+        assertTrue("$label contrast $ratio", ratio >= 4.5)
     }
 }
 

@@ -9,8 +9,6 @@ import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.UnifiedTransaction
 
-private val IndonesianLocale = Locale.forLanguageTag("id-ID")
-
 private val TransactionDateFormatter: DateTimeFormatter = DateTimeFormatter
     .ofPattern("d MMM yyyy, HH:mm", Locale.US)
     .withZone(AccountingTime.zone)

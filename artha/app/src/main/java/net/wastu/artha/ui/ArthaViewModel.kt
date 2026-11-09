@@ -97,8 +97,6 @@ class ArthaViewModel(
     val allTransactions = _reconciledCache.asStateFlow()
     private val _monthAnalysis = MutableStateFlow(BudgetAnalyzer.analyzeMonth(_selectedMonth.value, emptyList()))
     val monthAnalysis = _monthAnalysis.asStateFlow()
-    private val _settingsError = MutableStateFlow<String?>(null)
-    val settingsError = _settingsError.asStateFlow()
     private val _refreshing = MutableStateFlow(false)
     val refreshing = _refreshing.asStateFlow()
     private val _automaticImportActive = MutableStateFlow(false)
@@ -454,7 +452,6 @@ class ArthaViewModel(
                     e.message ?: "AI settings could not be saved securely"
                 }
             }
-            _settingsError.value = error
             onComplete(error)
         }
     }

@@ -6,7 +6,6 @@ import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.TransactionClassifier
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.analysis.PaymentCategoryState
-import net.wastu.artha.data.analysis.paymentCategoryStateLabel
 import org.json.JSONException
 import org.json.JSONObject
 
@@ -31,11 +30,5 @@ internal fun linkedRecordsExplanation(transaction: UnifiedTransaction): String? 
         "Counted once in spending." else null
 }
 
-internal fun paymentCategoryRowSupporting(state: PaymentCategoryState): String? =
-    paymentCategoryStateLabel(state)
-
 internal fun paymentNoteRowSupporting(state: PaymentCategoryState): String? =
     if (state != PaymentCategoryState.IDLE) "Locked while categorizing" else null
-
-internal fun canEditTransaction(state: PaymentCategoryState, hasStore: Boolean): Boolean =
-    hasStore && state == PaymentCategoryState.IDLE

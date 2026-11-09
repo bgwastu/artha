@@ -114,17 +114,16 @@ class TransactionEditFeedbackTest {
         } finally { Dispatchers.resetMain() }
     }
 
-    @Test fun manualChoiceAndNoteSurviveFreshFactsAndAutomaticInsights() {
+    @Test fun manualChoiceAndNoteSurviveFreshFacts() {
         val tx = payment()
         val chosen = AnalysisSnapshot(
             userNotes = mapOf(tx.key to "First line\nSecond line"),
             categories = mapOf(tx.key to "A long fictional manual category name"),
             manualCategories = setOf(tx.key), updatedAt = mapOf("cat:${tx.key}" to 20, "note:${tx.key}" to 20),
         )
-        val automated = TransactionMetadata.applyAutomatic(chosen, mapOf(tx.key to ("Dining Out" to "Suggestion")), 30)
         val projector = SpendingProjector()
-        val first = projector.project(listOf(tx), automated).transactions.single()
-        val fresh = projector.project(listOf(tx.copy(description = "Updated fictional payment")), automated).transactions.single()
+        val first = projector.project(listOf(tx), chosen).transactions.single()
+        val fresh = projector.project(listOf(tx.copy(description = "Updated fictional payment")), chosen).transactions.single()
         for (record in listOf(first, fresh)) {
             assertEquals("A long fictional manual category name", record.category)
             assertEquals("First line\nSecond line", record.userNote)

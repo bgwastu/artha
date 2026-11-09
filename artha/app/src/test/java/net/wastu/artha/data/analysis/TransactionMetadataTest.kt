@@ -13,14 +13,9 @@ class TransactionMetadataTest {
         val b = tx(Provider.JAGO, "112")
         val c = tx(Provider.SHOPEE, "12")
         val snapshot = AnalysisSnapshot(userNotes = mapOf(a.key to "Only this one"))
-        assertEquals("Only this one", TransactionMetadata.enrich(a, snapshot).userNote)
-        assertNull(TransactionMetadata.enrich(b, snapshot).userNote)
-        assertNull(TransactionMetadata.enrich(c, snapshot).userNote)
-    }
-
-    @Test fun automaticClassificationPreservesManualChoice() {
-        val tx = tx(Provider.JAGO, "12")
-        val snapshot = AnalysisSnapshot(categories = mapOf(tx.key to "Groceries"), manualCategories = setOf(tx.key))
-        assertEquals(snapshot, TransactionMetadata.applyAutomatic(snapshot, mapOf(tx.key to ("Dining Out" to "AI")), 100))
+        val notes = SpendingProjector().project(listOf(a, b, c), snapshot).transactions.associate { it.key to it.userNote }
+        assertEquals("Only this one", notes[a.key])
+        assertNull(notes[b.key])
+        assertNull(notes[c.key])
     }
 }

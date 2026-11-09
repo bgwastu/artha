@@ -36,18 +36,6 @@ sealed interface RecategorizeScope {
     data object AllPending : RecategorizeScope
 }
 
-fun recategorizeLabel(scope: RecategorizeScope): String = when (scope) {
-    is RecategorizeScope.Payment -> "Re-categorize with AI"
-    is RecategorizeScope.CategoryInMonth -> "Re-categorize these payments with AI"
-    is RecategorizeScope.Month -> "Re-categorize this month"
-    RecategorizeScope.Uncategorized -> "Re-categorize Uncategorized"
-    RecategorizeScope.NeedsReview -> "Re-check payments to review"
-    RecategorizeScope.All -> "Re-categorize all"
-    is RecategorizeScope.New -> "Categorize new payments"
-    is RecategorizeScope.MonthPending -> "Categorize this month"
-    RecategorizeScope.AllPending -> "Categorize all history"
-}
-
 /** Confirmation text for runs that relabel many payments; null when no confirmation is needed. */
 fun recategorizeConfirmation(scope: RecategorizeScope, count: Int, monthLabel: String? = null): String? = when (scope) {
     is RecategorizeScope.Month -> "Re-categorize $count payments in ${monthLabel ?: scope.month}? Your own picks stay the same."

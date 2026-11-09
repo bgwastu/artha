@@ -21,7 +21,6 @@ class AiConfigSaveFeedbackTest {
             val completed = CompletableDeferred<String?>()
             model.updateAiConfig(AiConfig()) { completed.complete(it) }
             assertEquals("AI settings are unavailable", completed.await())
-            assertEquals("AI settings are unavailable", model.settingsError.value)
         } finally {
             Dispatchers.resetMain()
         }

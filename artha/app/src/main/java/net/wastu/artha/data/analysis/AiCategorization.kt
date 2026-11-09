@@ -44,12 +44,6 @@ object AiCategorization {
     internal fun isSchemaSupported(config: AiConfig): Boolean =
         config !in unsupportedSchemaConfigs
 
-    /** UI decoration updates must not cancel a category request. */
-    fun requestSnapshot(snapshot: AnalysisSnapshot): AnalysisSnapshot = snapshot.copy(
-        categoryIcons = emptyMap(), deletedCategories = emptyMap(),
-        updatedAt = snapshot.updatedAt.filterKeys { it.startsWith("cat:") || it.startsWith("note:") },
-    )
-
     fun categories(snapshot: AnalysisSnapshot, type: TransactionType): List<String> =
         snapshot.categoriesFor(type).distinct()
 

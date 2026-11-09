@@ -231,9 +231,6 @@ class AnalysisStore(context: Context) {
         _snapshot.value = _snapshot.value.copy(manualCategories = manual)
     }
 
-    fun commitCategorySuggestions(candidates: List<CategoryCandidate>, suggestions: Map<String, CategorySuggestion>, input: AnalysisSnapshot): Int =
-        commitCategorySuggestionKeys(candidates, suggestions, input).size
-
     /** Saves the suggestions whose input is unchanged since [input]; returns the keys actually saved. */
     @Synchronized
     fun commitCategorySuggestionKeys(candidates: List<CategoryCandidate>, suggestions: Map<String, CategorySuggestion>, input: AnalysisSnapshot): Set<String> {

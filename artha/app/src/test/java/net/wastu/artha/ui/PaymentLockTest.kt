@@ -10,8 +10,6 @@ import net.wastu.artha.data.analysis.PaymentCategoryState
 import net.wastu.artha.data.analysis.paymentCategoryState
 import net.wastu.artha.data.analysis.paymentCategoryStateLabel
 import net.wastu.artha.ui.screens.TransactionDetailsState
-import net.wastu.artha.ui.screens.canEditTransaction
-import net.wastu.artha.ui.screens.paymentCategoryRowSupporting
 import net.wastu.artha.ui.screens.paymentNoteRowSupporting
 import org.junit.Assert.*
 import org.junit.Test
@@ -47,23 +45,14 @@ class PaymentLockTest {
     }
 
     @Test
-    fun rowSupportingLabelsAndEditVisibilityHelpers() {
+    fun rowSupportingLabelsFollowCategoryState() {
         assertNull(paymentCategoryStateLabel(PaymentCategoryState.IDLE))
         assertEquals("Queued", paymentCategoryStateLabel(PaymentCategoryState.QUEUED))
         assertEquals("Categorizing", paymentCategoryStateLabel(PaymentCategoryState.CATEGORIZING))
 
-        assertNull(paymentCategoryRowSupporting(PaymentCategoryState.IDLE))
-        assertEquals("Queued", paymentCategoryRowSupporting(PaymentCategoryState.QUEUED))
-        assertEquals("Categorizing", paymentCategoryRowSupporting(PaymentCategoryState.CATEGORIZING))
-
         assertNull(paymentNoteRowSupporting(PaymentCategoryState.IDLE))
         assertEquals("Locked while categorizing", paymentNoteRowSupporting(PaymentCategoryState.QUEUED))
         assertEquals("Locked while categorizing", paymentNoteRowSupporting(PaymentCategoryState.CATEGORIZING))
-
-        assertTrue(canEditTransaction(PaymentCategoryState.IDLE, hasStore = true))
-        assertFalse(canEditTransaction(PaymentCategoryState.IDLE, hasStore = false))
-        assertFalse(canEditTransaction(PaymentCategoryState.QUEUED, hasStore = true))
-        assertFalse(canEditTransaction(PaymentCategoryState.CATEGORIZING, hasStore = true))
     }
 
 
