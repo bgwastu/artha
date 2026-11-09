@@ -1,12 +1,10 @@
 package net.wastu.artha.ui.screens
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,28 +12,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.EditNote
-import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.ShoppingBag
-import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetValue
@@ -43,8 +27,6 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.SuggestionChip
-import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -62,10 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
@@ -77,13 +56,10 @@ import net.wastu.artha.data.analysis.CategorySource
 import net.wastu.artha.data.analysis.INITIAL_DEFAULT_CATEGORIES
 import net.wastu.artha.data.analysis.INITIAL_INCOME_CATEGORIES
 import net.wastu.artha.data.analysis.PaymentCategoryState
-import net.wastu.artha.data.analysis.RecategorizeScope
-import net.wastu.artha.data.analysis.categoryReasonText
 import net.wastu.artha.data.analysis.categorySource
 import net.wastu.artha.data.analysis.paymentCategoryState
 import net.wastu.artha.data.analysis.paymentCategoryStateLabel
 import net.wastu.artha.ui.ArthaViewModel
-import net.wastu.artha.ui.categoryIconFor
 import net.wastu.artha.ui.formatDate
 import net.wastu.artha.ui.formatMoney
 import net.wastu.artha.ui.groupRecords
@@ -292,7 +268,6 @@ private fun TransactionDetailsBody(
     val showCounterpart = counterpart != null && !humanTitle.contains(counterpart, ignoreCase = true)
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    var showReplaceManualDialog by remember(record.key) { mutableStateOf(false) }
 
     Box(Modifier.fillMaxWidth()) {
         if (state.editor == "category") {
@@ -390,150 +365,21 @@ private fun TransactionDetailsBody(
                     TagRow(tags)
                     if (records.isNotEmpty()) GroupRecordsSection(records, record.occurredAt, linkedRecordsExplanation(record)) { state.recordIndex = it }
 
-                    if (recordType != TransactionType.TRANSFER) {
-                        Column(Modifier.padding(top = if (records.isNotEmpty()) SectionGap else 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            DetailEditRow(
-                                label = "Category", value = currentCategory,
-                                supportingContent = if (isBusy && busyLabel != null) {
-                                    {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        ) {
-                                            LoadingIndicator(
-                                                modifier = Modifier.size(13.dp),
-                                            )
-                                            Text(
-                                                busyLabel,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.primary,
-                                            )
-                                        }
-                                    }
-                                } else when (categorySource) {
-                                    CategorySource.MANUAL -> ({
-                                        Text("Set by you", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    })
-                                    CategorySource.AI -> ({
-                                        Text(sureText("Suggested by AI", snapshot?.aiRecords?.get(record.key)?.confidence), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    })
-                                    CategorySource.MERCHANT -> ({
-                                        Text("Same merchant", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    })
-                                    CategorySource.REVIEW -> ({
-                                        Text(sureText("Needs review", snapshot?.aiRecords?.get(record.key)?.confidence), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
-                                    })
-                                    CategorySource.FAILED -> ({
-                                        Text("Couldn't categorize", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                                    })
-                                    CategorySource.PENDING -> ({
-                                        Text("Waiting for AI", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    })
-                                    CategorySource.NONE -> null
-                                },
-                                icon = categoryIconFor(currentCategory, snapshot?.categoryIcons.orEmpty()),
-                                enabled = viewModel?.analysisStore != null && !isBusy,
-                            ) {
-                                if (!isBusy) {
-                                    state.categoryDraft = currentCategory; state.saveError = null; state.savedFeedback = null; state.editor = "category"
-                                }
-                            }
-                            if (snapshot != null) {
-                                val reason = categoryReasonText(snapshot, record.key)
-                                if (reason != null && !isBusy) Text(
-                                    reason,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 4,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(start = 36.dp),
-                                )
-                                FlowRow(
-                                    modifier = Modifier.padding(start = 36.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    AssistChip(
-                                        onClick = {
-                                            if (categorySource == CategorySource.MANUAL) {
-                                                showReplaceManualDialog = true
-                                            } else {
-                                                viewModel?.recategorize(RecategorizeScope.Payment(record.key))
-                                            }
-                                        },
-                                        enabled = !isBusy,
-                                        label = { Text(if (isBusy) "Categorizing" else "Re-categorize") },
-                                        leadingIcon = {
-                                            if (isBusy) {
-                                                LoadingIndicator(
-                                                    modifier = Modifier.size(AssistChipDefaults.IconSize),
-                                                )
-                                            } else {
-                                                Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize))
-                                            }
-                                        },
-                                    )
-                                    if (categorySource == CategorySource.REVIEW && !isBusy) {
-                                        SuggestionChip(
-                                            onClick = {
-                                                viewModel?.confirmCategory(record, currentCategory) { result ->
-                                                    if (result.isSuccess) {
-                                                        scope.launch {
-                                                            snackbarHostState.showSnackbar("Category saved")
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                            label = { Text("Looks right") },
-                                            icon = {
-                                                Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(SuggestionChipDefaults.IconSize))
-                                            },
-                                        )
-                                    }
-                                }
-                                if (showReplaceManualDialog) {
-                                    AlertDialog(
-                                        onDismissRequest = { showReplaceManualDialog = false },
-                                        title = { Text("Replace your pick?") },
-                                        text = { Text("AI will choose a new category for this payment.") },
-                                        confirmButton = {
-                                            TextButton(
-                                                onClick = {
-                                                    showReplaceManualDialog = false
-                                                    viewModel?.recategorize(RecategorizeScope.Payment(record.key, replaceManual = true))
-                                                },
-                                            ) {
-                                                Text("Replace")
-                                            }
-                                        },
-                                        dismissButton = {
-                                            TextButton(onClick = { showReplaceManualDialog = false }) {
-                                                Text("Cancel")
-                                            }
-                                        },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    if (viewModel?.analysisStore != null && records.isEmpty()) {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(
-                                TransactionType.EXPENSE to "Expense",
-                                TransactionType.INCOME to "Income",
-                                TransactionType.TRANSFER to "Transfer",
-                            ).forEach { (type, label) ->
-                                FilterChip(
-                                    selected = recordType == type,
-                                    onClick = { if (recordType != type) viewModel.setTransactionType(record, type) },
-                                    label = { Text(label) },
-                                )
-                            }
-                            if (snapshot?.typeOverrides?.containsKey(record.key) == true) {
-                                TextButton(onClick = { viewModel.setTransactionType(record, null) }) { Text("Reset") }
-                            }
-                        }
-                    }
+                    if (recordType != TransactionType.TRANSFER) CategorySection(
+                        record = record, viewModel = viewModel, snapshot = snapshot,
+                        categorySource = categorySource, currentCategory = currentCategory,
+                        isBusy = isBusy, busyLabel = busyLabel, hasRecords = records.isNotEmpty(),
+                        snackbarHostState = snackbarHostState,
+                        onEdit = {
+                            if (!isBusy) { state.categoryDraft = currentCategory; state.saveError = null; state.savedFeedback = null; state.editor = "category" }
+                        },
+                    )
+                    if (viewModel?.analysisStore != null && records.isEmpty()) TransactionTypeChips(
+                        current = recordType,
+                        overridden = snapshot?.typeOverrides?.containsKey(record.key) == true,
+                        onSelect = { viewModel.setTransactionType(record, it) },
+                        onReset = { viewModel.setTransactionType(record, null) },
+                    )
                     DetailEditRow(
                         label = "Note", value = currentNote.ifBlank { "Add note" },
                         icon = Icons.Default.EditNote,
@@ -546,126 +392,11 @@ private fun TransactionDetailsBody(
                     }
                 }
 
-                if (showRoute) {
-                    DetailCard("Trip") {
-                        payload?.detailText("serviceTier")?.let {
-                            Text(
-                                it,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                    MaterialTheme.shapes.small,
-                                )
-                                .padding(12.dp),
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.Top,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.MyLocation,
-                                    contentDescription = "Pickup",
-                                    tint = incomeColor(),
-                                    modifier = Modifier.size(20.dp).padding(top = 2.dp),
-                                )
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        "Pick-up",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                    Text(
-                                        pickup.orEmpty(),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Medium,
-                                    )
-                                }
-                            }
-                            Box(
-                                Modifier
-                                    .padding(start = 9.dp, top = 4.dp, bottom = 4.dp)
-                                    .width(2.dp)
-                                    .height(20.dp)
-                                    .background(MaterialTheme.colorScheme.outlineVariant),
-                            )
-                            Row(
-                                verticalAlignment = Alignment.Top,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.LocationOn,
-                                    contentDescription = "Dropoff",
-                                    tint = expenseColor(),
-                                    modifier = Modifier.size(20.dp).padding(top = 2.dp),
-                                )
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        "Drop-off",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                    Text(
-                                        dropoff.orEmpty(),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Medium,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+                if (showRoute) TripCard(payload?.detailText("serviceTier"), pickup.orEmpty(), dropoff.orEmpty())
 
-                if (showOrder) {
-                    DetailCard("Items") {
-                        if (showShopInItems) {
-                            Text(shopLabel.orEmpty(), style = MaterialTheme.typography.titleSmall)
-                        }
-                        for (index in 0 until (items?.length() ?: 0)) {
-                            val item = items?.optJSONObject(index) ?: continue
-                            val name = item.detailText("name") ?: continue
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text(name, style = MaterialTheme.typography.bodyLarge)
-                                    item.detailText("qty")?.let {
-                                        Text("Qty $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                                item.detailText("price")?.let { Text(itemPriceText(it), style = MaterialTheme.typography.titleSmall) }
-                            }
-                        }
-                        notes?.let {
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.ShoppingBag, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
-                                Column(Modifier.weight(1f)) {
-                                    Text("Order Note", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text(it, style = MaterialTheme.typography.bodyMedium)
-                                }
-                            }
-                        }
-                    }
-                }
+                if (showOrder && items != null) OrderItemsCard(items, shopLabel.takeIf { showShopInItems }, notes)
 
-                if (showGoPayDetails) {
-                    DetailCard("Payment details") {
-                        for (index in 0 until detailViewItems!!.length()) {
-                            val row = detailViewItems.optJSONObject(index) ?: continue
-                            val label = row.detailText("title") ?: row.detailText("label")
-                            val value = row.detailText("value") ?: continue
-                            if (label != null) {
-                                DetailRow(label, value)
-                            } else {
-                                Text(value, style = MaterialTheme.typography.bodyMedium)
-                            }
-                        }
-                    }
-                }
+                if (showGoPayDetails && detailViewItems != null) PaymentDetailsCard(detailViewItems)
 
                 // Set apart from the sections above, so these read as facts about the whole payment.
                 val hasFacts = paymentLabel != null || (showCounterpart && counterpart != null) || record.pocket != null || (notes != null && !showOrder)
