@@ -38,8 +38,6 @@ data class AnalysisSnapshot(
     /** What the AI knows about each payment. Local cache, not backup content. */
     val aiRecords: Map<String, AiRecord> = emptyMap(),
 ) {
-    val aiCategoryFingerprints: Map<String, String> by lazy { aiRecords.mapNotNull { (k, r) -> r.fingerprint?.let { k to it } }.toMap() }
-    val aiConfidence: Map<String, CategoryConfidence> by lazy { aiRecords.mapNotNull { (k, r) -> r.confidence?.let { k to CategoryConfidence.of(it) } }.toMap() }
     fun categoriesFor(type: TransactionType): List<String> =
         if (type == TransactionType.INCOME) incomeCategories else customCategories
 
