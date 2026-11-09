@@ -40,6 +40,9 @@ import net.wastu.artha.ArthaApplication
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.data.providers.JagoPinStatus
 
+/** Where the background PIN stands, from "never set" to "Bank Jago rejected it". */
+private enum class PinState { NOT_SET, SET, VERIFIED, WRONG }
+
 /**
  * Bank Jago's background PIN. Artha types it into Bank Jago on a hidden display during
  * syncs, and the result of the last attempt shows here. The dialog state is hoisted
@@ -50,40 +53,45 @@ internal fun JagoPinSetting(dialogOpen: Boolean, onDialogOpenChange: (Boolean) -
     val app = LocalContext.current.applicationContext as? ArthaApplication ?: return
     val pinSet by app.providerPreferences.jagoPinSet.collectAsStateWithLifecycle()
     val pinCheck by app.providerPreferences.jagoPinCheck.collectAsStateWithLifecycle()
-
-    val colors = MaterialTheme.colorScheme
+    val state = when {
+        !pinSet -> PinState.NOT_SET
+        pinCheck.status == JagoPinStatus.WRONG -> PinState.WRONG
+        pinCheck.status == JagoPinStatus.VERIFIED -> PinState.VERIFIED
+        else -> PinState.SET
+    }
 
     SettingsHeading("Background sync")
+    JagoPinRow(state, detail = pinCheck.detail, onClick = { onDialogOpenChange(true) })
 
-    val isWrong = pinSet && pinCheck.status == JagoPinStatus.WRONG
-    val isVerified = pinSet && pinCheck.status == JagoPinStatus.VERIFIED
-
-    val supportingText = when {
-        !pinSet -> "Not set · Bank Jago only syncs when opened"
-        isWrong -> "Incorrect PIN · Bank Jago rejected it. Tap to fix."
-        isVerified -> "Verified · Bank Jago syncs in background"
-        pinCheck.detail != null -> pinCheck.detail!!
-        else -> "Set · checked on the next sync"
+    if (dialogOpen) {
+        JagoPinDialog(
+            app = app,
+            initial = app.providerPreferences.getJagoPin().orEmpty(),
+            isWrongPin = state == PinState.WRONG,
+            onDismiss = { onDialogOpenChange(false) },
+        )
     }
+}
 
-    val iconColor = when {
-        !pinSet -> colors.onSurfaceVariant
-        isWrong -> colors.error
-        isVerified -> colors.primary
-        else -> colors.primary
+@Composable
+private fun JagoPinRow(state: PinState, detail: String?, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val wrong = state == PinState.WRONG
+    val supportingText = when (state) {
+        PinState.NOT_SET -> "Not set · Bank Jago only syncs when opened"
+        PinState.WRONG -> "Incorrect PIN · Bank Jago rejected it. Tap to fix."
+        PinState.VERIFIED -> "Verified · Bank Jago syncs in background"
+        PinState.SET -> detail ?: "Set · checked on the next sync"
     }
-
-    val actionColor = when {
-        isWrong -> colors.error
-        else -> colors.primary
+    val icon = when (state) {
+        PinState.WRONG -> Icons.Default.ErrorOutline
+        PinState.VERIFIED -> Icons.Default.CheckCircle
+        else -> Icons.Default.Lock
     }
-
     Surface(
         shape = MaterialTheme.shapes.medium,
-        color = if (isWrong) colors.errorContainer.copy(alpha = 0.4f) else colors.surfaceContainerLow,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+        color = if (wrong) colors.errorContainer.copy(alpha = 0.4f) else colors.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
     ) {
         ListItem(
             headlineContent = {
@@ -91,56 +99,42 @@ internal fun JagoPinSetting(dialogOpen: Boolean, onDialogOpenChange: (Boolean) -
                     "Background PIN",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (isWrong) colors.error else colors.onSurface,
+                    color = if (wrong) colors.error else colors.onSurface,
                 )
             },
             supportingContent = {
-                Text(
-                    supportingText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (isWrong) colors.error else colors.onSurfaceVariant,
-                )
+                Text(supportingText, style = MaterialTheme.typography.bodySmall, color = if (wrong) colors.error else colors.onSurfaceVariant)
             },
             leadingContent = {
                 Surface(
                     shape = MaterialTheme.shapes.small,
-                    color = if (isWrong) colors.error.copy(alpha = 0.15f) else colors.surfaceContainerHighest,
+                    color = if (wrong) colors.error.copy(alpha = 0.15f) else colors.surfaceContainerHighest,
                     modifier = Modifier.size(40.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        val icon = when {
-                            isWrong -> Icons.Default.ErrorOutline
-                            isVerified -> Icons.Default.CheckCircle
-                            pinSet -> Icons.Default.Lock
-                            else -> Icons.Default.Lock
+                        val tint = when (state) {
+                            PinState.NOT_SET -> colors.onSurfaceVariant
+                            PinState.WRONG -> colors.error
+                            else -> colors.primary
                         }
-                        Icon(icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(20.dp))
+                        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
                     }
                 }
             },
             trailingContent = {
                 Text(
-                    text = when {
-                        !pinSet -> "Set"
-                        isWrong -> "Fix PIN"
+                    text = when (state) {
+                        PinState.NOT_SET -> "Set"
+                        PinState.WRONG -> "Fix PIN"
                         else -> "Change"
                     },
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
-                    color = actionColor,
+                    color = if (wrong) colors.error else colors.primary,
                 )
             },
             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            modifier = Modifier.clickable { onDialogOpenChange(true) },
-        )
-    }
-
-    if (dialogOpen) {
-        JagoPinDialog(
-            app = app,
-            initial = app.providerPreferences.getJagoPin().orEmpty(),
-            isWrongPin = isWrong,
-            onDismiss = { onDialogOpenChange(false) },
+            modifier = Modifier.clickable(onClick = onClick),
         )
     }
 }

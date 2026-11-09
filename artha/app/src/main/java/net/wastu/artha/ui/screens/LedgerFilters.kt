@@ -24,6 +24,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -56,7 +57,11 @@ internal fun TypeChips(selected: TransactionType?, onSelect: (TransactionType?) 
 
 internal data class ActiveTransactionFilter(val label: String, val clear: () -> Unit)
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+/**
+ * Method, source and date filters, staged in a draft until Apply. A category drill-down replaces the
+ * method and source options until it is removed.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun TransactionFilterSheet(
     transactions: List<UnifiedTransaction>,
@@ -80,93 +85,111 @@ internal fun TransactionFilterSheet(
             onDismiss = { pickingDates = false },
             onConfirm = { startMillis, endMillis -> dates = startMillis to endMillis; pickingDates = false },
         )
-    } else {
-        ModalBottomSheet(onDismissRequest = onDismiss, sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-            Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).imePadding()) {
-                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Filters", style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { draft = TransactionFilters(); dates = null; clearCategory = true }) { Text("Reset") }
+        return
+    }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).imePadding()) {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Filters", style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.weight(1f))
+                TextButton(onClick = { draft = TransactionFilters(); dates = null; clearCategory = true }) { Text("Reset") }
+            }
+            Column(
+                Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                if (category != null && !clearCategory) {
+                    CategoryFilterRow(
+                        category = category,
+                        onRemove = { clearCategory = true; draft = filters.copy(direction = null) },
+                        onRecategorize = viewModel?.let { vm ->
+                            {
+                                vm.recategorize(RecategorizeScope.CategoryInMonth(category, vm.selectedMonth.value))
+                                onDismiss()
+                            }
+                        },
+                    )
                 }
-                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    if (category != null && !clearCategory) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            FilterChip(
-                                selected = true,
-                                onClick = { clearCategory = true; draft = filters.copy(direction = null) },
-                                label = { Text(category) },
-                                trailingIcon = { Icon(Icons.Default.Clear, "Remove category filter") },
-                            )
-                            if (viewModel != null) {
-                                AssistChip(
-                                    onClick = {
-                                        val month = viewModel.selectedMonth.value
-                                        viewModel.recategorize(RecategorizeScope.CategoryInMonth(category, month))
-                                        onDismiss()
-                                    },
-                                    label = { Text("Re-categorize") },
-                                    leadingIcon = { Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(16.dp)) },
-                                )
-                            }
-                        }
-                    }
-                    if (category == null || clearCategory) {
-                        FilterOptions("Method", listOf(null) + PaymentMethod.entries, draft.type, { it?.label ?: "All" }) { draft = draft.copy(type = it) }
-                        FilterOptions("Source", listOf(null) + providers, draft.provider, { it?.displayName ?: "All" }) { draft = draft.copy(provider = it) }
-                    }
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Dates", style = MaterialTheme.typography.titleSmall)
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            TransactionPeriod.entries.forEach { period ->
-                                FilterChip(
-                                    selected = selectedPeriod == period,
-                                    onClick = {
-                                        if (period == TransactionPeriod.CUSTOM) pickingDates = true else dates = period.range(today)
-                                    },
-                                    label = { Text(period.label) },
-                                )
-                            }
-                        }
-                        if (selectedPeriod == TransactionPeriod.CUSTOM && dates?.first != null && dates?.second != null) {
-                            val customRange = dates!!
-                            val (customTotal, customCount) = remember(transactions, customRange) {
-                                val start = customRange.first
-                                val endExclusive = customRange.second?.let(AccountingTime::dayAfter)
-                                val spending = transactions.filter {
-                                    val millis = it.occurredAt.toEpochMilli()
-                                    it.isExpense &&
-                                        (start == null || millis >= start) &&
-                                        (endExclusive == null || millis < endExclusive)
-                                }
-                                spending.sumOf { it.money.amountMinor } to spending.size
-                            }
-                            Row(
-                                modifier = Modifier.padding(top = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = formatSpendingTotal(customTotal),
-                                    style = MaterialTheme.typography.titleMedium,
-                                )
-                                Text(
-                                    text = "$customCount ${if (customCount == 1) "payment" else "payments"}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
+                if (category == null || clearCategory) {
+                    FilterOptions("Method", listOf(null) + PaymentMethod.entries, draft.type, { it?.label ?: "All" }) { draft = draft.copy(type = it) }
+                    FilterOptions("Source", listOf(null) + providers, draft.provider, { it?.displayName ?: "All" }) { draft = draft.copy(provider = it) }
                 }
-                Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onDismiss) { Text("Cancel") }
-                    FilledTonalButton(onClick = { onApply(draft.copy(direction = null), dates, clearCategory) }, modifier = Modifier.weight(1f)) { Text("Apply") }
-                }
+                DateFilterOptions(
+                    selected = selectedPeriod,
+                    customRange = dates.takeIf { selectedPeriod == TransactionPeriod.CUSTOM },
+                    transactions = transactions,
+                    onSelect = { period -> if (period == TransactionPeriod.CUSTOM) pickingDates = true else dates = period.range(today) },
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+                FilledTonalButton(onClick = { onApply(draft.copy(direction = null), dates, clearCategory) }, modifier = Modifier.weight(1f)) { Text("Apply") }
             }
         }
+    }
+}
+
+/** The category drill-down as a removable chip, with a Re-categorize shortcut when a view model is available. */
+@Composable
+private fun CategoryFilterRow(category: String, onRemove: () -> Unit, onRecategorize: (() -> Unit)?) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        FilterChip(
+            selected = true,
+            onClick = onRemove,
+            label = { Text(category) },
+            trailingIcon = { Icon(Icons.Default.Clear, "Remove category filter") },
+        )
+        if (onRecategorize != null) {
+            AssistChip(
+                onClick = onRecategorize,
+                label = { Text("Re-categorize") },
+                leadingIcon = { Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(16.dp)) },
+            )
+        }
+    }
+}
+
+/** Period chips; a custom range also shows what it adds up to. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DateFilterOptions(
+    selected: TransactionPeriod,
+    customRange: Pair<Long?, Long?>?,
+    transactions: List<UnifiedTransaction>,
+    onSelect: (TransactionPeriod) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Dates", style = MaterialTheme.typography.titleSmall)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TransactionPeriod.entries.forEach { period ->
+                FilterChip(selected = selected == period, onClick = { onSelect(period) }, label = { Text(period.label) })
+            }
+        }
+        if (customRange?.first != null && customRange.second != null) CustomRangeTotal(transactions, customRange)
+    }
+}
+
+@Composable
+private fun CustomRangeTotal(transactions: List<UnifiedTransaction>, range: Pair<Long?, Long?>) {
+    val (total, count) = remember(transactions, range) {
+        val start = range.first
+        val endExclusive = range.second?.let(AccountingTime::dayAfter)
+        val spending = transactions.filter {
+            val millis = it.occurredAt.toEpochMilli()
+            it.isExpense && (start == null || millis >= start) && (endExclusive == null || millis < endExclusive)
+        }
+        spending.sumOf { it.money.amountMinor } to spending.size
+    }
+    Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(text = formatSpendingTotal(total), style = MaterialTheme.typography.titleMedium)
+        Text(
+            text = "$count ${if (count == 1) "payment" else "payments"}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

@@ -50,6 +50,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.coroutines.cancellation.CancellationException
@@ -91,15 +92,7 @@ fun AiScreen(
     val coroutineScope = rememberCoroutineScope()
     fun say(message: String) { coroutineScope.launch { snackbar.showSnackbar(message) } }
 
-    LaunchedEffect(Unit) {
-        viewModel.categoryRunResults.collect {
-            val result = snackbar.showSnackbar(
-                categoryRunMessage(it),
-                actionLabel = if (it.review > 0 || it.failed > 0) "Review" else null,
-            )
-            if (result == SnackbarResult.ActionPerformed) onOpenReview()
-        }
-    }
+    CategoryRunResultsEffect(viewModel, snackbar, onOpenReview)
 
     fun draft() = saved.copy(baseUrl = baseUrl.text.trim().toString(), apiKey = apiKey.text.trim().toString(), model = model.text.trim().toString())
     val providerDirty = draft() != saved
@@ -167,29 +160,46 @@ fun AiScreen(
             item { ProviderForm(baseUrl, apiKey, model, enabled = !busy, onTest = ::testConnection) }
             item { AutoCategorizeRow(snapshot.autoCategorize) { viewModel.setAutoCategorize(it) } }
             item { SectionHeader("Personal context") }
-            item {
-                OutlinedTextField(
-                    value = context,
-                    onValueChange = { context = it },
-                    placeholder = { Text("Job, household, shops you use") },
-                    minLines = 3,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                )
-            }
+            item { PersonalContextField(context) { context = it } }
             item { Spacer(Modifier.height(32.dp)) }
         }
     }
 
     pendingScope?.let { scope ->
-        val monthLabel = remember(selectedMonth) { DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US).format(selectedMonth) }
-        val text = recategorizeConfirmation(scope, viewModel.recategorizeCount(scope), monthLabel)
-        if (text != null) RecategorizeDialog(
-            scope = scope,
-            text = text,
-            onConfirm = { viewModel.recategorize(scope) },
-            onDismiss = { pendingScope = null },
-        )
+        RecategorizeConfirmation(viewModel, scope, selectedMonth, onDismiss = { pendingScope = null })
     }
+}
+
+/** Reports each finished categorization run in the snackbar, with a Review shortcut when something needs a look. */
+@Composable
+private fun CategoryRunResultsEffect(viewModel: ArthaViewModel, snackbar: SnackbarHostState, onOpenReview: () -> Unit) {
+    LaunchedEffect(Unit) {
+        viewModel.categoryRunResults.collect {
+            val result = snackbar.showSnackbar(
+                categoryRunMessage(it),
+                actionLabel = if (it.review > 0 || it.failed > 0) "Review" else null,
+            )
+            if (result == SnackbarResult.ActionPerformed) onOpenReview()
+        }
+    }
+}
+
+@Composable
+private fun RecategorizeConfirmation(viewModel: ArthaViewModel, scope: RecategorizeScope, month: YearMonth, onDismiss: () -> Unit) {
+    val monthLabel = remember(month) { DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US).format(month) }
+    val text = recategorizeConfirmation(scope, viewModel.recategorizeCount(scope), monthLabel) ?: return
+    RecategorizeDialog(scope = scope, text = text, onConfirm = { viewModel.recategorize(scope) }, onDismiss = onDismiss)
+}
+
+@Composable
+private fun PersonalContextField(value: String, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        placeholder = { Text("Job, household, shops you use") },
+        minLines = 3,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+    )
 }
 
 /** Stop while a run is going, Save, and the bulk re-categorize menu. */
