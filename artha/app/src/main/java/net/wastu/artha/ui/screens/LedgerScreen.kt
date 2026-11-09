@@ -9,6 +9,12 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Scaffold
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.ImeAction
@@ -572,44 +578,40 @@ fun SearchTransactionsScreen(
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
     Scaffold(
         topBar = {
-            TopAppBar(
-                navigationIcon = {
-                    IconButton(onClick = closeSearch) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                title = {
-                    BasicTextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                            .focusRequester(focusRequester)
-                            .semantics { contentDescription = "Search payments" },
-                        decorationBox = { input ->
-                            Box(contentAlignment = Alignment.CenterStart) {
-                                if (query.isEmpty()) Text("Search payments", style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                input()
+            val searchColors = SearchBarDefaults.colors()
+            Surface(
+                modifier = Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).padding(horizontal = 16.dp, vertical = 8.dp),
+                shape = SearchBarDefaults.inputFieldShape,
+                color = searchColors.containerColor,
+            ) {
+                SearchBarDefaults.InputField(
+                    query = query,
+                    onQueryChange = { query = it },
+                    onSearch = { keyboard?.hide() },
+                    expanded = false,
+                    onExpandedChange = {},
+                    modifier = Modifier.focusRequester(focusRequester).semantics { contentDescription = "Search payments" },
+                    placeholder = { Text("Search payments") },
+                    leadingIcon = {
+                        IconButton(onClick = closeSearch) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                    },
+                    trailingIcon = {
+                        Row {
+                            if (query.isNotEmpty()) IconButton(onClick = { query = "" }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear search")
                             }
-                        },
-                    )
-                },
-                actions = {
-                    if (query.isNotEmpty()) IconButton(onClick = { query = "" }) {
-                        Icon(Icons.Default.Clear, contentDescription = "Clear search")
-                    }
-                    IconButton(onClick = { keyboard?.hide(); focusManager.clearFocus(); showFilter = true },
-                        modifier = Modifier.semantics { stateDescription = if (activeFilters.isEmpty()) "No filters" else "${activeFilters.size} filters applied" }) {
-                        Icon(Icons.Default.FilterList, contentDescription = "Filter",
-                            tint = if (activeFilters.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)
-                    }
-                },
-            )
+                            IconButton(
+                                onClick = { keyboard?.hide(); focusManager.clearFocus(); showFilter = true },
+                                modifier = Modifier.semantics { stateDescription = if (activeFilters.isEmpty()) "No filters" else "${activeFilters.size} filters applied" },
+                            ) {
+                                Icon(Icons.Default.FilterList, contentDescription = "Filter",
+                                    tint = if (activeFilters.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    },
+                    colors = searchColors.inputFieldColors,
+                )
+            }
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
@@ -702,7 +704,7 @@ private fun TransactionList(
     LazyColumn(
         state = listState,
         modifier = Modifier.widthIn(max = 720.dp).fillMaxSize(),
-        contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 96.dp),
     ) {
         if (periodSummary != null) {
             item(key = "period_summary") {

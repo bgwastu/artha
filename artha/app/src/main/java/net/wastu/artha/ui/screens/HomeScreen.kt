@@ -46,6 +46,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.WideNavigationRail
 import androidx.compose.material3.WideNavigationRailItem
+import androidx.compose.material3.FloatingToolbarDefaults
+import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -179,26 +181,30 @@ fun HomeScreen(
                         }
                     },
                     title = { Text(destination.label, style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    actions = {
-                        if (destination == Destination.TRANSACTIONS) {
-                            IconButton(onClick = onRefresh, enabled = !refreshing || automaticImport) {
-                                if (refreshing) {
-                                    LoadingIndicator(
-                                        modifier = Modifier.size(28.dp).semantics { contentDescription = "Syncing" },
-                                    )
-                                } else {
-                                    Icon(Icons.Default.Sync, contentDescription = "Sync")
-                                }
-                            }
-                            IconButton(onClick = { showFilter = true }) {
-                                Icon(Icons.Default.FilterList, contentDescription = "Filter")
-                            }
-                            IconButton(onClick = { showSearch = true }) {
+                )
+            },
+            floatingActionButton = {
+                if (destination == Destination.TRANSACTIONS) {
+                    HorizontalFloatingToolbar(
+                        expanded = true,
+                        floatingActionButton = {
+                            FloatingToolbarDefaults.VibrantFloatingActionButton(onClick = { showSearch = true }) {
                                 Icon(Icons.Default.Search, contentDescription = "Search")
                             }
+                        },
+                    ) {
+                        IconButton(onClick = onRefresh, enabled = !refreshing || automaticImport) {
+                            if (refreshing) {
+                                LoadingIndicator(modifier = Modifier.size(28.dp).semantics { contentDescription = "Syncing" })
+                            } else {
+                                Icon(Icons.Default.Sync, contentDescription = "Sync")
+                            }
                         }
-                    },
-                )
+                        IconButton(onClick = { showFilter = true }) {
+                            Icon(Icons.Default.FilterList, contentDescription = "Filter")
+                        }
+                    }
+                }
             },
             bottomBar = {
                 if (!showRail) {

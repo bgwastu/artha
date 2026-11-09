@@ -1,6 +1,7 @@
 package net.wastu.artha.ui.screens
 
 import net.wastu.artha.core.model.iconRes
+import net.wastu.artha.ui.components.PageScaffold
 import net.wastu.artha.ui.components.shape
 import androidx.core.net.toUri
 import android.content.Intent
@@ -38,14 +39,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -121,9 +120,9 @@ fun SourcesScreen(
         val expanded = maxWidth >= 840.dp && maxHeight >= 480.dp
         Row(Modifier.fillMaxSize()) {
             Column(Modifier.weight(1f).widthIn(max = 600.dp).fillMaxSize()) {
-            TopAppBar(
-                title = { Text("Sources") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
+            PageScaffold(
+                title = "Sources",
+                onBack = onBack,
                 actions = {
                     if (anyImportRunning) {
                         LoadingIndicator(Modifier.padding(end = 12.dp).size(28.dp).semantics { contentDescription = "Syncing" })
@@ -131,10 +130,13 @@ fun SourcesScreen(
                         TextButton(onClick = { viewModel?.refresh() }, enabled = viewModel != null) { Text("Sync all") }
                     }
                 },
-            )
+            ) { padding ->
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 16.dp),
+                contentPadding = PaddingValues(
+                    top = padding.calculateTopPadding(),
+                    bottom = padding.calculateBottomPadding() + 16.dp,
+                ),
             ) {
                 items(Provider.entries, key = { it.name }) { provider ->
                     val diagnostic = diagnostics[provider]
@@ -183,7 +185,7 @@ fun SourcesScreen(
                         )
                     }
                 }
-
+            }
             }
             }
 
@@ -265,43 +267,25 @@ private fun SourcePage(
     }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Image(
-                                painter = painterResource(provider.iconRes),
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .clip(MaterialTheme.shapes.extraSmall),
-                                contentScale = ContentScale.Crop,
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Text(
-                                text = provider.displayName,
-                                modifier = Modifier.semantics { heading() },
-                            )
-                        }
-                    },
-                    navigationIcon = {
-                        if (onBack != null) {
-                            IconButton(onClick = onBack) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                            }
-                        }
-                    },
-                    actions = {
-                        SyncHeaderAction(
-                            importing = importing,
-                            enabled = importEnabled && !busy,
-                            onSync = onImport,
-                        )
-                    },
+        PageScaffold(
+            title = provider.displayName,
+            onBack = onBack,
+            snackbarHost = snackbarHostState,
+            titleIcon = {
+                Image(
+                    painter = painterResource(provider.iconRes),
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp).clip(MaterialTheme.shapes.extraSmall),
+                    contentScale = ContentScale.Crop,
                 )
             },
-            snackbarHost = { SnackbarHost(snackbarHostState) },
+            actions = {
+                SyncHeaderAction(
+                    importing = importing,
+                    enabled = importEnabled && !busy,
+                    onSync = onImport,
+                )
+            },
         ) { padding ->
             Column(
                 Modifier
