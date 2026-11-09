@@ -1,11 +1,9 @@
 package net.wastu.artha.ui.screens
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import net.wastu.artha.ui.components.PageScaffold
 import net.wastu.artha.ui.components.ConnectedChoiceRow
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,8 +12,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,20 +20,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.outlined.Label
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.EditNote
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -46,11 +37,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
@@ -71,23 +59,17 @@ import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.launch
 import net.wastu.artha.data.analysis.UNCATEGORIZED_LABEL
 import net.wastu.artha.ui.formatMoney
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -101,7 +83,6 @@ import net.wastu.artha.core.model.AccountingTime
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.analysis.AI_REASON_PREFIX
 import net.wastu.artha.data.analysis.AnalysisSnapshot
-import net.wastu.artha.data.analysis.BudgetAnalyzer
 import net.wastu.artha.data.analysis.CategorySource
 import net.wastu.artha.data.analysis.attentionSource
 import net.wastu.artha.data.analysis.inMonth
@@ -336,23 +317,20 @@ fun CategoryReviewScreen(
     var wholeType by rememberSaveable { mutableStateOf(net.wastu.artha.core.model.TransactionType.EXPENSE) }
     val snackbar = remember { SnackbarHostState() }
     val monthValue = remember(browsedMonth) { java.time.YearMonth.parse(browsedMonth) }
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbar) },
-        topBar = {
-            Column(Modifier.fillMaxWidth()) {
-                TopAppBar(
-                    title = { Text(monthValue.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.US))) },
-                    navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
-                    actions = {
-                        if (mode == ReviewMode.WHOLE_MONTH) {
-                            IconButton(onClick = { browsedMonth = monthValue.minusMonths(1).toString() }) { Icon(Icons.Default.ChevronLeft, "Previous month") }
-                            IconButton(
-                                enabled = monthValue < java.time.YearMonth.now(AccountingTime.clock),
-                                onClick = { browsedMonth = monthValue.plusMonths(1).toString() },
-                            ) { Icon(Icons.Default.ChevronRight, "Next month") }
-                        }
-                    },
-                )
+    PageScaffold(
+        title = monthValue.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.US)),
+        onBack = onBack,
+        snackbarHost = snackbar,
+        actions = {
+                    if (mode == ReviewMode.WHOLE_MONTH) {
+                        IconButton(onClick = { browsedMonth = monthValue.minusMonths(1).toString() }) { Icon(Icons.Default.ChevronLeft, "Previous month") }
+                        IconButton(
+                            enabled = monthValue < java.time.YearMonth.now(AccountingTime.clock),
+                            onClick = { browsedMonth = monthValue.plusMonths(1).toString() },
+                        ) { Icon(Icons.Default.ChevronRight, "Next month") }
+                    }
+        },
+        belowBar = {
                 ConnectedChoiceRow(
                     options = ReviewMode.entries,
                     selected = mode,
@@ -360,7 +338,6 @@ fun CategoryReviewScreen(
                     label = { it.label },
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
-            }
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {

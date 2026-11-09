@@ -1,5 +1,7 @@
 package net.wastu.artha.ui.screens
 
+import androidx.compose.runtime.getValue
+import net.wastu.artha.ui.components.PageScaffold
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -24,17 +26,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.IconButton
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -54,14 +52,7 @@ fun RemoteAccessScreen(onBack: () -> Unit) {
     val on = state is TunnelState.Starting || state is TunnelState.Active
     val colors = MaterialTheme.colorScheme
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Remote access") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
-            )
-        },
-    ) { padding ->
+    PageScaffold(title = "Remote access", onBack = onBack) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             val failed = state is TunnelState.Failed
             val (title, support) = when (val s = state) {

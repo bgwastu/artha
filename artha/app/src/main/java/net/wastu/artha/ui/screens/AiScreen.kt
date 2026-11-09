@@ -1,5 +1,8 @@
 package net.wastu.artha.ui.screens
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import net.wastu.artha.ui.components.PageScaffold
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,13 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Stop
@@ -31,26 +29,20 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -70,7 +62,6 @@ import net.wastu.artha.data.analysis.categoryProgressLabel
 import net.wastu.artha.data.analysis.categoryRunMessage
 import net.wastu.artha.data.analysis.recategorizeConfirmation
 import net.wastu.artha.ui.ArthaViewModel
-import net.wastu.artha.ui.categoryIconFor
 
 internal object AiCategoriesLogic {
     fun headerStatusText(progress: CategoryProgress): String? = when {
@@ -184,38 +175,34 @@ fun AiScreen(
     val historyCount = remember(allTransactions, snapshot) { viewModel.recategorizeCount(RecategorizeScope.AllPending) }
     val configured = saved.baseUrl.isNotBlank() && saved.apiKey.isNotBlank() && saved.model.isNotBlank()
 
-    Scaffold(
-        topBar = {
-            Column(Modifier.fillMaxWidth()) {
-                TopAppBar(
-                    title = { Text("AI categorization") },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-                    },
-                    actions = {
-                        if (working) {
-                            IconButton(onClick = { viewModel.stopCategorization() }) {
-                                Icon(Icons.Default.Stop, contentDescription = "Stop categorization")
-                            }
+    PageScaffold(
+        title = "AI categorization",
+        onBack = onBack,
+        snackbarHost = snackbar,
+        actions = {
+                    if (working) {
+                        IconButton(onClick = { viewModel.stopCategorization() }) {
+                            Icon(Icons.Default.Stop, contentDescription = "Stop categorization")
                         }
-                        TextButton(enabled = !busy && (providerDirty || contextDirty), onClick = ::save) { Text("Save") }
-                        Box {
-                            IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More options") }
-                            DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                                DropdownMenuItem(
-                                    text = { Text("Re-categorize uncategorized") },
-                                    enabled = !working && uncategorizedCount > 0,
-                                    onClick = { menu = false; pendingScope = RecategorizeScope.Uncategorized },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Re-categorize all") },
-                                    enabled = !working && allCount > 0,
-                                    onClick = { menu = false; pendingScope = RecategorizeScope.All },
-                                )
-                            }
+                    }
+                    TextButton(enabled = !busy && (providerDirty || contextDirty), onClick = ::save) { Text("Save") }
+                    Box {
+                        IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More options") }
+                        DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Re-categorize uncategorized") },
+                                enabled = !working && uncategorizedCount > 0,
+                                onClick = { menu = false; pendingScope = RecategorizeScope.Uncategorized },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Re-categorize all") },
+                                enabled = !working && allCount > 0,
+                                onClick = { menu = false; pendingScope = RecategorizeScope.All },
+                            )
                         }
-                    },
-                )
+                    }
+        },
+        belowBar = {
                 if (working) {
                     if (progress.runTotal > 0) {
                         LinearWavyProgressIndicator(
@@ -224,9 +211,7 @@ fun AiScreen(
                         )
                     } else LinearWavyProgressIndicator(Modifier.fillMaxWidth())
                 } else if (busy) LinearWavyProgressIndicator(Modifier.fillMaxWidth())
-            }
         },
-        snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         LazyColumn(Modifier.fillMaxSize().imePadding().padding(padding)) {
             item {
