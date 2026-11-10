@@ -1,6 +1,14 @@
 package net.wastu.artha.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -135,7 +143,11 @@ fun HomeScreen(
                 )
             },
             floatingActionButton = {
-                if (destination == Destination.TRANSACTIONS) {
+                AnimatedVisibility(
+                    visible = destination == Destination.TRANSACTIONS,
+                    enter = fadeIn() + slideInVertically { it / 2 },
+                    exit = fadeOut() + slideOutVertically { it / 2 },
+                ) {
                     LedgerActionsToolbar(
                         refreshing = refreshing,
                         syncEnabled = !refreshing || automaticImport,
@@ -153,15 +165,21 @@ fun HomeScreen(
                 if (showRail) HomeNavigationRail(destination, largeNavigationText) { destination = it }
                 Column(Modifier.weight(1f)) {
                     if (ledgerLoadFailed && ledgerState is LedgerState.Ready) LedgerLoadFailedBanner(onRetryLedger)
-                    // The Transactions bar has its own spinner; one loader at a time.
-                    if (refreshing && destination != Destination.TRANSACTIONS) {
+                    // Sync runs in the view model, so every tab shows the same bar for as long as it lasts.
+                    AnimatedVisibility(visible = refreshing, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
                         LinearWavyProgressIndicator(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                         )
                     }
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                        saveableStateHolder.SaveableStateProvider(destination.name) {
-                            when (destination) {
+                    AnimatedContent(
+                        targetState = destination,
+                        transitionSpec = { ScreenMotion.fadeThrough().using(null) },
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.TopCenter,
+                        label = "tab",
+                    ) { tab ->
+                        saveableStateHolder.SaveableStateProvider(tab.name) {
+                            when (tab) {
                                 Destination.TRANSACTIONS -> Row(Modifier.fillMaxSize()) {
                                     Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
                                         LedgerScreen(
@@ -198,7 +216,7 @@ fun HomeScreen(
                 }
             }
         }
-        if (showSearch) {
+        AnimatedVisibility(visible = showSearch, enter = ScreenMotion.overlayEnter, exit = ScreenMotion.overlayExit) {
             Surface(Modifier.fillMaxSize()) {
                 SearchTransactionsScreen(
                     ledgerState,
@@ -211,6 +229,7 @@ fun HomeScreen(
         }
         HomePages(
             top = pages.top,
+            depth = pages.depth,
             viewModel = viewModel,
             enabledProviders = enabledProviders,
             syncingProvider = syncingProvider,

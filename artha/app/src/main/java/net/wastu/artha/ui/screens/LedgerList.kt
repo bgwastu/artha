@@ -94,13 +94,14 @@ internal fun TransactionList(
         }
     }
 
-    val groupedByDay by produceState<List<DayGroup>>(emptyList(), transactions) {
-        value = withContext(Dispatchers.Default) {
+    // Returning to this tab recomposes the list; reuse the last grouping instead of flashing a loader.
+    val groupedByDay by produceState(DayGroupCache.lookup(transactions).orEmpty(), transactions) {
+        value = DayGroupCache.lookup(transactions) ?: withContext(Dispatchers.Default) {
             val zone = AccountingTime.zone
             transactions
                 .groupBy { it.occurredAt.atZone(zone).toLocalDate() }
                 .map { (date, dailyTxs) -> DayGroup(date, dailyTxs) }
-        }
+        }.also { DayGroupCache.store(transactions, it) }
     }
 
     // Avoid measuring an empty list while groups load, which loses restored scroll position.
@@ -166,6 +167,18 @@ internal fun TransactionList(
     }
     openDay?.let { day ->
         groupedByDay.firstOrNull { it.date == day }?.let { DayTotalsSheet(it, activeRange, onFilterDates) { openDay = null } }
+    }
+}
+
+/** The most recent day grouping; equal lists share the same row instances, so the comparison is cheap. */
+private object DayGroupCache {
+    private var last: Pair<List<UnifiedTransaction>, List<DayGroup>>? = null
+
+    fun lookup(transactions: List<UnifiedTransaction>): List<DayGroup>? =
+        last?.takeIf { it.first == transactions }?.second
+
+    fun store(transactions: List<UnifiedTransaction>, groups: List<DayGroup>) {
+        last = transactions to groups
     }
 }
 

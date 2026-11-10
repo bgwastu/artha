@@ -12,6 +12,9 @@ internal class PageStack(initial: List<Page> = emptyList()) {
 
     val top: Page? get() = stack.lastOrNull()
 
+    /** How many pages are open; the transition uses it to tell opening from going back. */
+    val depth: Int get() = stack.size
+
     fun open(page: Page) { if (top != page) stack.add(page) }
 
     fun back() { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) }
