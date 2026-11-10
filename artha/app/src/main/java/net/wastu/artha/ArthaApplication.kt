@@ -86,6 +86,8 @@ class ArthaApplication : Application() {
                         providerPreferences.recordJagoPinCheck(JagoPinStatus.WRONG, "Bank Jago rejected the PIN")
                     JagoScreenSync.Result.UNLOCK_FAILED ->
                         providerPreferences.recordJagoPinCheck(JagoPinStatus.UNVERIFIED, "Could not reach Bank Jago's PIN screen")
+                    JagoScreenSync.Result.ABORTED ->
+                        providerPreferences.recordJagoPinCheck(JagoPinStatus.UNVERIFIED, "The last unlock stopped before Bank Jago's PIN screen appeared")
                     JagoScreenSync.Result.JAGO_EXITED ->
                         providerPreferences.recordJagoPinCheck(JagoPinStatus.UNVERIFIED, "Bank Jago closed itself while unlocking")
                     else -> Unit

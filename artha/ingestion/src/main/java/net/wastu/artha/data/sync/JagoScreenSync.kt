@@ -1,6 +1,7 @@
 package net.wastu.artha.data.sync
 
 import android.os.Build
+import android.os.PowerManager
 import java.io.StringReader
 import javax.xml.parsers.DocumentBuilderFactory
 import kotlinx.coroutines.Dispatchers
@@ -38,7 +39,23 @@ class JagoScreenSync(
     enum class Stage { LAUNCHED, PIN_SCREEN, PIN_ENTERED, UNLOCKED, SETTLED }
 
     /** [trigger] says what asked for the run; it is only recorded. */
-    override suspend fun run(trigger: String): Result = RootScreenSession.exclusive { withContext(Dispatchers.IO) { Attempt(trigger).execute() } }
+    override suspend fun run(trigger: String): Result = RootScreenSession.exclusive {
+        withContext(Dispatchers.IO) { keepingScreenOn { Attempt(trigger).execute() } }
+    }
+
+    /**
+     * Bank Jago needs well over 15 s to cold-start, and a run is abandoned the moment the screen sleeps, so
+     * the usual 15 s screen timeout would end it before the PIN screen appears. This holds the screen on for
+     * the run only; without ACQUIRE_CAUSES_WAKEUP it never wakes a screen that is already off.
+     */
+    @Suppress("DEPRECATION")
+    private suspend fun <T> keepingScreenOn(block: suspend () -> T): T {
+        val lock = runCatching {
+            reader.context.getSystemService(PowerManager::class.java)?.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "artha:jago_unlock")
+        }.getOrNull()
+        runCatching { lock?.acquire(SCREEN_LOCK_MAX_MS) }
+        try { return block() } finally { runCatching { if (lock?.isHeld == true) lock.release() } }
+    }
 
     private inner class Attempt(private val trigger: String) {
         private val startedAt = System.currentTimeMillis()
@@ -300,6 +317,8 @@ class JagoScreenSync(
         private const val SETTLE_QUIET_MS = 4_000L
         private const val SETTLE_IDLE_MS = 15_000L
         private const val SETTLE_MAX_MS = 45_000L
+        /** Longer than the three waits above add up to, so the lock frees itself even if release is missed. */
+        private const val SCREEN_LOCK_MAX_MS = 120_000L
         private const val MAX_DIALOG_TAPS = 3
         private const val MAX_BIOMETRIC_DISMISSALS = 4
         private val BOUNDS_REGEX = Regex("\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]")
