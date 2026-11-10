@@ -141,13 +141,17 @@ class GrabOrderReader(
 
     suspend fun readSessionToken(): String {
         val path = "/data/data/com.grabtaxi.passenger/shared_prefs/com.grabtaxi.passenger_preferences.xml"
-        val prefs = parsePreferencesXml(requireNotNull(files.stableBatch(listOf(path))[path]).inputStream())
-        val sessionId = prefs["sessionId"] ?: error("Grab session missing. Open Grab and log in again.")
-        val salt = prefs["salt"] ?: error("Grab session salt missing. Open Grab and log in again.")
+        val bytes = files.stableBatch(listOf(path))[path] ?: throw grabLoggedOut()
+        val prefs = parsePreferencesXml(bytes.inputStream())
+        val sessionId = prefs["sessionId"] ?: throw grabLoggedOut()
+        val salt = prefs["salt"] ?: throw grabLoggedOut()
         val installTime = installTimeOverride ?: files.packageFirstInstallTime("com.grabtaxi.passenger").takeIf { it > 0 }
             ?: error("Cannot verify Grab install time for the primary Android profile")
         return decryptSession(sessionId, salt, installTime, prefs["KEY_GENERATION_ID"], prefs["appsFlyerAppId"])
     }
+
+    /** Grab keeps no session until the user signs in, so a missing one is a sign-in prompt, not a failure. */
+    private fun grabLoggedOut() = ProviderReadException(AccountStatus.NEEDS_LOGIN, "Grab is signed out. Open Grab and log in.")
 
     private fun loadReceiptCache(): MutableMap<String, JSONObject> {
         val file = File(files.context.cacheDir, "grab_receipts_cache.json")
