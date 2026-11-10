@@ -52,10 +52,14 @@ class IngestionCoordinator(
         } finally { beforeBatch() }
     }
 
-    suspend fun syncProvider(provider: Provider): String = mutex.withLock {
+    /**
+     * Imports one provider. Pass [interactive] only for a sync a person asked for: it lets an adapter do
+     * the heavier, visible-to-the-app work (such as unlocking Bank Jago); everything automatic stays read-only.
+     */
+    suspend fun syncProvider(provider: Provider, interactive: Boolean = false): String = mutex.withLock {
         check(rootAccess.verify()) { "Root access unavailable" }
         beforeBatch()
-        try { importTracked(provider, interactive = true) }
+        try { importTracked(provider, interactive) }
         finally { beforeBatch() }
     }
 

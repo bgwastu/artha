@@ -22,15 +22,27 @@ import net.wastu.artha.data.providers.AccountStatus
 import net.wastu.artha.data.providers.historyCoverageHint
 import net.wastu.artha.data.sync.AppSessionWakeSync
 import net.wastu.artha.data.sync.JagoScreenSync
+import net.wastu.artha.data.sync.JagoUnlock
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** One decrypted bank history snapshot per ingestion batch. */
-class JagoTransactionReader(private val files: RootFileReader) {
-    private var snapshot: List<UnifiedTransaction>? = null
-    fun invalidate() { snapshot = null }
+/** What the Jago adapter needs from Bank Jago's saved history. */
+interface JagoCache {
+    fun invalidate()
+    suspend fun transactions(): List<UnifiedTransaction>
+    /** When Bank Jago last wrote its saved history, or null if it has none. */
+    suspend fun cacheModifiedAtMillis(): Long?
+}
 
-    suspend fun transactions(): List<UnifiedTransaction> {
+/** One decrypted bank history snapshot per ingestion batch. */
+class JagoTransactionReader(private val files: RootFileReader) : JagoCache {
+    private var snapshot: List<UnifiedTransaction>? = null
+    override fun invalidate() { snapshot = null }
+
+    override suspend fun cacheModifiedAtMillis(): Long? =
+        files.lastModifiedMillis("/data/data/com.jago.digitalBanking/app_flutter/list_transaction_history.hive")
+
+    override suspend fun transactions(): List<UnifiedTransaction> {
         currentCoroutineContext().ensureActive()
         snapshot?.let { return it }
         return withContext(Dispatchers.IO) {
@@ -301,18 +313,46 @@ object JagoCachedHistory {
     }
 }
 
+/**
+ * Bank Jago's saved history. Reading it never touches the app. Only [ingestInteractive], which a
+ * person's own Sync or Retry reaches, may unlock Jago on a hidden display first; every automatic
+ * path (opening Artha, the periodic job, notifications, widgets) goes through [ingest] and just reads
+ * what Jago last saved.
+ */
 class JagoProviderAdapter(
-    private val reader: JagoTransactionReader,
-    private val screenSync: JagoScreenSync? = null,
+    private val reader: JagoCache,
+    private val screenSync: JagoUnlock? = null,
     private val onScreenSync: (JagoScreenSync.Result) -> Unit = {},
+    /** When a failed unlock last told the user to verify Bank Jago, or null if nothing is pending. */
+    private val verificationRequestedAt: () -> Long? = { null },
 ) : ProviderAdapter {
     override val coverageHint = Provider.JAGO.historyCoverageHint
     override val provider = Provider.JAGO
+
     override suspend fun ingest(): List<UnifiedTransaction> {
-        screenSync?.run()?.let(onScreenSync)
+        // Until Bank Jago has saved something since the unlock failed, the request to verify still stands.
+        verificationRequestedAt()?.let { requestedAt ->
+            if ((reader.cacheModifiedAtMillis() ?: 0L) < requestedAt) throw verifyJago()
+        }
+        return readCache()
+    }
+
+    override suspend fun ingestInteractive(): List<UnifiedTransaction> {
+        val result = screenSync?.run(trigger = "Sync button")
+        result?.let(onScreenSync)
+        if (result == JagoScreenSync.Result.UNLOCK_FAILED || result == JagoScreenSync.Result.JAGO_EXITED) throw verifyJago()
+        return readCache()
+    }
+
+    private suspend fun readCache(): List<UnifiedTransaction> {
         reader.invalidate()
         return reader.transactions()
     }
+
+    private fun verifyJago() = ProviderReadException(
+        AccountStatus.NEEDS_LOGIN,
+        "Bank Jago could not be unlocked in the background. Open Bank Jago and verify, then sync again.",
+    )
 }
 
 class ShopeeProviderAdapter(

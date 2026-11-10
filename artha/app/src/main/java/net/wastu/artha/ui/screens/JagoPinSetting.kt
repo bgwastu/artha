@@ -153,7 +153,7 @@ private fun JagoPinDialog(
     fun save() {
         app.providerPreferences.setJagoPin(pin.ifBlank { null })
         // A new PIN is checked by the very next Bank Jago sync.
-        if (pin.isNotBlank()) app.syncInBackground(Provider.JAGO, force = true)
+        if (pin.isNotBlank()) app.syncInBackground(Provider.JAGO, force = true, interactive = true)
         onDismiss()
     }
 

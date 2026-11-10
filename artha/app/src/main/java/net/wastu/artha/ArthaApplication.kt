@@ -4,7 +4,7 @@ import android.app.Activity
 import android.app.Application
 import android.os.Bundle
 import android.os.PowerManager
-import android.util.Log
+import net.wastu.artha.core.log.ArthaLog
 import androidx.core.content.edit
 import java.time.Instant
 import java.time.LocalDate
@@ -39,6 +39,7 @@ import net.wastu.artha.data.ingestion.RootFileReader
 import net.wastu.artha.data.ingestion.ShopeeProviderAdapter
 import net.wastu.artha.data.ledger.LedgerDatabase
 import net.wastu.artha.data.ledger.RoomLedgerRepository
+import net.wastu.artha.data.providers.AccountStatus
 import net.wastu.artha.data.providers.JagoPinStatus
 import net.wastu.artha.data.providers.ProviderImportWindow
 import net.wastu.artha.data.providers.ProviderPreferences
@@ -72,11 +73,12 @@ class ArthaApplication : Application() {
             files,
             isInteractive,
             { false },
-            { providerPreferences.getJagoPin() },
+            // A PIN Bank Jago already rejected is not typed again: repeated wrong tries can lock the account.
+            { providerPreferences.getJagoPin()?.takeUnless { providerPreferences.jagoPinCheck.value.status == JagoPinStatus.WRONG } },
         )
         val sessionWake = AppSessionWakeSync(files, isInteractive, { false })
         val adapters = listOf(
-            JagoProviderAdapter(reader, jagoSync) { result ->
+            JagoProviderAdapter(reader, jagoSync, onScreenSync = { result ->
                 when (result) {
                     JagoScreenSync.Result.SYNCED, JagoScreenSync.Result.QUIET ->
                         providerPreferences.recordJagoPinCheck(JagoPinStatus.VERIFIED, "Bank Jago accepted the PIN")
@@ -84,9 +86,15 @@ class ArthaApplication : Application() {
                         providerPreferences.recordJagoPinCheck(JagoPinStatus.WRONG, "Bank Jago rejected the PIN")
                     JagoScreenSync.Result.UNLOCK_FAILED ->
                         providerPreferences.recordJagoPinCheck(JagoPinStatus.UNVERIFIED, "Could not reach Bank Jago's PIN screen")
+                    JagoScreenSync.Result.JAGO_EXITED ->
+                        providerPreferences.recordJagoPinCheck(JagoPinStatus.UNVERIFIED, "Bank Jago closed itself while unlocking")
                     else -> Unit
                 }
             },
+            verificationRequestedAt = {
+                providerPreferences.diagnostics.value[Provider.JAGO]
+                    ?.takeIf { it.accountStatus == AccountStatus.NEEDS_LOGIN }?.lastAttemptEpochMillis
+            }),
             ShopeeProviderAdapter(files, sessionWake),
             GojekProviderAdapter(files),
             GrabProviderAdapter(files, sessionWake),
@@ -115,13 +123,17 @@ class ArthaApplication : Application() {
     private var startedActivities = 0
     val isAppInForeground: Boolean get() = startedActivities > 0
 
-    fun syncInBackground(provider: Provider? = null, force: Boolean = false): Job =
+    /**
+     * [interactive] is for a sync a person just asked for (it may unlock Bank Jago on a hidden display);
+     * the API, notifications, widgets and the periodic job leave it off and only read saved history.
+     */
+    fun syncInBackground(provider: Provider? = null, force: Boolean = false, interactive: Boolean = false): Job =
         applicationScope.launch {
             if (BuildConfig.DEMO) return@launch
             try {
                 if (!rootAccess.verify()) return@launch
                 transactionAlerts.around {
-                    if (provider != null) ingestion.syncProvider(provider) else ingestion.ingestAll(force = force)
+                    if (provider != null) ingestion.syncProvider(provider, interactive) else ingestion.ingestAll(force = force)
                 }
                 AnalysisWidgetProvider.triggerUpdate(this@ArthaApplication)
                 TransactionsWidgetProvider.triggerUpdate(this@ArthaApplication)
@@ -175,7 +187,7 @@ class ArthaApplication : Application() {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.w("Artha", "GoPay refresh failed", e)
+            ArthaLog.w("Artha", "GoPay refresh failed", e)
             "GoPay refresh failed. Try again"
         }
     }
@@ -185,7 +197,7 @@ class ArthaApplication : Application() {
             getSharedPreferences("provider_visibility", MODE_PRIVATE)
                 .getString("GOJEK_last_summary", null)
         } catch (e: Exception) {
-            Log.w("Artha", "Could not read the GoPay refresh summary", e)
+            ArthaLog.w("Artha", "Could not read the GoPay refresh summary", e)
             null
         }
     }
@@ -200,6 +212,7 @@ class ArthaApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        ArthaLog.install(java.io.File(filesDir, "logs"))
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: Activity) { startedActivities++ }
             override fun onActivityStopped(activity: Activity) { startedActivities-- }

@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
                             { application.ledger },
                             ingest = { synced { application.ingestion.ingestAll() } },
                             ingestStale = { synced { application.ingestion.ingestAll(force = false) } },
-                            syncSingle = { provider -> synced { application.ingestion.syncProvider(provider) } },
+                            syncSingle = { provider -> synced { application.ingestion.syncProvider(provider, interactive = true) } },
                             categorize = if (BuildConfig.DEMO) DemoAi::categorize else null,
                             preferences = application.providerPreferences,
                             syncingProvider = application.ingestion.syncingProvider,
