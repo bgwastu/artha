@@ -39,8 +39,12 @@ internal object ProviderNotificationRules {
     fun alertFor(payments: List<UnifiedTransaction>): Alert? {
         val latest = payments.firstOrNull() ?: return null
         if (payments.size == 1) {
-            val sign = if (latest.direction == Direction.CREDIT) "+" else ""
-            return Alert("$sign${formatMoney(latest.money)} · ${latest.provider.displayName}", latest.description)
+            val title = if (latest.direction == Direction.CREDIT) {
+                "Received ${formatMoney(latest.money)} in ${latest.provider.displayName}"
+            } else {
+                "Paid ${formatMoney(latest.money)} with ${latest.provider.displayName}"
+            }
+            return Alert(title, latest.description)
         }
         val providers = payments.map { it.provider.displayName }.distinct().joinToString(", ")
         return Alert("${payments.size} new transactions", providers)

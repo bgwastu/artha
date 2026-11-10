@@ -56,9 +56,12 @@ class ProviderNotificationRulesTest {
     @Test
     fun singlePaymentAlertNamesAmountAndSource() {
         val alert = ProviderNotificationRules.alertFor(listOf(tx("1", "2026-11-09T09:00:00Z", Provider.GOJEK)))!!
-        assertTrue(alert.title.endsWith("· Gojek"))
+        assertTrue(alert.title.startsWith("Paid "))
+        assertTrue(alert.title.endsWith(" with Gojek"))
         assertEquals("Kopi 1", alert.text)
-        assertTrue(ProviderNotificationRules.alertFor(listOf(tx("1", "2026-11-09T09:00:00Z", direction = Direction.CREDIT)))!!.title.startsWith("+"))
+        val credit = ProviderNotificationRules.alertFor(listOf(tx("1", "2026-11-09T09:00:00Z", direction = Direction.CREDIT)))!!
+        assertTrue(credit.title.startsWith("Received "))
+        assertTrue(credit.title.endsWith(" in Bank Jago"))
     }
 
     @Test

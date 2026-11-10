@@ -78,10 +78,10 @@ private fun JagoPinRow(state: PinState, detail: String?, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val wrong = state == PinState.WRONG
     val supportingText = when (state) {
-        PinState.NOT_SET -> "Not set · Bank Jago only syncs when opened"
-        PinState.WRONG -> "Incorrect PIN · Bank Jago rejected it. Tap to fix."
-        PinState.VERIFIED -> "Verified · Bank Jago syncs in background"
-        PinState.SET -> detail ?: "Set · checked on the next sync"
+        PinState.NOT_SET -> "Bank Jago only syncs while it is open. Add the PIN to sync in the background."
+        PinState.WRONG -> "Bank Jago rejected this PIN. Tap to fix it."
+        PinState.VERIFIED -> "Verified. Bank Jago syncs in the background."
+        PinState.SET -> detail ?: "Saved. It is checked on the next sync."
     }
     val icon = when (state) {
         PinState.WRONG -> Icons.Default.ErrorOutline
