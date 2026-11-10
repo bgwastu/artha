@@ -121,6 +121,7 @@ class GojekScreenSync(
                 shouldAbort = { shouldAbort() || !isInteractive() },
                 onPayment = store::append,
                 onSkip = store::skip,
+                onTrace = { log("walk: $it") },
             ).run()
         } finally {
             // Cleanup must finish even when the caller is cancelled.

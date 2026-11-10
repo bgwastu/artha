@@ -29,6 +29,8 @@ class GojekScreenWalk(
     private val onPayment: (UnifiedTransaction) -> Unit,
     private val onSkip: (String) -> Unit,
     private val limits: Limits = Limits(),
+    /** Receives one line per opened payment (date and verdict) and a closing line counting rows per date; never amounts or names. */
+    private val onTrace: (String) -> Unit = {},
 ) {
     interface Screen {
         /** Accessibility dump of the walk's display, or null when it cannot be read. */
@@ -55,6 +57,9 @@ class GojekScreenWalk(
     private val knownCounts: Map<Key, Int> = known.groupingBy { Key(it.occurredAt.atZone(zone).toLocalDate(), it.direction, it.money.amountMinor) }.eachCount()
     private val passedCounts = mutableMapOf<Key, Int>()
     private val seen = mutableListOf<Pair<String, LocalDate>>()
+    private val rowsPerDate = java.util.TreeMap<LocalDate, Int>(compareByDescending { it })
+    /** Why the last opened detail was refused, so the trace can say it. */
+    private var rejection: String? = null
 
     suspend fun run(): Outcome {
         var stored = 0
@@ -62,7 +67,10 @@ class GojekScreenWalk(
         var pages = 0
         var knownStreak = 0
         var failures = 0
-        fun outcome(stop: Stop) = Outcome(stop, stored, opened, pages)
+        fun outcome(stop: Stop): Outcome {
+            onTrace("rows seen per date: " + rowsPerDate.entries.take(TRACE_DATES).joinToString(", ") { "${it.key} x${it.value}" }.ifEmpty { "none" })
+            return Outcome(stop, stored, opened, pages)
+        }
         var rows = awaitList() ?: return outcome(Stop.LIST_UNREADABLE)
         while (true) {
             if (shouldAbort()) return outcome(Stop.ABORTED)
@@ -70,6 +78,7 @@ class GojekScreenWalk(
             for (row in fresh(rows)) {
                 val signature = signature(row)
                 seen += signature to requireNotNull(row.date)
+                rowsPerDate.merge(row.date, 1, Int::plus)
                 val key = Key(row.date, row.direction, row.amountMinor)
                 val passed = passedCounts.merge(key, 1, Int::plus)!!
                 if (passed <= (knownCounts[key] ?: 0) || "${row.date}|$signature" in skipped) {
@@ -84,9 +93,14 @@ class GojekScreenWalk(
             if (target != null) {
                 if (opened >= limits.maxDetails) return outcome(Stop.DETAIL_BUDGET)
                 opened++
+                rejection = null
                 when (val result = openDetail(target)) {
-                    is UnifiedTransaction -> { onPayment(result); stored++ }
-                    false -> if (++failures >= MAX_FAILURES) return outcome(Stop.LIST_UNREADABLE)
+                    is UnifiedTransaction -> { onPayment(result); stored++; onTrace("opened ${target.date}: read") }
+                    false -> {
+                        onTrace("opened ${target.date}: no detail screen appeared")
+                        if (++failures >= MAX_FAILURES) return outcome(Stop.LIST_UNREADABLE)
+                    }
+                    else -> onTrace("opened ${target.date}: " + (rejection?.let { "refused, $it" } ?: "not settled yet"))
                 }
                 rows = awaitList() ?: return outcome(Stop.LIST_UNREADABLE)
                 continue
@@ -140,7 +154,8 @@ class GojekScreenWalk(
         val result: Any? = try {
             GojekScreenParser.detail(nodes)?.let { GojekScreenParser.transaction(row, it, zone) }
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: ProviderReadException) {
+        catch (refused: ProviderReadException) {
+            rejection = refused.message
             onSkip("${row.date}|${signature(row)}")
             null
         }
@@ -170,6 +185,7 @@ class GojekScreenWalk(
         const val SWIPE_FROM_Y = 1900
         const val SWIPE_TO_Y = 900
         const val MAX_FAILURES = 3
+        const val TRACE_DATES = 40
         val DETAIL_LABELS = setOf("ID transaksi", "Transaction ID")
     }
 }

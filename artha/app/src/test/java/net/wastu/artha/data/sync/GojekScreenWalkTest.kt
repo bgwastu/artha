@@ -85,6 +85,15 @@ class GojekScreenWalkTest {
         assertEquals(0, gopay.opened)
     }
 
+    @Test fun traceSaysWhatHappenedToEachOpenedRowAndWhichDatesWereSeen() = runBlocking {
+        val lines = mutableListOf<String>()
+        val gopay = FakeGoPay(history, unreadable = setOf("fictional-id-0001"))
+        GojekScreenWalk(gopay, history.drop(3).map { it.ledgerRow() }, emptySet(), false, zone, today, { false }, {}, {}, fast, lines::add).run()
+        assertEquals(listOf("opened $today: read", "opened $today: refused, GoPay detail screen has no transaction ID", "opened $today: read"), lines.filter { it.startsWith("opened") })
+        assertTrue(lines.last().startsWith("rows seen per date: $today x"))
+        assertFalse(lines.any { "Fictional" in it || "000" in it })
+    }
+
     private fun walk(
         screen: GojekScreenWalk.Screen,
         known: List<UnifiedTransaction>,
