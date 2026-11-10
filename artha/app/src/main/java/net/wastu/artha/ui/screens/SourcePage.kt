@@ -3,6 +3,7 @@ package net.wastu.artha.ui.screens
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +20,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -105,6 +107,7 @@ internal fun SourcePage(
                     diagnostic = diagnostic,
                     coverage = coverage,
                     importing = importing,
+                    busy = busy,
                     allTransactions = allTransactions,
                     providerCounts = providerCounts,
                     onEnabled = onEnabled,
@@ -125,6 +128,7 @@ private fun SourcePageContent(
     diagnostic: ProviderDiagnostic?,
     coverage: SourceCoverage?,
     importing: Boolean,
+    busy: Boolean,
     allTransactions: List<UnifiedTransaction>,
     providerCounts: Map<Provider, Int>,
     onEnabled: (Boolean) -> Unit,
@@ -142,7 +146,7 @@ private fun SourcePageContent(
             AttentionAction.SET_JAGO_PIN -> pinDialogOpen = true
         }
     }
-    SourceStatusSection(provider, diagnostic, importEnabled, importing, onImport)
+    SourceStatusSection(provider, diagnostic, importEnabled, importing, busy, onImport)
     SourceHistorySection(diagnostic, coverage, expenseCount)
     if (provider == Provider.GOJEK) GojekSection(flash)
     if (provider == Provider.JAGO) JagoPinSetting(dialogOpen = pinDialogOpen, onDialogOpenChange = { pinDialogOpen = it })
@@ -158,6 +162,7 @@ private fun SourceStatusSection(
     diagnostic: ProviderDiagnostic?,
     importEnabled: Boolean,
     importing: Boolean,
+    busy: Boolean,
     onImport: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -196,11 +201,15 @@ private fun SourceStatusSection(
             overflow = TextOverflow.Ellipsis,
         )
     }
-    Row(Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp)) {
-        if (status == AccountStatus.ERROR) {
-            FilledTonalButton(onClick = onImport) { Text("Retry") }
-        } else {
+    Row(Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Signing in happens in the provider's app, so that comes first; Retry then checks the new session.
+        if (status == AccountStatus.NEEDS_LOGIN || status == AccountStatus.APP_NOT_INSTALLED) {
             FilledTonalButton(onClick = { openProviderApp(context, provider) }) { Text("Open ${provider.displayName}") }
+        }
+        when (status) {
+            AccountStatus.APP_NOT_INSTALLED -> Unit
+            AccountStatus.NEEDS_LOGIN -> OutlinedButton(onClick = onImport, enabled = !busy) { Text("Retry") }
+            else -> FilledTonalButton(onClick = onImport, enabled = !busy) { Text("Retry") }
         }
     }
 }

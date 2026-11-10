@@ -133,6 +133,9 @@ fun SourcesScreen(
                                 status = statusText,
                                 problem = syncProblem || needsAttention != null,
                                 onClick = { selectedProvider = provider },
+                                onRetry = { syncAction(provider) }
+                                    .takeIf { canRetrySync(diagnostic, provider in importEnabled, providerImporting) },
+                                retryEnabled = !(importBusy && !automaticImport),
                             )
                         }
                     }
@@ -154,7 +157,14 @@ fun SourcesScreen(
 }
 
 @Composable
-private fun SourceListRow(provider: Provider, status: String, problem: Boolean, onClick: () -> Unit) {
+private fun SourceListRow(
+    provider: Provider,
+    status: String,
+    problem: Boolean,
+    onClick: () -> Unit,
+    onRetry: (() -> Unit)?,
+    retryEnabled: Boolean,
+) {
     Surface(onClick = onClick) {
         ListItem(
             headlineContent = { Text(provider.displayName) },
@@ -173,7 +183,9 @@ private fun SourceListRow(provider: Provider, status: String, problem: Boolean, 
                 )
             },
             trailingContent = {
-                if (problem) {
+                if (onRetry != null) {
+                    TextButton(onClick = onRetry, enabled = retryEnabled) { Text("Retry") }
+                } else if (problem) {
                     Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                 } else {
                     Icon(Icons.Default.ChevronRight, contentDescription = null)

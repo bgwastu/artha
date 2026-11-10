@@ -24,6 +24,11 @@ internal fun isSourceProblem(diagnostic: ProviderDiagnostic?, importEnabled: Boo
     }
 }
 
+/** A failed or throttled sync can simply be run again; a signed-out or missing app needs the user first. */
+internal fun canRetrySync(diagnostic: ProviderDiagnostic?, importEnabled: Boolean, importing: Boolean): Boolean =
+    importEnabled && !importing &&
+        (diagnostic?.accountStatus == AccountStatus.ERROR || diagnostic?.accountStatus == AccountStatus.RATE_LIMITED)
+
 internal fun sourceRowStatus(
     provider: Provider,
     diagnostic: ProviderDiagnostic?,

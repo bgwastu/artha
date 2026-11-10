@@ -7,6 +7,7 @@ import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.providers.AccountStatus
 import net.wastu.artha.data.providers.ProviderDiagnostic
+import net.wastu.artha.ui.screens.canRetrySync
 import net.wastu.artha.ui.screens.countExpenses
 import net.wastu.artha.ui.screens.formatRelativeTime
 import net.wastu.artha.ui.screens.isSourceProblem
@@ -365,5 +366,17 @@ class SourcesPresentationTest {
         assertFalse(isSourceProblem(ProviderDiagnostic(accountStatus = AccountStatus.PARTIAL), importEnabled = true, importing = false))
         assertFalse(isSourceProblem(ProviderDiagnostic(accountStatus = AccountStatus.UNKNOWN), importEnabled = true, importing = false))
         assertFalse(isSourceProblem(null, importEnabled = true, importing = false))
+    }
+
+    @Test
+    fun retryIsOfferedOnlyWhenRunningTheSyncAgainCanHelp() {
+        assertTrue(canRetrySync(ProviderDiagnostic(accountStatus = AccountStatus.ERROR), importEnabled = true, importing = false))
+        assertTrue(canRetrySync(ProviderDiagnostic(accountStatus = AccountStatus.RATE_LIMITED), importEnabled = true, importing = false))
+        assertFalse(canRetrySync(ProviderDiagnostic(accountStatus = AccountStatus.ERROR), importEnabled = true, importing = true))
+        assertFalse(canRetrySync(ProviderDiagnostic(accountStatus = AccountStatus.ERROR), importEnabled = false, importing = false))
+        assertFalse(canRetrySync(ProviderDiagnostic(accountStatus = AccountStatus.NEEDS_LOGIN), importEnabled = true, importing = false))
+        assertFalse(canRetrySync(ProviderDiagnostic(accountStatus = AccountStatus.APP_NOT_INSTALLED), importEnabled = true, importing = false))
+        assertFalse(canRetrySync(ProviderDiagnostic(accountStatus = AccountStatus.CONNECTED), importEnabled = true, importing = false))
+        assertFalse(canRetrySync(null, importEnabled = true, importing = false))
     }
 }
