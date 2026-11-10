@@ -370,6 +370,24 @@ class GojekProviderContractTest {
         assertTrue(payload.getJSONArray("detailViewItems").length() >= 2)
     }
 
+    @Test fun jagoLinkedDebitWithNullFieldsNeverNamesTheMerchantNull() {
+        val jago = UnifiedTransaction(
+            provider = Provider.JAGO,
+            providerTransactionId = "jago:null-fixture",
+            direction = Direction.DEBIT,
+            money = Money(25_000_00L),
+            occurredAt = Instant.parse("2026-10-03T05:00:00Z"),
+            description = "004 - Gopay - Generic Jago payment",
+            rawPayload = """{"code":"GPD01","counterpart":null,"notes":"null","localized":null,"fields":{"f6":"order-null-1","f17":null}}""",
+        )
+        val row = GojekProviderParser.paymentFromJagoLinkedDebit(jago, "order-null")
+        assertEquals("GoPay Payment", row.description)
+        assertFalse(JSONObject(row.rawPayload).has("merchantName"))
+        assertTrue(GojekProviderParser.lacksMerchant(row))
+        val named = GojekProviderParser.paymentFromJagoLinkedDebit(jago.copy(rawPayload = """{"code":"GPD01","counterpart":"Indomaret","fields":{"f6":"order-null-1"}}"""), "order-null")
+        assertFalse(GojekProviderParser.lacksMerchant(named))
+    }
+
     @Test fun cachedPaymentsFinishPartialWhenLiveSessionIsInvalid() {
         val rows = ImportRows()
         rows.readRow { requireNotNull(GojekProviderParser.payment(payment())) }

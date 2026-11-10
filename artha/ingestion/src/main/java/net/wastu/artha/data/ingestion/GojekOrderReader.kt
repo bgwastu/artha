@@ -226,7 +226,7 @@ class GojekOrderReader(private val files: RootFileReader, private val screen: Go
         val auth = preferences("AuthPreferences.xml")
         val identity = preferences("gojek-identity-sso.xml")
         // AuthData.deviceId matches this package's SSAID, unlike Artha's own Android ID.
-        val deviceId = identity["ID_SSO_AuthData"]?.let { runCatching { JSONObject(it).optString("deviceId") }.getOrNull() }
+        val deviceId = identity["ID_SSO_AuthData"]?.let { runCatching { JSONObject(it).optText("deviceId") }.getOrNull() }
         val info = files.context.packageManager.getPackageInfo("com.gojek.app", 0)
         val version = info.versionName.orEmpty()
         return buildMap {
@@ -320,9 +320,9 @@ class GojekOrderReader(private val files: RootFileReader, private val screen: Go
             .filter { it.provider == Provider.JAGO && it.direction == Direction.DEBIT }
             .mapNotNull { transaction ->
                 val payload = runCatching { JSONObject(transaction.rawPayload) }.getOrNull() ?: return@mapNotNull null
-                val code = payload.optString("code")
+                val code = payload.optText("code")
                 if (code !in GOPAY_BANK_CODES) return@mapNotNull null
-                val orderId = payload.optJSONObject("fields")?.optString("f6")
+                val orderId = payload.optJSONObject("fields")?.optText("f6")
                     ?.removeSuffix("-1")
                     ?.trim()
                     ?.takeIf { it.isNotBlank() && it.any(Char::isLetter) }

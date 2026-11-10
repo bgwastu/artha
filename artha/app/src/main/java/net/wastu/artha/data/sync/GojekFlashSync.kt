@@ -10,8 +10,10 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
+import net.wastu.artha.data.ingestion.GojekProviderParser
 import net.wastu.artha.data.ingestion.GojekScreenStore
 import net.wastu.artha.data.ingestion.RootFileReader
+import net.wastu.artha.data.ledger.ProviderObservations
 import net.wastu.artha.data.providers.ProviderPreferences
 
 /**
@@ -101,8 +103,7 @@ class GojekScreenSync(
 
         val store = GojekScreenStore(reader.context.filesDir)
         val zone = ZoneId.systemDefault()
-        val known = ledgerPayments().filter { it.provider == Provider.GOJEK && it.providerTransactionId.startsWith("gopay:") } +
-            store.transactions()
+        val known = gopayPaymentsAlreadyRead(ledgerPayments(), store.transactions())
         // A fresh Gojek process starts on the walk's display instead of moving a background task there.
         sh("am force-stop com.gojek.app")
         val session = RootScreenSession.start(reader.context.applicationInfo.sourceDir)
@@ -158,3 +159,16 @@ class GojekScreenSync(
         const val DEEP_LINK = "gojek://gopay/history"
     }
 }
+
+/**
+ * One entry per GoPay payment whose merchant is already known, from the ledger's latest revisions and the walk's own
+ * store. Rows only Jago described name no merchant, so the walk opens them again; a payment the store holds counts
+ * as read even while the ledger still shows Jago's version.
+ */
+internal fun gopayPaymentsAlreadyRead(saved: List<UnifiedTransaction>, stored: List<UnifiedTransaction>): List<UnifiedTransaction> =
+    (runCatching { ProviderObservations.resolve(saved) }.getOrDefault(saved) + stored)
+        .filter { it.provider == Provider.GOJEK && it.providerTransactionId.startsWith("gopay:") }
+        .groupBy { it.providerTransactionId }
+        .values
+        .filter { versions -> versions.any { !GojekProviderParser.lacksMerchant(it) } }
+        .map { it.first() }

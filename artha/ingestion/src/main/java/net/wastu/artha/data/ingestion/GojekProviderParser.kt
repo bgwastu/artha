@@ -162,39 +162,39 @@ object GojekProviderParser {
         val sourceTime = paymentTimestamp(requiredText(item, "order_timestamp"))
         // Room's event time is millisecond precision. Keep the source precision separately.
         val occurredAt = Instant.ofEpochMilli(sourceTime.toEpochMilli())
-        val service = item.optString("service_type")
+        val service = item.optText("service_type")
         val reversal = service == "REFUND" || service.endsWith("_REFUND")
         schema(!reversal || direction == Direction.CREDIT, "GoPay refund has no explicit credit direction")
         val methods = JSONArray()
         val breakup = item.optJSONArray("payment_method_breakup")
         for (i in 0 until (breakup?.length() ?: 0)) {
             val method = breakup?.optJSONObject(i) ?: continue
-            methods.put(JSONObject().put("method", method.optString("payment_method")).put("name", method.optString("payment_method_name")))
+            methods.put(JSONObject().put("method", method.optText("payment_method")).put("name", method.optText("payment_method_name")))
         }
         // COLLECT includes merchant payments; the service name alone does not establish QRIS.
-        val qris = item.optString("payment_transfer_type").contains("QRIS", true) ||
-            (0 until methods.length()).any { methods.getJSONObject(it).optString("method").equals("QRIS", true) }
+        val qris = item.optText("payment_transfer_type").contains("QRIS", true) ||
+            (0 until methods.length()).any { methods.getJSONObject(it).optText("method").equals("QRIS", true) }
         val payload = JSONObject().put("origin", "gopay-order-history").put("provider", Provider.GOJEK.name)
             .put("orderNumber", id).put("serviceTier", service).put("isQris", qris)
-            .put("paymentMethod", methods.optJSONObject(0)?.optString("name").orEmpty().ifBlank { "GoPay" })
+            .put("paymentMethod", methods.optJSONObject(0)?.optText("name").orEmpty().ifBlank { "GoPay" })
             .put("paymentMethods", methods).put("paymentStatus", status).put("paymentDirection", direction.name)
             .put("paymentAmountMinor", minor).put("paymentCurrency", "IDR").put("paymentTimestamp", occurredAt.toString())
             .put("sourcePaymentTimestamp", sourceTime.toString())
             .put("paymentEvidence", "settled-wallet-history")
         return UnifiedTransaction(Provider.GOJEK, "gopay:$id", direction, Money(minor), occurredAt,
-            item.optString("description").ifBlank { "GoPay Payment" }, payload.toString(), isQris = qris, isReversal = reversal)
+            item.optText("description").ifBlank { "GoPay Payment" }, payload.toString(), isQris = qris, isReversal = reversal)
     }
 
     /** When GoPay history APIs return GoPay-1000, keep bank↔wallet fusion using Jago's order reference. */
     fun paymentFromJagoLinkedDebit(jago: UnifiedTransaction, orderId: String): UnifiedTransaction {
         schema(jago.provider == Provider.JAGO && jago.direction == Direction.DEBIT, "Jago-linked GoPay hints require a settled debit")
         val source = JSONObject(jago.rawPayload)
-        val code = source.optString("code")
+        val code = source.optText("code")
         schema(code in setOf("GPD01", "GPD05"), "Jago-linked GoPay hints require a GoPay debit code")
         val fields = source.optJSONObject("fields")
-        val counterpart = source.optString("counterpart").ifBlank { fields?.optString("f17").orEmpty() }.trim()
-        val notes = source.optString("notes")
-        val localized = source.optString("localized")
+        val counterpart = source.optText("counterpart").ifBlank { fields?.optText("f17").orEmpty() }.trim()
+        val notes = source.optText("notes")
+        val localized = source.optText("localized")
         val qris = source.optBoolean("isQris") ||
             jago.isQris ||
             listOf(counterpart, jago.description, notes, localized).any { it.contains("QRIS", ignoreCase = true) }
@@ -215,7 +215,7 @@ object GojekProviderParser {
             .put("counterpart", counterpart)
             .put("notes", notes)
             .put("localized", localized)
-        source.optString("paymentMethod").takeIf { it.isNotBlank() }?.let { payload.put("paymentMethod", it) }
+        source.optText("paymentMethod").takeIf { it.isNotBlank() }?.let { payload.put("paymentMethod", it) }
         merchant?.let { payload.put("merchantName", it) }
         val detailItems = JSONArray()
         if (merchant != null) detailItems.put(JSONObject().put("title", "Merchant").put("value", merchant))
@@ -232,6 +232,16 @@ object GojekProviderParser {
             rawPayload = payload.toString(),
             isQris = qris,
         )
+    }
+
+    /**
+     * A GoPay row that only Jago described and that names no merchant. GoPay's own history screens can still
+     * say who was paid, so the screen walk reopens these instead of treating them as already read.
+     */
+    fun lacksMerchant(transaction: UnifiedTransaction): Boolean {
+        if (transaction.provider != Provider.GOJEK) return false
+        val payload = runCatching { JSONObject(transaction.rawPayload) }.getOrNull() ?: return false
+        return payload.optText("paymentEvidence") == "jago-linked-order-reference" && payload.optText("merchantName").isBlank()
     }
 
     private fun merchantFromJagoHint(counterpart: String, title: String, localized: String, notes: String): String? {
@@ -251,7 +261,7 @@ object GojekProviderParser {
      */
     private fun jagoHintNoise(text: String): Boolean {
         val trimmed = text.trim()
-        if (trimmed.isBlank()) return true
+        if (trimmed.isBlank() || trimmed.equals("null", ignoreCase = true)) return true
         if (trimmed.equals("GoPay Payment", ignoreCase = true) || trimmed.equals("GoPay", ignoreCase = true)) return true
         if (trimmed.equals("QRIS Payment", ignoreCase = true)) return true
         if (trimmed.contains("Generic Jago payment", ignoreCase = true)) return true
@@ -282,7 +292,7 @@ object GojekProviderParser {
             val service = integerCode(action, "service_type")
             if (number.isNullOrBlank() || status == null || service == null) { malformed++; continue }
             orders += NativeOrder(number, status, service,
-                payload.optJSONObject("estate")?.optJSONArray("middle_column")?.optJSONObject(0)?.optJSONObject("payload")?.optString("text")?.takeIf { it.isNotBlank() })
+                payload.optJSONObject("estate")?.optJSONArray("middle_column")?.optJSONObject(0)?.optJSONObject("payload")?.optText("text")?.takeIf { it.isNotBlank() })
         }
         return OrderPage(orders, malformed)
     }
@@ -309,7 +319,7 @@ object GojekProviderParser {
 
     fun shouldFetchPaymentDetail(transaction: UnifiedTransaction): Boolean {
         val payload = runCatching { JSONObject(transaction.rawPayload) }.getOrNull()
-        val service = payload?.optString("serviceTier").orEmpty()
+        val service = payload?.optText("serviceTier").orEmpty()
         if (transaction.isQris || service in DETAIL_FETCH_SERVICES) return true
         val description = transaction.description.trim()
         return description.isBlank() || description.equals("GoPay Payment", ignoreCase = true)
@@ -331,13 +341,13 @@ object GojekProviderParser {
             order.description?.let { payload.put("orderDisplayDescription", it) }
         }
         val qris = transaction.isQris || (0 until values.length()).any { index ->
-            val value = values.optJSONObject(index)?.optString("value").orEmpty()
+            val value = values.optJSONObject(index)?.optText("value").orEmpty()
             value.equals("QRIS", true) || value.equals("Pembayaran QRIS", true)
         }
         payload.put("isQris", qris)
         mergeDetailViewItems(payload, values, matches.isEmpty())
-        val merchant = payload.optString("merchantName").takeIf { it.isNotBlank() }
-        val display = payload.optString("orderDisplayDescription").takeIf { it.isNotBlank() }
+        val merchant = payload.optText("merchantName").takeIf { it.isNotBlank() }
+        val display = payload.optText("orderDisplayDescription").takeIf { it.isNotBlank() }
         val description = when {
             merchant != null -> gopayDisplayDescription(merchant, qris)
             display != null && transaction.description.equals("GoPay Payment", ignoreCase = true) -> display
@@ -359,21 +369,21 @@ object GojekProviderParser {
         }
         if (copied.length() > 0) payload.put("detailViewItems", copied)
         detailValue(items, "payment method", "metode pembayaran", "payment method")?.let { method ->
-            val current = payload.optString("paymentMethod")
+            val current = payload.optText("paymentMethod")
             if (current.isBlank() || current.equals("GoPay", ignoreCase = true)) payload.put("paymentMethod", method)
         }
         if (!includeMerchant) return
         merchantFromDetailItems(items)?.let { merchant ->
             payload.put("merchantName", merchant)
-            if (payload.optString("counterpart").isBlank()) payload.put("counterpart", merchant)
+            if (payload.optText("counterpart").isBlank()) payload.put("counterpart", merchant)
         }
     }
 
     private fun merchantFromDetailItems(items: JSONArray): String? {
         for (index in 0 until items.length()) {
             val row = items.optJSONObject(index) ?: continue
-            val title = row.optString("title").ifBlank { row.optString("label") }.trim()
-            val value = row.optString("value").trim()
+            val title = row.optText("title").ifBlank { row.optText("label") }.trim()
+            val value = row.optText("value").trim()
             if (value.isBlank() || isDetailNoise(value)) continue
             if (title.contains("merchant", true) || title.contains("toko", true) ||
                 title.contains("nama", true) || title.contains("store", true)) {
@@ -381,7 +391,7 @@ object GojekProviderParser {
             }
         }
         for (index in 0 until items.length()) {
-            val value = items.optJSONObject(index)?.optString("value")?.trim().orEmpty()
+            val value = items.optJSONObject(index)?.optText("value")?.trim().orEmpty()
             if (value.isNotBlank() && !isDetailNoise(value)) return value
         }
         return null
@@ -390,9 +400,9 @@ object GojekProviderParser {
     private fun detailValue(items: JSONArray, vararg titleHints: String): String? {
         for (index in 0 until items.length()) {
             val row = items.optJSONObject(index) ?: continue
-            val title = row.optString("title").ifBlank { row.optString("label") }.trim()
+            val title = row.optText("title").ifBlank { row.optText("label") }.trim()
             if (titleHints.none { hint -> title.contains(hint, ignoreCase = true) }) continue
-            val value = row.optString("value").trim()
+            val value = row.optText("value").trim()
             if (value.isNotBlank()) return value
         }
         return null

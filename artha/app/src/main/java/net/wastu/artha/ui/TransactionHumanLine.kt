@@ -1,6 +1,8 @@
 package net.wastu.artha.ui
 
+import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
+import net.wastu.artha.data.ingestion.optText
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -11,8 +13,11 @@ private const val HUMAN_LINE_SEP = " - "
 internal fun transactionHumanLine(transaction: UnifiedTransaction): String {
     val payload = runCatching { JSONObject(transaction.rawPayload) }.getOrNull()
     val built = payload?.let { lineFromPayload(it) }
-    val normalized = normalizeHumanLine(built ?: transaction.description)
-    return normalized.ifBlank { transaction.description.trim() }
+    // An import that stored a missing description as the word "null" is the same as having none.
+    val description = transaction.description.trim().takeUnless { it.equals("null", ignoreCase = true) }.orEmpty()
+    val normalized = normalizeHumanLine(built ?: description)
+    return normalized.ifBlank { description }
+        .let { if (it.isBlank() && transaction.provider == Provider.GOJEK) opaqueTitle(payload) else it }
         .let { if (isOpaqueFallback(it)) opaqueTitle(payload) else it }
 }
 
@@ -22,30 +27,30 @@ internal fun isOpaqueFallback(title: String): Boolean =
         title.equals("Gopay Tabungan Transaction", ignoreCase = true)
 
 private fun opaqueTitle(payload: JSONObject?): String {
-    val pocket = payload?.optString("pocketName")?.trim().orEmpty()
+    val pocket = payload?.optText("pocketName")?.trim().orEmpty()
     return if (pocket.isBlank() || pocket.equals("GoPay Tabungan", ignoreCase = true)) "GoPay Payment"
     else "GoPay Payment$HUMAN_LINE_SEP$pocket"
 }
 
 private fun lineFromPayload(payload: JSONObject): String? {
-    val merchant = usableMerchant(payload.optString("merchantName"))
+    val merchant = usableMerchant(payload.optText("merchantName"))
         ?: qrisMerchantHint(payload)
-        ?: usableMerchant(payload.optString("counterpart"))
+        ?: usableMerchant(payload.optText("counterpart"))
     // QRIS is a row tag, not part of the title.
     if (merchant != null) return merchant
-    payload.optString("orderDisplayDescription").trim().takeIf { it.isNotBlank() }?.let { return it }
-    val shop = payload.optString("shopName").ifBlank { payload.optString("restaurantName") }
+    payload.optText("orderDisplayDescription").trim().takeIf { it.isNotBlank() }?.let { return it }
+    val shop = payload.optText("shopName").ifBlank { payload.optText("restaurantName") }
     val items = payload.optJSONArray("items")
     if (shop.isNotBlank() || (items?.length() ?: 0) > 0) {
         val product = primaryItemLabel(items)
         val orderLine = listOf(shop, product).filter { it.isNotBlank() }.joinToString(HUMAN_LINE_SEP)
         if (orderLine.isNotBlank()) return orderLine
     }
-    val pickup = payload.optString("pickupLocation").trim()
-    val dropoff = payload.optString("dropoffLocation").trim()
+    val pickup = payload.optText("pickupLocation").trim()
+    val dropoff = payload.optText("dropoffLocation").trim()
     if (pickup.isNotBlank()) {
         val route = if (dropoff.isNotBlank()) "$pickup to $dropoff" else pickup
-        val tier = payload.optString("serviceTier").trim()
+        val tier = payload.optText("serviceTier").trim()
         return if (tier.isNotBlank()) listOf(tier, route).joinToString(HUMAN_LINE_SEP) else route
     }
     return null
@@ -58,7 +63,7 @@ private fun lineFromPayload(payload: JSONObject): String? {
  */
 private fun qrisMerchantHint(payload: JSONObject): String? {
     if (!payload.optBoolean("isQris")) return null
-    val localized = payload.optString("localized").trim()
+    val localized = payload.optText("localized").trim()
     if (localized.isBlank()) return null
     val cleaned = localized
         .replace(Regex("(?i)\\s*-\\s*qr?is\\s*$"), "")
@@ -96,7 +101,7 @@ private fun usableMerchant(raw: String): String? {
 
 private fun primaryItemLabel(items: JSONArray?): String {
     if (items == null || items.length() == 0) return ""
-    val first = items.optJSONObject(0)?.optString("name")?.trim().orEmpty()
+    val first = items.optJSONObject(0)?.optText("name")?.trim().orEmpty()
     if (first.isBlank()) return ""
     val extra = items.length() - 1
     return if (extra > 0) "$first (+$extra more)" else first
@@ -106,6 +111,7 @@ private fun normalizeHumanLine(text: String): String {
     var line = text.trim()
     if (line.isBlank()) return ""
     line = line.replace(Regex("(?i)\\s*\\(Reversed\\)\\s*"), "").trim()
+    // Rows saved by older versions joined their parts with a dot; read them with the same dash as everything else.
     line = line.replace('·', '-').replace('•', '-')
     line = line.replace(Regex("(?i)^([^:]+):\\s+"), "$1$HUMAN_LINE_SEP")
     val parts = line.split(Regex("\\s*-\\s*")).map { it.trim() }.filter { it.isNotBlank() }

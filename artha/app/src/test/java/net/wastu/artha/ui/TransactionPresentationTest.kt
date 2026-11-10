@@ -34,6 +34,16 @@ class TransactionPresentationTest {
         assertEquals("Warung Sari", transactionHumanLine(reversed))
     }
 
+    @Test fun gopayRowsStoredWithTheWordNullStillReadAsGoPayPayments() {
+        val stored = transaction("null-gopay").copy(
+            provider = Provider.GOJEK,
+            description = "null",
+            rawPayload = """{"origin":"gopay-order-history","merchantName":"null","counterpart":null}""",
+        )
+        assertEquals("GoPay Payment", transactionHumanLine(stored))
+        assertEquals("GoPay Payment", transactionHumanLine(stored.copy(rawPayload = "{}")))
+    }
+
     @org.junit.Test fun reversedPaymentShowsZeroButOriginalChargeRemainsAvailable() {
         val tx = net.wastu.artha.core.model.UnifiedTransaction(net.wastu.artha.core.model.Provider.JAGO, "fixture",
             net.wastu.artha.core.model.Direction.DEBIT, net.wastu.artha.core.model.Money(125000),

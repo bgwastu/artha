@@ -70,4 +70,26 @@ class ProviderObservationsTest {
         assertEquals(listOf(corrected), ProviderObservations.resolve(records))
         assertEquals(2, records.size)
     }
+
+    private fun gopay(evidence: String, merchant: String?, description: String) = UnifiedTransaction(
+        Provider.GOJEK, "gopay:order-1", Direction.DEBIT, Money(2_500_000), Instant.parse("2026-10-10T03:00:00Z"), description,
+        JSONObject().put("origin", "gopay-order-history").put("orderNumber", "order-1").put("paymentEvidence", evidence)
+            .apply { merchant?.let { put("merchantName", it) } }.toString(),
+    )
+
+    @Test fun gopayScreenReadNamesTheMerchantJagoCouldNot() {
+        val generic = gopay("jago-linked-order-reference", null, "GoPay Payment")
+        val screen = gopay("gopay-screen", "Warung Bu Sari", "Warung Bu Sari")
+        val revision = ProviderObservations.capture(listOf(generic), listOf(screen), 1000).single()
+        val stored = listOf(generic, revision)
+        assertEquals(listOf(screen), ProviderObservations.resolve(stored))
+        ProviderObservations.validate(stored)
+        assertTrue(ProviderObservations.capture(stored, listOf(screen), 2000).isEmpty())
+    }
+
+    @Test fun gopayScreenReadNeverRewritesARowThatAlreadyNamesItsMerchant() {
+        val named = gopay("jago-linked-order-reference", "Indomaret", "Indomaret")
+        val screen = gopay("gopay-screen", "Indomaret Point", "Indomaret Point")
+        assertTrue(ProviderObservations.capture(listOf(named), listOf(screen), 1000).isEmpty())
+    }
 }

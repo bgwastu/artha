@@ -3,6 +3,7 @@ package net.wastu.artha.data.ledger
 import java.security.MessageDigest
 import java.time.Instant
 import net.wastu.artha.core.model.*
+import net.wastu.artha.data.ingestion.GojekProviderParser
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -10,6 +11,7 @@ import org.json.JSONObject
 object ProviderObservations {
     private const val PREFIX = "artha:observation:"
     private const val ORIGIN = "artha-provider-observation"
+    private const val SCREEN_EVIDENCE = "gopay-screen"
     private data class Revision(val transaction: UnifiedTransaction, val time: Long)
 
     fun isObservation(tx: UnifiedTransaction) = tx.providerTransactionId.startsWith(PREFIX)
@@ -51,7 +53,8 @@ object ProviderObservations {
         return when (tx.provider) {
             Provider.SHOPEE -> (raw.optString("origin") in setOf("shopee-order-api", "shopeefood-order-api", "shopee-digital-api") && raw.optBoolean("paymentDetailVerified")) ||
                 raw.optString("origin") == "shopee-refund-api" && raw.optBoolean("verifiedRefund") && raw.optLong("sourceRefundStatus") == 5L
-            Provider.GOJEK -> raw.optString("origin") == "gopay-order-history" && raw.optString("paymentEvidence") == "settled-wallet-history"
+            Provider.GOJEK -> raw.optString("origin") == "gopay-order-history" &&
+                raw.optString("paymentEvidence") in setOf("settled-wallet-history", SCREEN_EVIDENCE)
             Provider.GRAB -> raw.optString("origin") in setOf("grab-wallet-api", "grab-rides-api") &&
                 (raw.optString("paymentEvidence") == "settled-charge-history" || raw.optBoolean("paymentDetailVerified"))
             else -> false
@@ -93,6 +96,8 @@ object ProviderObservations {
             for (tx in incoming.filter(::eligible)) {
                 val previous = current[tx.key] ?: continue
                 if (fingerprint(previous) == fingerprint(tx)) continue
+                // GoPay's own screens only fill in what Jago's note could not say; they never rewrite other rows.
+                if (JSONObject(tx.rawPayload).optString("paymentEvidence") == SCREEN_EVIDENCE && !GojekProviderParser.lacksMerchant(previous)) continue
                 val time = maxOf(now, Math.addExact(times[tx.key] ?: 0L, 1L))
                 val id = "$PREFIX${tx.providerTransactionId}:$time:${fingerprint(tx)}"
                 val payload = JSONObject().put("origin", ORIGIN).put("observedAtEpochMillis", time).put("transaction", encode(tx))
