@@ -63,6 +63,7 @@ internal fun HomePages(
                     onOpenTransaction = onOpenTransaction,
                 )
                 Page.UPDATES -> UpdatesScreen(onBack = onBack)
+                Page.LOG -> ActivityLogScreen(onBack = onBack)
             }
         }
     }

@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.SettingsSuggest
 import androidx.compose.material.icons.filled.SystemUpdate
@@ -92,7 +93,8 @@ internal fun SettingsScreen(
             item { Spacer(Modifier.height(16.dp)) }
             item { SettingsLink("Remote access", remoteSummary, Icons.Default.Link, segment = Segment.First) { onOpen(Page.REMOTE) } }
             item { SettingsLink("Export and import", "Back up or restore your data", Icons.Default.FileDownload, segment = Segment.Middle) { onOpen(Page.DATA) } }
-            item { SettingsLink("Updates", updateSummary, Icons.Default.SystemUpdate, segment = Segment.Last) { onOpen(Page.UPDATES) } }
+            item { SettingsLink("Updates", updateSummary, Icons.Default.SystemUpdate, segment = Segment.Middle) { onOpen(Page.UPDATES) } }
+            item { SettingsLink("Activity log", "What Artha did in the background", Icons.Default.History, segment = Segment.Last) { onOpen(Page.LOG) } }
             item { Spacer(Modifier.height(16.dp)) }
         }
         item {

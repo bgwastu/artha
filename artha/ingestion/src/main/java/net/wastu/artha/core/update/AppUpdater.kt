@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Log
+import net.wastu.artha.core.log.ArthaLog
 import androidx.core.content.edit
 import androidx.core.content.pm.PackageInfoCompat
 import java.io.ByteArrayOutputStream
@@ -99,7 +99,7 @@ class AppUpdater(
                     prefs.edit { putString(KEY_READY, release.versionName); putLong(KEY_READY_CODE, release.versionCode) }
                     _state.value = UpdateState.Ready(release.versionName)
                     if (install) {
-                        Log.i(TAG, "Installing ${release.versionName}")
+                        ArthaLog.i(TAG, "Installing ${release.versionName}")
                         _state.value = UpdateState.Installing(release.versionName)
                         installer.install(apk)
                     }
@@ -119,7 +119,7 @@ class AppUpdater(
     }
 
     private fun fail(message: String, error: Exception? = null) {
-        Log.w(TAG, "Update failed: $message", error)
+        ArthaLog.w(TAG, "Update failed: $message", error)
         prefs.edit { putString(KEY_ERROR, message) }
         _state.value = UpdateState.Failed(message)
     }
@@ -149,7 +149,7 @@ class AppUpdater(
         val partial = File(dir, "partial-${target.name}")
         val digest = MessageDigest.getInstance("SHA-256")
         var received = 0L
-        Log.i(TAG, "Downloading ${release.versionName}")
+        ArthaLog.i(TAG, "Downloading ${release.versionName}")
         val connection = open(asset.url)
         try {
             connection.inputStream.use { input ->

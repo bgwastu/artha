@@ -1,7 +1,7 @@
 package net.wastu.artha.data.sync
 
 import android.os.Build
-import android.util.Log
+import net.wastu.artha.core.log.ArthaLog
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.concurrent.atomic.AtomicBoolean
@@ -50,14 +50,14 @@ class GojekFlashController(
 
     suspend fun run(gojekImportEnabled: Boolean, ignoreCooldown: Boolean = false): GojekScreenSync.Result {
         if (!running.compareAndSet(false, true)) {
-            Log.i("ArthaScreen", "BUSY: already running")
+            ArthaLog.i("ArthaScreen", "BUSY: already running")
             return GojekScreenSync.Result.BUSY
         }
         abort.set(false)
         try {
             val last = preferences.gojekFlash.value
             if (!ignoreCooldown && GojekFlashPolicy.cooldownActive(last.result, last.millis, System.currentTimeMillis())) {
-                Log.i("ArthaScreen", "SKIPPED_COOLDOWN")
+                ArthaLog.i("ArthaScreen", "SKIPPED_COOLDOWN")
                 return GojekScreenSync.Result.SKIPPED_COOLDOWN
             }
             val result = GojekScreenSync(reader, isInteractive, abort::get, ledgerPayments).run(gojekImportEnabled)
@@ -150,7 +150,7 @@ class GojekScreenSync(
 
     private suspend fun sh(command: String): List<String>? = reader.executeCommandWithOutput(command)
 
-    private fun log(message: String) = Log.i(TAG, message)
+    private fun log(message: String) = ArthaLog.i(TAG, message)
 
     private fun skipped(result: Result, why: String): Result = log("$result: $why").let { result }
 

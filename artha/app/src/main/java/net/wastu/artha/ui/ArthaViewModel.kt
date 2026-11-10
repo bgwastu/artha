@@ -2,7 +2,7 @@ package net.wastu.artha.ui
 
 import android.content.Context
 import android.net.Uri
-import android.util.Log
+import net.wastu.artha.core.log.ArthaLog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import java.time.Clock
@@ -137,10 +137,10 @@ class ArthaViewModel(
             stream.readBytes().toString(Charsets.UTF_8)
         } ?: throw IllegalStateException("Unable to read the import file.")
         val parsed = LedgerJsonlImport.parse(body)
-        Log.i("ArthaImport", "parsed ${parsed.transactions.size} rows from ${body.length} bytes")
+        ArthaLog.i("ArthaImport", "parsed ${parsed.transactions.size} rows from ${body.length} bytes")
         analysisStore?.mergeImportedAnalysis(parsed.meta, parsed.labels)
         ledger().append(parsed.transactions).also { result ->
-            Log.i("ArthaImport", "append: ${result.inserted} inserted, ${result.duplicates} duplicates")
+            ArthaLog.i("ArthaImport", "append: ${result.inserted} inserted, ${result.duplicates} duplicates")
         }
     }
 

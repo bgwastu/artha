@@ -1,7 +1,7 @@
 package net.wastu.artha.core.root
 
 import android.content.Context
-import android.util.Log
+import net.wastu.artha.core.log.ArthaLog
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -25,7 +25,7 @@ class LibsuRootAccess(private val context: Context) : RootAccess {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (e: Exception) {
-                Log.w("ArthaRoot", "Root check failed", e)
+                ArthaLog.w("ArthaRoot", "Root check failed", e)
                 false
             }
         }

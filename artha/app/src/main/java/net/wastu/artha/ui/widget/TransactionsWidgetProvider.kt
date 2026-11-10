@@ -8,7 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
+import net.wastu.artha.core.log.ArthaLog
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
@@ -249,7 +249,7 @@ private class TransactionsRemoteViewsFactory(
                 val app = context.applicationContext as ArthaApplication
                 val enabled = app.providerPreferences.enabled.value
                 rows = groupedWidgetPayments(widgetSpending(context).transactions, enabled)
-            } catch (e: Exception) { Log.w("ArthaWidget", "Keeping the last widget rows", e) }
+            } catch (e: Exception) { ArthaLog.w("ArthaWidget", "Keeping the last widget rows", e) }
         }
     }
 

@@ -3,7 +3,7 @@
 package net.wastu.artha.data.ingestion
 
 import android.annotation.SuppressLint
-import android.util.Log
+import net.wastu.artha.core.log.ArthaLog
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
@@ -170,7 +170,7 @@ class GrabOrderReader(
             val json = JSONObject()
             cache.entries.toList().takeLast(200).forEach { (k, v) -> json.put(k, v) }
             file.writeText(json.toString(), Charsets.UTF_8)
-        } catch (e: Exception) { Log.w("ArthaGrab", "Could not save receipt cache", e) }
+        } catch (e: Exception) { ArthaLog.w("ArthaGrab", "Could not save receipt cache", e) }
     }
 
     private suspend fun request(token: String, path: String, allowRateLimitRetry: Boolean = true): JSONObject {

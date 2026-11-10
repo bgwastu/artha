@@ -1,6 +1,6 @@
 package net.wastu.artha.data.sync
 
-import android.util.Log
+import net.wastu.artha.core.log.ArthaLog
 import java.io.BufferedWriter
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
@@ -58,7 +58,7 @@ class RootScreenSession private constructor(private val process: Process) : Goje
             val line = replies.poll(left.coerceAtLeast(0), TimeUnit.NANOSECONDS)
             if (line == null || line == CLOSED) {
                 if (line == CLOSED) replies.put(CLOSED)
-                Log.w(TAG, "$command: no reply")
+                ArthaLog.w(TAG, "$command: no reply")
                 process.destroy()
                 return@withContext null
             }
@@ -66,7 +66,7 @@ class RootScreenSession private constructor(private val process: Process) : Goje
                 line == "ok" -> return@withContext ""
                 line.startsWith("ok ") -> return@withContext line.substring(3)
                 line.startsWith("err") -> {
-                    Log.w(TAG, "$command: $line")
+                    ArthaLog.w(TAG, "$command: $line")
                     return@withContext null
                 }
                 // Anything else is runtime noise on stdout, not a reply.
@@ -99,6 +99,6 @@ class RootScreenSession private constructor(private val process: Process) : Goje
             require(apkPath.matches(Regex("/[A-Za-z0-9._~=+/-]+\\.apk"))) { "unexpected APK path" }
             val command = "CLASSPATH=$apkPath exec app_process /system/bin $HELPER 2>/dev/null"
             RootScreenSession(ProcessBuilder("su", "-M", "-c", command).start())
-        }.onFailure { Log.w(TAG, "helper did not start", it) }.getOrNull()
+        }.onFailure { ArthaLog.w(TAG, "helper did not start", it) }.getOrNull()
     }
 }

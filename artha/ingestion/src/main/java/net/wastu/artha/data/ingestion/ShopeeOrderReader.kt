@@ -3,7 +3,7 @@
 package net.wastu.artha.data.ingestion
 
 import android.annotation.SuppressLint
-import android.util.Log
+import net.wastu.artha.core.log.ArthaLog
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -52,7 +52,7 @@ class ShopeeOrderReader(private val files: RootFileReader) {
             val json = JSONObject()
             cache.entries.toList().takeLast(500).forEach { (k, v) -> json.put(k, v) }
             file.writeText(json.toString(), Charsets.UTF_8)
-        } catch (e: Exception) { Log.w("ArthaShopee", "Could not save order cache", e) }
+        } catch (e: Exception) { ArthaLog.w("ArthaShopee", "Could not save order cache", e) }
     }
 
     suspend fun transactions(): List<UnifiedTransaction> = withContext(Dispatchers.IO) {

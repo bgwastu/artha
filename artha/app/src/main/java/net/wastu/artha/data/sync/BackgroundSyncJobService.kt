@@ -8,7 +8,7 @@ import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.util.Log
+import net.wastu.artha.core.log.ArthaLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,7 +53,7 @@ class BackgroundSyncJobService : JobService() {
                 for (provider in app.providerPreferences.importEnabled.value) {
                     app.providerPreferences.recordSyncError(provider, message)
                 }
-                Log.w(TAG, "background sync failed: ${t.javaClass.simpleName}: $message")
+                ArthaLog.w(TAG, "background sync failed: ${t.javaClass.simpleName}: $message")
             } finally {
                 jobFinished(jobParams, !allProvidersHealthy)
             }

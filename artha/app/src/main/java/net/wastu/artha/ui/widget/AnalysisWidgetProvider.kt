@@ -9,7 +9,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
+import net.wastu.artha.core.log.ArthaLog
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
@@ -206,7 +206,7 @@ private class AnalysisRemoteViewsFactory(
                 val month = YearMonth.now(AccountingTime.clock)
                 val analysis = BudgetAnalyzer.analyzeMonth(month, widgetSpending(context).transactions)
                 categories = analysis.categories
-            } catch (e: Exception) { Log.w("ArthaWidget", "Analysis widget refresh failed", e) }
+            } catch (e: Exception) { ArthaLog.w("ArthaWidget", "Analysis widget refresh failed", e) }
         }
     }
 

@@ -6,7 +6,7 @@ import android.app.job.JobScheduler
 import android.app.job.JobService
 import android.content.ComponentName
 import android.content.Context
-import android.util.Log
+import net.wastu.artha.core.log.ArthaLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,7 +31,7 @@ class AppUpdateJobService : JobService() {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w("AppUpdateJob", "Update check failed", e)
+                ArthaLog.w("AppUpdateJob", "Update check failed", e)
             } finally {
                 jobFinished(jobParams, false)
             }

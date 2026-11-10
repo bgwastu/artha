@@ -1,7 +1,7 @@
 package net.wastu.artha.api.tunnel
 
 import android.content.Context
-import android.util.Log
+import net.wastu.artha.core.log.ArthaLog
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.Inet4Address
@@ -59,7 +59,7 @@ class CloudflareQuickTunnel(
             try {
                 run(localPort)
             } catch (e: Exception) {
-                Log.e(TAG, "Tunnel failed", e)
+                ArthaLog.e(TAG, "Tunnel failed", e)
                 destroyProcess()
                 _state.value = TunnelState.Failed(e.message ?: "Could not start the share link")
             }
@@ -116,7 +116,7 @@ class CloudflareQuickTunnel(
         val reader = scope.launch(Dispatchers.IO) {
             // Reading throws when stop() closes the stream; that is expected.
             runCatching { proc.inputStream.bufferedReader().forEachLine { line ->
-                Log.d(TAG, line)
+                ArthaLog.d(TAG, line)
                 synchronized(tail) {
                     tail.addLast(line)
                     if (tail.size > 6) tail.removeFirst()
