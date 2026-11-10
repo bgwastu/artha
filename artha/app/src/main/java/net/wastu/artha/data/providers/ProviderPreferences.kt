@@ -5,6 +5,7 @@ import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import net.wastu.artha.core.model.Provider
+import net.wastu.artha.core.log.ArthaLog
 
 
 data class ProviderDiagnostic(
@@ -30,7 +31,7 @@ data class ProviderImportWindow(val paymentCount: Int, val earliestMillis: Long?
 /** Latest invisible GoPay flash trigger outcome for the provider screen. */
 data class GojekFlashRecord(val millis: Long?, val result: String)
 
-class ProviderPreferences(context: Context) {
+class ProviderPreferences(context: Context, private val pinCipher: PinCipher = KeystorePinCipher()) {
     private val preferences = context.getSharedPreferences("provider_visibility", Context.MODE_PRIVATE)
 
     /** Outcome of the last invisible GoPay flash, so sleep-time syncs stay observable in the UI. */
@@ -44,6 +45,8 @@ class ProviderPreferences(context: Context) {
         _gojekFlash.value = GojekFlashRecord(now, result)
     }
     init {
+        // A PIN saved in plain text by an older version is sealed right away rather than on the next sync.
+        if (preferences.getString(PIN_LEGACY_KEY, null) != null && getJagoPin() != null) ArthaLog.i("ProviderPrefs", "sealed the saved Bank Jago PIN with the Keystore")
         val obsoleteKeys = preferences.all.keys.filter { it.startsWith("TOKOPEDIA") }
         if (obsoleteKeys.isNotEmpty()) {
             preferences.edit {
@@ -176,9 +179,26 @@ class ProviderPreferences(context: Context) {
         _diagnostics.value = current
     }
 
-    fun getJagoPin(): String? = preferences.getString("JAGO_pin", null)
+    /**
+     * Bank Jago's background PIN, or null when none is set or the sealed copy cannot be opened. It is
+     * stored only as a Keystore-sealed token; a plaintext PIN left by an older version is sealed on first read.
+     */
+    fun getJagoPin(): String? {
+        preferences.getString(PIN_SEALED_KEY, null)?.let { token ->
+            pinCipher.decrypt(token)?.let { return it }
+            // The key is gone, so the token can never be opened again: drop it and ask for the PIN anew.
+            preferences.edit { remove(PIN_SEALED_KEY); remove("JAGO_pin_check") }
+            return null
+        }
+        val legacy = preferences.getString(PIN_LEGACY_KEY, null)?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return runCatching { pinCipher.encrypt(legacy) }.getOrNull()?.let { token ->
+            preferences.edit { putString(PIN_SEALED_KEY, token); remove(PIN_LEGACY_KEY) }
+            legacy
+        }
+    }
 
-    fun isJagoPinSet(): Boolean = !getJagoPin().isNullOrBlank()
+    /** Whether a PIN is saved, without opening it. */
+    fun isJagoPinSet(): Boolean = preferences.getString(PIN_SEALED_KEY, null) != null || !preferences.getString(PIN_LEGACY_KEY, null).isNullOrBlank()
 
     private val _jagoPinCheck = MutableStateFlow(loadJagoPinCheck())
     /** What happened when Artha last typed the current PIN into Bank Jago. */
@@ -192,7 +212,8 @@ class ProviderPreferences(context: Context) {
         val next = pin?.trim()?.takeIf { it.isNotEmpty() }
         val changed = next != getJagoPin()
         preferences.edit {
-            if (next == null) remove("JAGO_pin") else putString("JAGO_pin", next)
+            remove(PIN_LEGACY_KEY)
+            if (next == null) remove(PIN_SEALED_KEY) else putString(PIN_SEALED_KEY, pinCipher.encrypt(next))
             if (changed) remove("JAGO_pin_check")
         }
         _jagoPinSet.value = isJagoPinSet()
@@ -210,6 +231,11 @@ class ProviderPreferences(context: Context) {
         val raw = preferences.getString("JAGO_pin_check", null) ?: return JagoPinCheck()
         val status = runCatching { JagoPinStatus.valueOf(raw.substringBefore('|')) }.getOrNull() ?: return JagoPinCheck()
         return JagoPinCheck(status, raw.substringAfter('|', "").ifBlank { null })
+    }
+
+    private companion object {
+        const val PIN_SEALED_KEY = "JAGO_pin_enc"
+        const val PIN_LEGACY_KEY = "JAGO_pin"
     }
 }
 
