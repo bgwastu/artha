@@ -31,6 +31,8 @@ class GojekScreenWalk(
     private val limits: Limits = Limits(),
     /** Receives one line per opened payment (date and verdict) and a closing line counting rows per date; never amounts or names. */
     private val onTrace: (String) -> Unit = {},
+    /** Receives the raw screen dump when a tapped row opened no detail screen; it holds payment text, so keep it private. */
+    private val onDiagnostic: (String) -> Unit = {},
 ) {
     interface Screen {
         /** Accessibility dump of the walk's display, or null when it cannot be read. */
@@ -71,7 +73,9 @@ class GojekScreenWalk(
             onTrace("rows seen per date: " + rowsPerDate.entries.take(TRACE_DATES).joinToString(", ") { "${it.key} x${it.value}" }.ifEmpty { "none" })
             return Outcome(stop, stored, opened, pages)
         }
-        var rows = awaitList() ?: return outcome(Stop.LIST_UNREADABLE)
+        // No list came back: either the walk was told to stop (screen locked, Gojek opened on the phone), or the screen is unreadable.
+        fun noList() = if (shouldAbort()) Stop.ABORTED else Stop.LIST_UNREADABLE
+        var rows = awaitList() ?: return outcome(noList())
         while (true) {
             if (shouldAbort()) return outcome(Stop.ABORTED)
             var target: ListRow? = null
@@ -102,18 +106,18 @@ class GojekScreenWalk(
                     }
                     else -> onTrace("opened ${target.date}: " + (rejection?.let { "refused, $it" } ?: "not settled yet"))
                 }
-                rows = awaitList() ?: return outcome(Stop.LIST_UNREADABLE)
+                rows = awaitList() ?: return outcome(noList())
                 continue
             }
             if (pages >= limits.maxPages) return outcome(Stop.PAGE_BUDGET)
             screen.swipe(540, SWIPE_FROM_Y, 540, SWIPE_TO_Y, 450)
             pages++
             delay(limits.swipeSettleMillis)
-            rows = awaitList() ?: return outcome(Stop.LIST_UNREADABLE)
+            rows = awaitList() ?: return outcome(noList())
             if (fresh(rows).isEmpty()) {
                 // The list may still be loading its next page.
                 delay(limits.waitMillis / 4)
-                rows = awaitList() ?: return outcome(Stop.LIST_UNREADABLE)
+                rows = awaitList() ?: return outcome(noList())
                 if (fresh(rows).isEmpty()) return outcome(Stop.END_OF_LIST)
             }
         }
@@ -148,6 +152,10 @@ class GojekScreenWalk(
             // A detail screen that never shows an ID is remembered instead of retried on every walk.
             ?: screen.dump()?.let { runCatching { GojekScreenParser.nodes(it) }.getOrNull() }?.takeIf { nodes -> nodes.any { it.text == "Status" } }
         if (nodes == null) {
+            onTrace("opened ${row.date}: tapped ${row.tapX},${row.tapY}, " +
+                if (shouldAbort()) "and the walk was told to stop (screen off or Gojek in use)" else "and the screen showed no detail labels")
+            val after = screen.dump()
+            onDiagnostic("BEFORE TAP (the list the row came from)\n${listDump.orEmpty()}\nAFTER TAP\n${after.orEmpty()}")
             screen.back()
             return false
         }
@@ -164,14 +172,44 @@ class GojekScreenWalk(
         return result
     }
 
-    private suspend fun awaitList(): List<ListRow>? =
-        awaitNodes { nodes -> nodes.any { it.id == "tvAmount" } }?.let { GojekScreenParser.listRows(it, today) }
+    /**
+     * The list once two dumps in a row place every row identically. Right after a back press or a swipe the
+     * window is still sliding or flinging: its rows sit at shifted coordinates and nothing is clipped to the
+     * display yet, so a row below the edge looks tappable and a tap lands in the wrong place.
+     */
+    private suspend fun awaitList(): List<ListRow>? {
+        var previous: List<ListRow>? = null
+        var waited = 0L
+        while (true) {
+            if (shouldAbort()) return null
+            val raw = screen.dump()
+            lastDump = raw
+            val rows = raw?.let { runCatching { GojekScreenParser.nodes(it) }.getOrNull() }
+                ?.takeIf { nodes -> nodes.any { it.id == "tvAmount" } }
+                ?.let { GojekScreenParser.listRows(it, today) }
+            if (rows != null && rows == previous) { listDump = raw; return rows }
+            // The budget is spent, but the dump just taken still gets compared with the one before it.
+            if (waited > limits.waitMillis) {
+                onDiagnostic("LIST NEVER SETTLED\n${raw.orEmpty()}")
+                return null
+            }
+            previous = rows
+            delay(limits.pollMillis)
+            waited += limits.pollMillis
+        }
+    }
+
+    /** The newest raw dump, and the one the current list rows were read from; only used to explain a failed tap. */
+    private var lastDump: String? = null
+    private var listDump: String? = null
 
     private suspend fun awaitNodes(ready: (List<GojekScreenParser.Node>) -> Boolean): List<GojekScreenParser.Node>? {
         var waited = 0L
         while (waited <= limits.waitMillis) {
             if (shouldAbort()) return null
-            val nodes = screen.dump()?.let { runCatching { GojekScreenParser.nodes(it) }.getOrNull() }
+            val raw = screen.dump()
+            lastDump = raw
+            val nodes = raw?.let { runCatching { GojekScreenParser.nodes(it) }.getOrNull() }
             if (nodes != null && ready(nodes)) return nodes
             delay(limits.pollMillis)
             waited += limits.pollMillis

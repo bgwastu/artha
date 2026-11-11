@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -26,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +38,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import net.wastu.artha.ArthaApplication
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.data.providers.JagoPinStatus
@@ -148,13 +153,43 @@ private fun JagoPinDialog(
 ) {
     var pin by remember { mutableStateOf(initial) }
     var rejected by remember { mutableStateOf(isWrongPin) }
+    var storeFailed by remember { mutableStateOf(false) }
+    var checking by remember { mutableStateOf(false) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     val colors = MaterialTheme.colorScheme
 
+    /** Saves the PIN, then tries it on Bank Jago right now and reports what happened here. */
     fun save() {
-        app.providerPreferences.setJagoPin(pin.ifBlank { null })
-        // A new PIN is checked by the very next Bank Jago sync.
-        if (pin.isNotBlank()) app.syncInBackground(Provider.JAGO, force = true, interactive = true)
-        onDismiss()
+        // Sealing needs the Android Keystore; if it still refuses, say so rather than closing the app.
+        if (runCatching { app.providerPreferences.setJagoPin(pin.ifBlank { null }) }.isFailure) {
+            storeFailed = true
+            return
+        }
+        if (pin.isBlank()) {
+            onDismiss()
+            return
+        }
+        checking = true
+        notice = null
+        scope.launch {
+            // Bank Jago's answer to the PIN is known within seconds; its cache refresh carries on in the background.
+            val sync = app.syncInBackground(Provider.JAGO, force = true, interactive = true)
+            val answer = async { app.providerPreferences.jagoPinCheck.first { it.status != JagoPinStatus.UNVERIFIED } }
+            sync.invokeOnCompletion { answer.cancel() }
+            runCatching { answer.await() }
+            checking = false
+            val check = app.providerPreferences.jagoPinCheck.value
+            when (check.status) {
+                JagoPinStatus.VERIFIED -> onDismiss()
+                JagoPinStatus.WRONG -> rejected = true
+                else -> {
+                    // No verdict recorded means the sync never reached Bank Jago; its own error says why.
+                    val why = check.detail ?: app.providerPreferences.diagnostics.value[Provider.JAGO]?.lastError ?: "The sync did not reach Bank Jago"
+                    notice = "${why.trimEnd('.')}. Saved; it is checked again on the next sync."
+                }
+            }
+        }
     }
 
     AlertDialog(
@@ -175,23 +210,31 @@ private fun JagoPinDialog(
                         if (it.length <= 6 && it.all(Char::isDigit)) {
                             pin = it
                             rejected = false
+                            storeFailed = false
+                            notice = null
                         }
                     },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
                     label = { Text("6-digit PIN") },
-                    isError = rejected,
-                    supportingText = if (rejected) {
-                        { Text("Bank Jago rejected this PIN. Check it and try again.") }
-                    } else null,
+                    enabled = !checking,
+                    isError = rejected || storeFailed,
+                    supportingText = when {
+                        checking -> { { Text("Checking with Bank Jago. This takes a few seconds.") } }
+                        storeFailed -> { { Text("Couldn’t store the PIN securely on this device. Try again.") } }
+                        rejected -> { { Text("Bank Jago rejected this PIN. Check it and try again.") } }
+                        notice != null -> { { Text(notice.orEmpty()) } }
+                        else -> null
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
         },
         confirmButton = {
-            Button(onClick = ::save, enabled = pin.isEmpty() || pin.length == 6) {
-                Text(if (pin.isEmpty()) "Turn off" else "Save and verify")
+            Button(onClick = ::save, enabled = !checking && !rejected && (pin.isEmpty() || pin.length == 6)) {
+                if (checking) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                else Text(if (pin.isEmpty()) "Turn off" else "Save and verify")
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

@@ -37,8 +37,14 @@ class BackgroundSyncJobService : JobService() {
                 if (app.rootAccess.verify()) {
                     val gojekImportEnabled = app.providerPreferences.importEnabled.value
                         .contains(Provider.GOJEK)
-                    app.gojekFlash.run(gojekImportEnabled)
-                    val summaries = app.transactionAlerts.around { app.ingestion.ingestAll(force = false) }
+                    val walked = app.gojekFlash.run(gojekImportEnabled)
+                    val summaries = app.transactionAlerts.around {
+                        // Payments the walk read, now or on an earlier pass, go into the ledger now, not whenever Gojek next turns stale.
+                        if (walked == GojekScreenSync.Result.FLASHED || walked == GojekScreenSync.Result.QUIET) {
+                            app.ingestion.syncProvider(Provider.GOJEK)
+                        }
+                        app.ingestion.ingestAll(force = false)
+                    }
                     allProvidersHealthy = summaries.values.none { it.startsWith("Unavailable") }
                     AnalysisWidgetProvider.triggerUpdate(app)
                     TransactionsWidgetProvider.triggerUpdate(app)

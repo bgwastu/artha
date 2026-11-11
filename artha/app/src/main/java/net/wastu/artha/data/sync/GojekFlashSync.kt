@@ -90,7 +90,10 @@ class GojekScreenSync(
         FLASHED, QUIET, ABORTED, SKIPPED_SCREEN_OFF, SKIPPED_GOJEK_IN_USE, ROOT_UNAVAILABLE, SKIPPED, SKIPPED_COOLDOWN, BUSY,
     }
 
-    suspend fun run(gojekImportEnabled: Boolean): Result = RootScreenSession.exclusive { walk(gojekImportEnabled) }
+    suspend fun run(gojekImportEnabled: Boolean): Result = RootScreenSession.exclusive {
+        // A walk takes about a minute, far past the 15 s screen timeout that would otherwise end it.
+        keepingScreenOn(reader.context, "gojek_walk", WALK_SCREEN_MAX_MS) { walk(gojekImportEnabled) }
+    }
 
     private suspend fun walk(gojekImportEnabled: Boolean): Result = withContext(Dispatchers.IO) {
         if (!gojekImportEnabled) return@withContext skipped(Result.SKIPPED, "gojek import disabled")
@@ -122,6 +125,8 @@ class GojekScreenSync(
                 onPayment = store::append,
                 onSkip = store::skip,
                 onTrace = { log("walk: $it") },
+                // Kept in the app's private storage only (never the shareable log); each failure replaces the last.
+                onDiagnostic = { runCatching { java.io.File(reader.context.filesDir, "gojek_walk_debug.xml").writeText(it) } },
             ).run()
         } finally {
             // Cleanup must finish even when the caller is cancelled.
@@ -158,6 +163,8 @@ class GojekScreenSync(
     private companion object {
         const val TAG = "ArthaScreen"
         const val DEEP_LINK = "gojek://gopay/history"
+        /** Frees the screen even if a walk hangs; a full 40-payment walk is the longest honest run. */
+        const val WALK_SCREEN_MAX_MS = 240_000L
     }
 }
 

@@ -52,6 +52,13 @@ class GojekScreenWalkTest {
         assertEquals(2, stored.size)
     }
 
+    @Test fun waitsForTheListToStopSlidingBeforeTappingARow() = runBlocking {
+        val stored = mutableListOf<UnifiedTransaction>()
+        val outcome = walk(SlidingAfterBack(FakeGoPay(history)), emptyList(), stored, limits = fast.copy(maxDetails = 4, waitMillis = 50)).run()
+        assertEquals(GojekScreenWalk.Stop.DETAIL_BUDGET, outcome.stop)
+        assertEquals(4, stored.size)
+    }
+
     @Test fun detailBudgetLeavesBackfillForTheNextWalk() = runBlocking {
         val first = mutableListOf<UnifiedTransaction>()
         val outcome = walk(FakeGoPay(history), emptyList(), first, limits = fast.copy(maxDetails = 10)).run()
@@ -81,7 +88,7 @@ class GojekScreenWalkTest {
     @Test fun abortStopsBeforeOpeningAnything() = runBlocking {
         val gopay = FakeGoPay(history)
         val outcome = walk(gopay, emptyList(), mutableListOf(), abort = { true }).run()
-        assertEquals(GojekScreenWalk.Stop.LIST_UNREADABLE, outcome.stop)
+        assertEquals(GojekScreenWalk.Stop.ABORTED, outcome.stop)
         assertEquals(0, gopay.opened)
     }
 
@@ -104,6 +111,24 @@ class GojekScreenWalkTest {
         abort: () -> Boolean = { false },
         limits: GojekScreenWalk.Limits = fast,
     ) = GojekScreenWalk(screen, known, skipped, backfill, zone, today, abort, { stored += it }, onSkip, limits)
+
+    /** After every back press the first dump shows the list still sliding in, 120px away from where it settles. */
+    private class SlidingAfterBack(private val inner: FakeGoPay) : GojekScreenWalk.Screen {
+        private var sliding = false
+
+        override suspend fun dump(): String? {
+            val xml = inner.dump()
+            if (!sliding) return xml
+            sliding = false
+            return Regex("""\[(\d+),(\d+)]\[(\d+),(\d+)]""").replace(xml) {
+                "[${it.groupValues[1]},${it.groupValues[2].toInt() + 120}][${it.groupValues[3]},${it.groupValues[4].toInt() + 120}]"
+            }
+        }
+
+        override suspend fun tap(x: Int, y: Int) = inner.tap(x, y)
+        override suspend fun swipe(fromX: Int, fromY: Int, toX: Int, toY: Int, millis: Int) = inner.swipe(fromX, fromY, toX, toY, millis)
+        override suspend fun back() { inner.back(); sliding = true }
+    }
 
     private data class Item(val id: String, val date: LocalDate, val description: String, val amountMinor: Long, val time: LocalTime)
 

@@ -23,6 +23,8 @@ object GojekScreenParser {
     data class Node(val id: String, val text: String, val left: Int, val top: Int, val right: Int, val bottom: Int) {
         val centerX get() = (left + right) / 2
         val centerY get() = (top + bottom) / 2
+        /** A row below the screen edge keeps its text in the dump, with its top beneath its bottom; nothing of it can be tapped. */
+        val visible get() = bottom > top && right > left
     }
 
     /** One visible history row. [date] is null while the row's date header is scrolled off. */
@@ -78,7 +80,8 @@ object GojekScreenParser {
             ).minOrNull()?.minus(ROW_SLACK) ?: Int.MAX_VALUE
             fun inRow(node: Node) = node.top >= rowTop && node.top < rowBottom
             // A row cut off at the screen edge has no description yet; the walk sees it after scrolling.
-            val description = nodes.firstOrNull { it.id == "tvDescription" && it.text.isNotEmpty() && inRow(it) } ?: return@mapIndexedNotNull null
+            if (!amount.visible) return@mapIndexedNotNull null
+            val description = nodes.firstOrNull { it.id == "tvDescription" && it.text.isNotEmpty() && it.visible && inRow(it) } ?: return@mapIndexedNotNull null
             val signed = amount(amount.text) ?: return@mapIndexedNotNull null
             val methods = nodes.filter { it.id == "rvPaymentMethods" && inRow(it) }
             val method = nodes.firstOrNull { node -> node.text.isNotEmpty() && methods.any { it.contains(node) } }?.text

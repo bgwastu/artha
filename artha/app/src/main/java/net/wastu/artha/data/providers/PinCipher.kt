@@ -21,9 +21,22 @@ interface PinCipher {
  * useless to anyone who only has the preferences file, a backup, or a copy of the app's data.
  */
 class KeystorePinCipher(private val alias: String = "artha_jago_pin") : PinCipher {
-    override fun encrypt(plain: String): String {
+    override fun encrypt(plain: String): String = try {
+        seal(plain)
+    } catch (_: Exception) {
+        // The Keystore can keep an entry it can no longer use ("Invalid key blob"). Nothing sealed with it can be
+        // opened anyway, so replace it with a fresh key and seal again.
+        discardKey()
+        seal(plain)
+    }
+
+    private fun seal(plain: String): String {
         val cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key()) }
         return Base64.encodeToString(cipher.iv + cipher.doFinal(plain.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
+    }
+
+    private fun discardKey() {
+        runCatching { KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(alias) }
     }
 
     override fun decrypt(token: String): String? = runCatching {

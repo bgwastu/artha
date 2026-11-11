@@ -75,6 +75,10 @@ class ArthaApplication : Application() {
             { false },
             // A PIN Bank Jago already rejected is not typed again: repeated wrong tries can lock the account.
             { providerPreferences.getJagoPin()?.takeUnless { providerPreferences.jagoPinCheck.value.status == JagoPinStatus.WRONG } },
+            onPinAnswer = { accepted ->
+                if (accepted) providerPreferences.recordJagoPinCheck(JagoPinStatus.VERIFIED, "Bank Jago accepted the PIN")
+                else providerPreferences.recordJagoPinCheck(JagoPinStatus.WRONG, "Bank Jago rejected the PIN")
+            },
         )
         val sessionWake = AppSessionWakeSync(files, isInteractive, { false })
         val adapters = listOf(
@@ -90,7 +94,12 @@ class ArthaApplication : Application() {
                         providerPreferences.recordJagoPinCheck(JagoPinStatus.UNVERIFIED, "The last unlock stopped before Bank Jago's PIN screen appeared")
                     JagoScreenSync.Result.JAGO_EXITED ->
                         providerPreferences.recordJagoPinCheck(JagoPinStatus.UNVERIFIED, "Bank Jago closed itself while unlocking")
-                    else -> Unit
+                    // A skipped run says nothing about the PIN, so it never replaces a verdict already reached.
+                    JagoScreenSync.Result.SKIPPED_SCREEN_OFF -> noteSkippedPinCheck("The screen was off. Turn it on and try again")
+                    JagoScreenSync.Result.SKIPPED_JAGO_IN_USE -> noteSkippedPinCheck("Bank Jago is open on the screen. Close it and try again")
+                    JagoScreenSync.Result.SKIPPED_NOT_INSTALLED -> noteSkippedPinCheck("Bank Jago is not installed")
+                    JagoScreenSync.Result.ROOT_UNAVAILABLE -> noteSkippedPinCheck("Root access and Android 13 are needed")
+                    JagoScreenSync.Result.SKIPPED_NO_PIN -> Unit
                 }
             },
             verificationRequestedAt = {
@@ -124,6 +133,12 @@ class ArthaApplication : Application() {
 
     private var startedActivities = 0
     val isAppInForeground: Boolean get() = startedActivities > 0
+
+    private fun noteSkippedPinCheck(reason: String) {
+        if (providerPreferences.jagoPinCheck.value.status == JagoPinStatus.UNVERIFIED) {
+            providerPreferences.recordJagoPinCheck(JagoPinStatus.UNVERIFIED, reason)
+        }
+    }
 
     /**
      * [interactive] is for a sync a person just asked for (it may unlock Bank Jago on a hidden display);

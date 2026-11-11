@@ -1,7 +1,6 @@
 package net.wastu.artha.data.sync
 
 import android.os.Build
-import android.os.PowerManager
 import java.io.StringReader
 import javax.xml.parsers.DocumentBuilderFactory
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +28,8 @@ class JagoScreenSync(
     private val isInteractive: () -> Boolean,
     private val shouldAbort: () -> Boolean,
     private val getPin: () -> String?,
+    /** Called the moment Bank Jago accepts (true) or rejects (false) the typed PIN, before the cache refresh is awaited. */
+    private val onPinAnswer: (accepted: Boolean) -> Unit = {},
 ) : JagoUnlock {
     enum class Result {
         SYNCED, QUIET, ABORTED, SKIPPED_SCREEN_OFF, SKIPPED_JAGO_IN_USE,
@@ -40,21 +41,7 @@ class JagoScreenSync(
 
     /** [trigger] says what asked for the run; it is only recorded. */
     override suspend fun run(trigger: String): Result = RootScreenSession.exclusive {
-        withContext(Dispatchers.IO) { keepingScreenOn { Attempt(trigger).execute() } }
-    }
-
-    /**
-     * Bank Jago needs well over 15 s to cold-start, and a run is abandoned the moment the screen sleeps, so
-     * the usual 15 s screen timeout would end it before the PIN screen appears. This holds the screen on for
-     * the run only; without ACQUIRE_CAUSES_WAKEUP it never wakes a screen that is already off.
-     */
-    @Suppress("DEPRECATION")
-    private suspend fun <T> keepingScreenOn(block: suspend () -> T): T {
-        val lock = runCatching {
-            reader.context.getSystemService(PowerManager::class.java)?.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "artha:jago_unlock")
-        }.getOrNull()
-        runCatching { lock?.acquire(SCREEN_LOCK_MAX_MS) }
-        try { return block() } finally { runCatching { if (lock?.isHeld == true) lock.release() } }
+        withContext(Dispatchers.IO) { keepingScreenOn(reader.context, "jago_unlock", SCREEN_LOCK_MAX_MS) { Attempt(trigger).execute() } }
     }
 
     private inner class Attempt(private val trigger: String) {
@@ -172,8 +159,11 @@ class JagoScreenSync(
                 if (exited()) return jagoExited("Bank Jago closed itself after the PIN was typed")
                 val dump = session.dump() ?: continue
                 lastDump = dump
-                if (WRONG_PIN_TEXT.containsMatchIn(dump)) return skipped(Result.WRONG_PIN, "Bank Jago rejected the PIN")
-                if (JagoScreens.isPastPinScreen(dump)) { stage = Stage.UNLOCKED; return null }
+                if (WRONG_PIN_TEXT.containsMatchIn(dump)) {
+                    onPinAnswer(false)
+                    return skipped(Result.WRONG_PIN, "Bank Jago rejected the PIN")
+                }
+                if (JagoScreens.isPastPinScreen(dump)) { stage = Stage.UNLOCKED; onPinAnswer(true); return null }
             }
             screen = lastDump?.let(JagoScreens::signature)
             return skipped(Result.UNLOCK_FAILED, "still on the PIN screen ${PIN_ACCEPT_WAIT_MS / 1000} s after typing it")

@@ -44,6 +44,15 @@ class GojekScreenParserTest {
         assertEquals("Fictional Cafe", rows.single().description)
     }
 
+    @Test fun rowsLaidOutBelowTheVisibleEdgeAreNotOffered() {
+        // From a real hidden-display dump: the text is there, but the row's top lies below its bottom because none of it is on screen.
+        val xml = screen(
+            header("Sabtu, 17 Jan 2026", 994) + row("Fictional Shop", "-Rp19.000", 1110, "Fictional Bank") +
+                node("tvDescription", "Fictional Mart", 187, 2375, 836, 2340) + node("tvAmount", "-Rp19.000", 858, 2343, 1036, 2340),
+        )
+        assertEquals(listOf("Fictional Shop"), GojekScreenParser.listRows(GojekScreenParser.nodes(xml), today).map { it.description })
+    }
+
     @Test fun relativeHeadersResolveAgainstToday() {
         val xml = screen(node("2131385000", "Hari ini", 44, 652, 1036, 713) + row("Fictional Shop", "-Rp5.000", 768))
         assertEquals(today, GojekScreenParser.listRows(GojekScreenParser.nodes(xml), today).single().date)
