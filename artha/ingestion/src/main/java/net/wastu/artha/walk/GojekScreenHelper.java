@@ -29,8 +29,9 @@ import java.util.concurrent.TimeUnit;
  * Root-side half of the GoPay screen walk, started from Artha's own APK with
  * {@code CLASSPATH=<apk> app_process / net.wastu.artha.walk.GojekScreenHelper}.
  *
- * <p>It owns an invisible, always-unlocked virtual display with its own focus, so Gojek runs
- * there without touching what the user sees, and reads that display through UiAutomation.
+ * <p>It owns an invisible, always-unlocked virtual display with its own focus that never becomes the
+ * phone's focused display, so Gojek runs there without touching what the user sees or types, and
+ * reads that display through UiAutomation.
  * Commands arrive one per line on stdin; every reply is one line starting with {@code ok} or
  * {@code err}. Dumps use the {@code uiautomator dump} XML shape. EOF or the watchdog releases the
  * display, which destroys whatever Gojek showed on it.
@@ -114,11 +115,30 @@ public final class GojekScreenHelper {
         }, new Handler(frames.getLooper()));
         int flags = 1 /* PUBLIC */ | 8 /* OWN_CONTENT_ONLY */ | (1 << 6) /* SUPPORTS_TOUCH */
             | (1 << 8) /* DESTROY_CONTENT_ON_REMOVAL */ | (1 << 10) /* TRUSTED */ | (1 << 11) /* OWN_DISPLAY_GROUP */
-            | (1 << 12) /* ALWAYS_UNLOCKED */ | (1 << 13) /* TOUCH_FEEDBACK_DISABLED */ | (1 << 14) /* OWN_FOCUS */;
+            | (1 << 12) /* ALWAYS_UNLOCKED */ | (1 << 13) /* TOUCH_FEEDBACK_DISABLED */ | (1 << 14) /* OWN_FOCUS */
+            | (1 << 16) /* STEAL_TOP_FOCUS_DISABLED */;
         display = manager.createVirtualDisplay("artha-gopay", WIDTH, HEIGHT, DENSITY, reader.getSurface(), flags);
         if (display == null) throw new IllegalStateException("virtual display refused");
+        if (!keepsUserFocus(display.getDisplay())) {
+            release();
+            throw new IllegalStateException("virtual display would take the phone's focus");
+        }
         automation = connect();
         return display.getDisplay().getDisplayId();
+    }
+
+    /**
+     * Without STEAL_TOP_FOCUS_DISABLED every launch and injected tap makes the hidden display the phone's focused
+     * display: the real screen loses its focused window, so the keyboard and notification shade close mid-use.
+     * Android 13 lacks the flag, and Android drops it when the display is not trusted with its own focus.
+     */
+    private static boolean keepsUserFocus(android.view.Display created) {
+        try {
+            int flag = android.view.Display.class.getField("FLAG_STEAL_TOP_FOCUS_DISABLED").getInt(null);
+            return (created.getFlags() & flag) != 0;
+        } catch (Throwable missing) {
+            return false;
+        }
     }
 
     private static void release() {

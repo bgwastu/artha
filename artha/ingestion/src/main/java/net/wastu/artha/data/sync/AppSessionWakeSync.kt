@@ -21,13 +21,23 @@ class AppSessionWakeSync(
         if (Build.VERSION.SDK_INT < 33 || shouldAbort() || !isInteractive()) return@withContext false
         val installed = sh("pm path com.shopee.id 2>/dev/null")
         if (installed == null || installed.none { it.startsWith("package:") }) return@withContext false
+        // Shopee only opens on the hidden display while activities are forced resizable; the user's own value comes back after.
+        val resizable = sh("settings get global force_resizable_activities")?.firstOrNull()?.trim()
         sh("settings put global force_resizable_activities 1")
-        wake(
-            pkg = "com.shopee.id",
-            component = "com.shopee.id/com.shopee.app.ui.home.HomeActivity_",
-            targetPath = "/data/data/com.shopee.id/app_webview_com.shopee.id/Default/Cookies",
-            maxWaitSeconds = 8,
-        )
+        try {
+            wake(
+                pkg = "com.shopee.id",
+                component = "com.shopee.id/com.shopee.app.ui.home.HomeActivity_",
+                targetPath = "/data/data/com.shopee.id/app_webview_com.shopee.id/Default/Cookies",
+                maxWaitSeconds = 8,
+            )
+        } finally {
+            withContext(NonCancellable) {
+                if (resizable != "1") {
+                    sh(if (resizable == "0") "settings put global force_resizable_activities 0" else "settings delete global force_resizable_activities")
+                }
+            }
+        }
     }
 
     suspend fun wakeGrab(): Boolean = withContext(Dispatchers.IO) {

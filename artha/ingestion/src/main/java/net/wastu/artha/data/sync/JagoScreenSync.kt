@@ -205,18 +205,22 @@ class JagoScreenSync(
 
         /**
          * The fingerprint prompt Bank Jago raises is drawn by System UI on the real screen, not on the
-         * hidden display, so it has to be closed from outside: first the system-dialog broadcast, then Back
-         * only if the prompt itself holds focus. Stopping Jago is left to the end of the run.
+         * hidden display, so it has to be closed from outside: Back while the prompt itself holds focus, so it
+         * reaches only the prompt, and the system-dialog broadcast only when that did not close it, because the
+         * broadcast also closes the user's notification shade. Stopping Jago is left to the end of the run.
          */
         private suspend fun dismissBiometricPrompt() {
             if (biometricDismissals >= MAX_BIOMETRIC_DISMISSALS) return
             val signal = biometricSignal() ?: return
             biometricDismissals++
-            sh("am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1; echo done")
-            delay(800)
-            var closed = biometricSignal() == null
-            if (!closed && promptFocused()) {
+            var closed = false
+            if (promptFocused()) {
                 sh("input keyevent 4; echo done")
+                delay(800)
+                closed = biometricSignal() == null
+            }
+            if (!closed) {
+                sh("am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1; echo done")
                 delay(800)
                 closed = biometricSignal() == null
             }
