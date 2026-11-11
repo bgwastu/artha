@@ -18,8 +18,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -29,7 +27,9 @@ import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -80,112 +80,86 @@ internal fun UpdatesScreen(onBack: () -> Unit) {
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
                 .widthIn(max = 600.dp)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
-            VersionCard(
-                versionName = updater?.installedVersionName?.ifBlank { "0.1.0" } ?: "0.1.0",
-                versionCode = updater?.installedVersionCode ?: 1L,
-            )
-            UpdateStatusCard(
+            val versionName = updater?.installedVersionName?.ifBlank { "0.1.0" } ?: "0.1.0"
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(56.dp)) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.SystemUpdate, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(28.dp))
+                    }
+                }
+                Column {
+                    Text("Artha", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Version $versionName",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            UpdateStatus(
                 state = state,
                 onCheck = { scope.launch { updater?.update(install = false) } },
                 onInstall = { scope.launch { updater?.update(install = true) } },
             )
-            AutoUpdateCard(checked = autoUpdate, onCheckedChange = { updater?.setAutoUpdate(it) })
-            if (!canRequestInstalls) {
-                InstallPermissionCard(onOpenSettings = {
-                    context.startActivity(
-                        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
-                            data = "package:${context.packageName}".toUri()
+            Column(Modifier.fillMaxWidth()) {
+                ListItem(
+                    headlineContent = { Text("Update automatically") },
+                    trailingContent = { Switch(checked = autoUpdate, onCheckedChange = { updater?.setAutoUpdate(it) }) },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+                if (!canRequestInstalls) {
+                    ListItem(
+                        headlineContent = { Text("Allow installing updates") },
+                        trailingContent = {
+                            TextButton(onClick = {
+                                context.startActivity(
+                                    Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                                        data = "package:${context.packageName}".toUri()
+                                    },
+                                )
+                            }) { Text("Allow") }
                         },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     )
-                })
-            }
-            SecurityNote()
-        }
-    }
-}
-
-@Composable
-private fun UpdateCard(color: Color, content: @Composable () -> Unit) {
-    Surface(shape = MaterialTheme.shapes.large, color = color, modifier = Modifier.fillMaxWidth(), content = content)
-}
-
-@Composable
-private fun VersionCard(versionName: String, versionCode: Long) {
-    UpdateCard(MaterialTheme.colorScheme.surfaceContainer) {
-        ListItem(
-            leadingContent = {
-                Surface(
-                    shape = MaterialTheme.shapes.small,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.size(40.dp),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Default.SystemUpdate,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
-            },
-            headlineContent = { Text("Artha", fontWeight = FontWeight.Medium) },
-            supportingContent = { Text("Version $versionName (build $versionCode)") },
-        )
-    }
-}
-
-@Composable
-private fun UpdateStatusCard(state: UpdateState, onCheck: () -> Unit, onInstall: () -> Unit) {
-    UpdateCard(MaterialTheme.colorScheme.surfaceContainerHigh) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            when (state) {
-                is UpdateState.Idle -> {
-                    Text("No update check has been run yet.")
-                    Button(onClick = onCheck, modifier = Modifier.fillMaxWidth()) {
-                        RefreshLabel("Check for updates")
-                    }
-                }
-                is UpdateState.Checking -> BusyLine("Checking GitHub for updates...")
-                is UpdateState.UpToDate -> {
-                    StatusHeadline(Icons.Default.CheckCircle, "Your app is up to date", MaterialTheme.colorScheme.primary)
-                    val checkedAt = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(state.checkedAt))
-                    Text("Last checked: $checkedAt", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    OutlinedButton(onClick = onCheck, modifier = Modifier.fillMaxWidth()) { RefreshLabel("Check again") }
-                }
-                is UpdateState.Downloading -> {
-                    Text("Downloading update ${state.versionName}...", fontWeight = FontWeight.Medium)
-                    LinearWavyProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth())
-                    Text("${(state.progress * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
-                }
-                is UpdateState.Ready -> {
-                    StatusHeadline(Icons.Default.Download, "Version ${state.versionName} ready to install", MaterialTheme.colorScheme.primary)
-                    Text("The update has been downloaded and cryptographically verified.")
-                    Button(onClick = onInstall, modifier = Modifier.fillMaxWidth()) { Text("Install now") }
-                }
-                is UpdateState.Installing -> BusyLine("Installing version ${state.versionName}...")
-                is UpdateState.WaitingForConfirmation -> {
-                    Text("Android requires your confirmation to complete the install.", fontWeight = FontWeight.Medium)
-                    Text("Please confirm the installation in the system prompt.")
-                }
-                is UpdateState.Failed -> {
-                    StatusHeadline(Icons.Default.Warning, "Update check failed", MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.error)
-                    Text(state.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                    Button(onClick = onCheck, modifier = Modifier.fillMaxWidth()) { Text("Try again") }
                 }
             }
         }
     }
 }
 
+/** One line about where things stand and, when there is something to do, one button. */
 @Composable
-private fun RefreshLabel(text: String) {
-    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-    Spacer(Modifier.width(8.dp))
-    Text(text)
+private fun UpdateStatus(state: UpdateState, onCheck: () -> Unit, onInstall: () -> Unit) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        when (state) {
+            is UpdateState.Idle -> Button(onClick = onCheck, modifier = Modifier.fillMaxWidth()) { Text("Check for updates") }
+            is UpdateState.Checking -> BusyLine("Checking…")
+            is UpdateState.UpToDate -> {
+                StatusHeadline(Icons.Default.CheckCircle, "Up to date", MaterialTheme.colorScheme.primary)
+                val checkedAt = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(state.checkedAt))
+                Text("Checked $checkedAt", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FilledTonalButton(onClick = onCheck, modifier = Modifier.fillMaxWidth()) { Text("Check again") }
+            }
+            is UpdateState.Downloading -> {
+                Text("Downloading ${state.versionName}", fontWeight = FontWeight.Medium)
+                LinearWavyProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth())
+            }
+            is UpdateState.Ready -> {
+                StatusHeadline(Icons.Default.Download, "${state.versionName} is ready", MaterialTheme.colorScheme.primary)
+                Button(onClick = onInstall, modifier = Modifier.fillMaxWidth()) { Text("Install") }
+            }
+            is UpdateState.Installing -> BusyLine("Installing ${state.versionName}…")
+            is UpdateState.WaitingForConfirmation -> Text("Confirm in the system prompt", fontWeight = FontWeight.Medium)
+            is UpdateState.Failed -> {
+                StatusHeadline(Icons.Default.Warning, "Update failed", MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.error)
+                Text(state.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Button(onClick = onCheck, modifier = Modifier.fillMaxWidth()) { Text("Try again") }
+            }
+        }
+    }
 }
 
 @Composable
@@ -203,50 +177,5 @@ private fun BusyLine(text: String) {
         LoadingIndicator(modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(12.dp))
         Text(text)
-    }
-}
-
-@Composable
-private fun AutoUpdateCard(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    UpdateCard(MaterialTheme.colorScheme.surfaceContainer) {
-        ListItem(
-            headlineContent = { Text("Automatic updates", fontWeight = FontWeight.Medium) },
-            supportingContent = { Text("Check and download updates automatically in the background") },
-            trailingContent = { Switch(checked = checked, onCheckedChange = onCheckedChange) },
-        )
-    }
-}
-
-@Composable
-private fun InstallPermissionCard(onOpenSettings: () -> Unit) {
-    val onError = MaterialTheme.colorScheme.onErrorContainer
-    UpdateCard(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Install permission needed", fontWeight = FontWeight.Medium, color = onError)
-            Text(
-                "Android requires permission to install apps before Artha can update itself.",
-                style = MaterialTheme.typography.bodySmall,
-                color = onError,
-            )
-            OutlinedButton(onClick = onOpenSettings) { Text("Open install settings") }
-        }
-    }
-}
-
-@Composable
-private fun SecurityNote() {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.Top) {
-        Icon(
-            Icons.Default.Security,
-            contentDescription = null,
-            modifier = Modifier.size(16.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            "Updates are fetched from GitHub Releases over HTTPS. Every update is verified against its SHA-256 checksum and must match Artha's signing certificate.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }

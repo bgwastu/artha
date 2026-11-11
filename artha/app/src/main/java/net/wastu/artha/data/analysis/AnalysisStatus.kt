@@ -21,6 +21,8 @@ data class CategoryProgress(
     /** Payments finished and queued in the current manual run; both 0 when no run is active. */
     val runDone: Int = 0,
     val runTotal: Int = 0,
+    /** Why payments are waiting to be retried (rate limit, outage); null when nothing is waiting. */
+    val issue: String? = null,
 )
 
 /** Emitted once when a manual run drains its queue without being stopped. */

@@ -1,6 +1,11 @@
 package net.wastu.artha.ui.screens
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +20,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,6 +38,8 @@ import io.github.koalaplot.core.pie.PieChart
 import io.github.koalaplot.core.pie.StraightLineConnector
 import io.github.koalaplot.core.util.ExperimentalKoalaPlotApi
 import kotlin.math.abs
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.ui.categoryColorFor
 import net.wastu.artha.ui.categoryIconFor
@@ -55,7 +64,8 @@ internal fun DonutChart(
 ) {
     if (slices.isEmpty()) return
 
-    val values = remember(slices) { slices.map { it.amountMinor.toFloat() } }
+    val shown = rememberAnimatedSlices(slices)
+    val values = shown.map { it.second }
     val picked = selected?.let { slices.getOrNull(it) }
 
     Box(modifier, contentAlignment = Alignment.Center) {
@@ -63,6 +73,8 @@ internal fun DonutChart(
             values = values,
             modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 6.dp),
             holeSize = 0.58f,
+            pieAnimationSpec = snap(),
+            labelAnimationSpec = snap(),
             minPieDiameter = 200.dp,
             maxPieDiameter = 240.dp,
             forceCenteredPie = true,
@@ -81,9 +93,12 @@ internal fun DonutChart(
                 if (slice != null && slice.showsLabel(index, selected)) SliceLabel(slice, bold = selected == index)
             },
             slice = { index ->
-                val slice = slices.getOrNull(index)
+                // Slices past the end are ones that just left the chart and are shrinking away.
+                val slice = shown.getOrNull(index)?.first
                 val isSelected = selected == index
-                if (slice != null) {
+                if (slice != null && index >= slices.size) {
+                    DefaultSlice(color = categoryColorFor(slice.name, slice.isOther), antiAlias = true, gap = 2.5f)
+                } else if (slice != null) {
                     DefaultSlice(
                         color = categoryColorFor(slice.name, slice.isOther),
                         hoverExpandFactor = 1.06f,
@@ -121,6 +136,40 @@ private fun SliceLabel(slice: SpendingChartLogic.Slice, bold: Boolean) {
             maxLines = 1,
         )
     }
+}
+
+private val SliceMotion = tween<Float>(durationMillis = 450, easing = FastOutSlowInEasing)
+
+/**
+ * The slices with amounts that glide to each new value, so the donut moves smoothly while payments are being
+ * categorized instead of jumping. Categories that disappear shrink away after the live ones.
+ */
+@Composable
+private fun rememberAnimatedSlices(slices: List<SpendingChartLogic.Slice>): List<Pair<SpendingChartLogic.Slice, Float>> {
+    val firstNames = remember { slices.map { it.name }.toSet() }
+    val amounts = remember { mutableMapOf<String, Animatable<Float, AnimationVector1D>>() }
+    val leaving = remember { mutableStateListOf<SpendingChartLogic.Slice>() }
+    val previous = remember { arrayOf<List<SpendingChartLogic.Slice>>(emptyList()) }
+    for (slice in slices) {
+        val target = slice.amountMinor.toFloat()
+        // Present on the first frame: shown at full size. Added later: grows in from nothing.
+        amounts.getOrPut(slice.name) { Animatable(if (slice.name in firstNames) target else 1f) }
+    }
+    LaunchedEffect(slices) {
+        val names = slices.map { it.name }.toSet()
+        leaving.removeAll { it.name in names }
+        previous[0].filter { old -> old.name !in names && leaving.none { it.name == old.name } }.forEach(leaving::add)
+        previous[0] = slices
+        coroutineScope {
+            for (slice in slices) launch { amounts[slice.name]?.animateTo(slice.amountMinor.toFloat(), SliceMotion) }
+            for (gone in leaving.toList()) launch {
+                amounts[gone.name]?.animateTo(1f, SliceMotion)
+                leaving.remove(gone)
+                amounts.remove(gone.name)
+            }
+        }
+    }
+    return (slices + leaving).map { it to (amounts[it.name]?.value ?: it.amountMinor.toFloat()).coerceAtLeast(1f) }
 }
 
 /** The centre of the donut: the picked category when there is one, otherwise the month total. */

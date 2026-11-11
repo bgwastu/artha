@@ -3,7 +3,17 @@ package net.wastu.artha.ui.screens
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.material.icons.outlined.RateReview
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,7 +44,6 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.PieChart
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -145,9 +154,26 @@ fun AnalysisScreen(
     }
     val working = categoryProgress.state == CategoryAutomationState.WORKING
     val slices = remember(analysis) { SpendingChartLogic.categorySlices(analysis) }
-    var selectedSliceIndex by rememberSaveable(analysis.month) { mutableStateOf<Int?>(null) }
+    var selectedSliceIndex by rememberSaveable(analysis.month, analysis.type) { mutableStateOf<Int?>(null) }
     val total = slices.sumOf { it.amountMinor }.coerceAtLeast(1)
     val canGoNext = selectedMonth < YearMonth.now(AccountingTime.clock)
+    // Pages run Expenses, Income, then Expenses of the next month, and so on. Swipe left for the next page, right for the previous.
+    val swipeType = Modifier.swipeBetween(
+        onLeft = {
+            if (analysis.type == TransactionType.EXPENSE) viewModel.setAnalysisType(TransactionType.INCOME)
+            else if (canGoNext) {
+                viewModel.setAnalysisMonth(selectedMonth.plusMonths(1))
+                viewModel.setAnalysisType(TransactionType.EXPENSE)
+            }
+        },
+        onRight = {
+            if (analysis.type == TransactionType.INCOME) viewModel.setAnalysisType(TransactionType.EXPENSE)
+            else {
+                viewModel.setAnalysisMonth(selectedMonth.minusMonths(1))
+                viewModel.setAnalysisType(TransactionType.INCOME)
+            }
+        },
+    )
 
     LazyColumn(
         modifier = Modifier.widthIn(max = 720.dp).fillMaxSize(),
@@ -170,39 +196,52 @@ fun AnalysisScreen(
                 selected = analysis.type,
                 onSelect = viewModel::setAnalysisType,
                 label = { if (it == TransactionType.INCOME) "Income" else "Expenses" },
-                modifier = Modifier.padding(vertical = 4.dp),
+                modifier = Modifier.padding(vertical = 4.dp).then(swipeType),
             )
         }
-        if (slices.isNotEmpty()) {
-            item(key = "chart") {
-                DonutChart(
-                    slices = slices,
-                    icons = snapshot.categoryIcons,
-                    selected = selectedSliceIndex,
-                    onSelect = { index -> selectedSliceIndex = if (selectedSliceIndex == index) null else index },
-                    onOpenCategory = { slice ->
-                        viewModel.openCategoryTransactions(slice.name, slice.categories)
-                    },
-                    total = total,
-                    totalDeltaPercent = analysis.totalDeltaPercent,
-                    canGoNext = canGoNext,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp)
-                        .height(300.dp),
-                )
+        item(key = "chart") {
+            // A new type slides in from the side it was swiped from. Same-type updates (categorizing) don't re-slide.
+            AnimatedContent(
+                targetState = ChartPage(analysis.month, analysis.type, slices, total, analysis.totalDeltaPercent),
+                contentKey = { it.month to it.type },
+                transitionSpec = {
+                    val forward = targetState.position > initialState.position
+                    (slideInHorizontally { if (forward) it else -it } + fadeIn()) togetherWith
+                        (slideOutHorizontally { if (forward) -it else it } + fadeOut())
+                },
+                modifier = Modifier.fillMaxWidth().then(swipeType),
+                label = "analysis_type",
+            ) { page ->
+                if (page.slices.isEmpty()) {
+                    EmptySpendingCard(page.type, canGoNext)
+                } else {
+                    DonutChart(
+                        slices = page.slices,
+                        icons = snapshot.categoryIcons,
+                        selected = selectedSliceIndex,
+                        onSelect = { index -> selectedSliceIndex = if (selectedSliceIndex == index) null else index },
+                        onOpenCategory = { slice ->
+                            viewModel.openCategoryTransactions(slice.name, slice.categories)
+                        },
+                        total = page.total,
+                        totalDeltaPercent = page.deltaPercent,
+                        canGoNext = canGoNext,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp)
+                            .height(300.dp),
+                    )
+                }
             }
-        } else {
-            item(key = "empty_spending") { EmptySpendingCard(analysis.type, canGoNext) }
         }
-        item(key = "category_header") {
-            CategoriesHeader(
+        item(key = "ai_section") {
+            AiCategorizationSection(
                 progress = categoryProgress,
                 attention = attention,
                 actionLabel = when {
                     working -> "Stop"
+                    !aiConfigured -> "Set up AI"
                     pendingCount > 0 -> "Categorize $pendingCount"
-                    !aiConfigured -> "Categorize"
                     else -> "Re-categorize"
                 },
                 onAction = {
@@ -214,6 +253,14 @@ fun AnalysisScreen(
                     }
                 },
                 onOpenReview = onOpenCategoryReview,
+            )
+        }
+        item(key = "category_header") {
+            Text(
+                text = "Categories",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 12.dp, bottom = 4.dp).semantics { heading() },
             )
         }
         if (slices.isEmpty()) {
@@ -254,6 +301,30 @@ fun AnalysisScreen(
             )
         }
     }
+}
+
+private data class ChartPage(
+    val month: YearMonth,
+    val type: TransactionType,
+    val slices: List<SpendingChartLogic.Slice>,
+    val total: Long,
+    val deltaPercent: Float?,
+) {
+    /** Where this page sits in the swipe order: Expenses then Income, month after month. */
+    val position: Int get() = (month.year * 12 + month.monthValue) * 2 + if (type == TransactionType.INCOME) 1 else 0
+}
+
+/** A horizontal swipe of more than 60 px calls [onLeft] or [onRight]; taps and vertical scrolling are untouched. */
+private fun Modifier.swipeBetween(onLeft: () -> Unit, onRight: () -> Unit): Modifier = pointerInput(onLeft, onRight) {
+    var drag = 0f
+    detectHorizontalDragGestures(
+        onHorizontalDrag = { _, amount -> drag += amount },
+        onDragEnd = {
+            if (drag < -60f) onLeft() else if (drag > 60f) onRight()
+            drag = 0f
+        },
+        onDragCancel = { drag = 0f },
+    )
 }
 
 @Composable
@@ -402,7 +473,7 @@ private fun EmptySpendingCard(type: TransactionType, canGoNext: Boolean) {
 }
 
 @Composable
-private fun CategoriesHeader(
+private fun AiCategorizationSection(
     progress: CategoryProgress,
     attention: CategoryAttention,
     actionLabel: String,
@@ -410,44 +481,50 @@ private fun CategoriesHeader(
     onOpenReview: () -> Unit,
 ) {
     val working = progress.state == CategoryAutomationState.WORKING
-    Column(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 2.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    val problem = progress.error.takeIf { progress.state == CategoryAutomationState.ERROR } ?: progress.issue
+    val showReview = !working && attention.total > 0
+    val failed = showReview && attention.failed > 0
+    val status = problem ?: when {
+        working -> categoryProgressLabel(progress)
+        showReview -> buildList {
+            if (attention.review > 0) add("${attention.review} to review")
+            if (attention.failed > 0) add("${attention.failed} failed")
+        }.joinToString(" · ")
+        else -> null
+    }
+    Column(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column {
             Text(
-                text = "Categories",
-                style = MaterialTheme.typography.titleSmall,
+                text = "AI categorization",
+                style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.semantics { heading() },
             )
-            Spacer(Modifier.weight(1f))
-            AssistChip(
-                onClick = onAction,
-                label = { Text(actionLabel) },
-                leadingIcon = {
-                    Icon(if (working) Icons.Default.Stop else Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp))
-                },
-            )
+            if (status != null) {
+                Text(
+                    status,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (problem != null || failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         if (working) {
             val fraction = if (progress.runTotal > 0) AiCardLogic.categoryProgressFraction(progress.runDone, progress.runTotal)
                 else AiCardLogic.categoryProgressFraction(progress.labeled, progress.total)
-            Text(
-                categoryProgressLabel(progress) ?: "Categorizing",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(vertical = 4.dp),
-            )
             LinearWavyProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
-        } else if (attention.total > 0) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    buildList {
-                        if (attention.review > 0) add("${attention.review} need review")
-                        if (attention.failed > 0) add("${attention.failed} failed")
-                    }.joinToString(", "),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (attention.failed > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                TextButton(onClick = onOpenReview) { Text("Review") }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (showReview) {
+                Button(onClick = onOpenReview) {
+                    Icon(Icons.Outlined.RateReview, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Review")
+                }
+            }
+            OutlinedButton(onClick = onAction) {
+                Icon(if (working) Icons.Default.Stop else Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(actionLabel)
             }
         }
     }

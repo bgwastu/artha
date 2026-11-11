@@ -13,7 +13,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetValue
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -42,6 +41,7 @@ import net.wastu.artha.data.analysis.PaymentCategoryState
 import net.wastu.artha.data.analysis.categorySource
 import net.wastu.artha.data.analysis.paymentCategoryState
 import net.wastu.artha.ui.ArthaViewModel
+import net.wastu.artha.ui.components.BannerHost
 import net.wastu.artha.ui.components.collectOrDefault
 import net.wastu.artha.ui.groupRecords
 
@@ -221,8 +221,8 @@ private fun TransactionDetailsBody(
                 categorySource, currentCategory, currentNote, paymentState,
             )
         }
-        SnackbarHost(
-            hostState = snackbarHostState,
+        BannerHost(
+            state = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
         )
     }

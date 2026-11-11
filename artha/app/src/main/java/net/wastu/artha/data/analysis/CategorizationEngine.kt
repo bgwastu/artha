@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import net.wastu.artha.core.log.ArthaLog
 import net.wastu.artha.core.model.AccountingTime
 import net.wastu.artha.core.model.UnifiedTransaction
 
@@ -30,6 +31,7 @@ import net.wastu.artha.core.model.UnifiedTransaction
  * category. All state lives on [scope]'s (main) thread.
  */
 private const val MAX_LANES = 4
+private const val TAG = "Categorize"
 
 class CategorizationEngine(
     private val scope: CoroutineScope,
@@ -74,6 +76,15 @@ class CategorizationEngine(
     private val backoff = listOf(30_000L, 120_000L, 600_000L)
     /** Batches allowed in flight; halved on HTTP 429 and restored when the queue drains. */
     private var lanes = MAX_LANES
+    /** The reason payments are backed off right now, for the analysis page. */
+    private var lastIssue: String? = null
+
+    /** Counts and provider reasons only: the log file is plain text, so never payments, merchants or keys. */
+    private fun logFields(fields: Array<out Pair<String, Any?>>) =
+        fields.mapNotNull { (name, value) -> value?.let { name to it.toString() } }.toMap()
+
+    private fun note(message: String, vararg fields: Pair<String, Any?>) = ArthaLog.i(TAG, message, logFields(fields))
+    private fun warn(message: String, vararg fields: Pair<String, Any?>) = ArthaLog.w(TAG, message, null, logFields(fields))
 
     /** Merchant key to the payment asked on its behalf; same-merchant payments wait for its answer. */
     private val probing = mutableMapOf<String, String>()
@@ -108,6 +119,7 @@ class CategorizationEngine(
             combine(rows, snapshot, pump) { r, s, _ -> r to s }.collect { (rows, snapshot) ->
                 val config = snapshot.aiConfig
                 if (config != previousConfig) {
+                    note("AI settings changed, queue reset")
                     cancelBatches()
                     clearBackoff()
                     if (config != previousConfig) {
@@ -153,7 +165,8 @@ class CategorizationEngine(
         val fresh = rows.filter { monthOf(it) == month && AiCategorization.isNew(it, snapshot) }
         if (fresh.isNotEmpty()) {
             stopped = false
-            automatic.addAll(fresh.map { it.key })
+            val added = fresh.count { automatic.add(it.key) }
+            if (added > 0) note("Queued new payments", "payments" to added, "autoOn" to snapshot.autoCategorize)
         }
         if (rows.isEmpty()) return
         val present = rows.mapTo(mutableSetOf()) { it.key }
@@ -246,6 +259,7 @@ class CategorizationEngine(
         probing.putAll(probes)
         val batchJob = scope.launch {
             try {
+                note("Batch sent", "payments" to batch.size, "lanes" to lanes, "running" to batches.size)
                 publish(snapshot.value)
                 val suggestions = withContext(computationDispatcher) {
                     categorize?.invoke(config, input, batch) ?: AiCategorization.classify(config, input, batch, rows.value)
@@ -282,6 +296,7 @@ class CategorizationEngine(
         commitReplacements(replacing, suggestions, answered)
 
         val (good, missing) = batch.filter { it.transaction.key !in replacing }.partition { answered(it.transaction.key) }
+        note("Batch answered", "usable" to good.size, "missing" to missing.size)
         if (missing.isNotEmpty()) {
             markFailed(missing.mapTo(mutableSetOf()) { it.transaction.key }, "AI did not return a valid category")
         }
@@ -341,21 +356,31 @@ class CategorizationEngine(
      */
     private suspend fun handleBatchFailure(e: Exception, keys: Set<String>, manualInBatch: List<ManualEntry>, batchSize: Int, self: Job?) {
         val http = (e as? AiHttpException) ?: (e.cause as? AiHttpException)
+        val why = arrayOf("payments" to batchSize, "status" to http?.status, "reason" to http?.detail, "error" to e::class.simpleName.takeIf { http == null })
         when {
             http != null && http.status in setOf(401, 403, 404) -> {
                 fatalError = aiConnectionFailure(e)
+                ArthaLog.e(TAG, "Stopped: $fatalError", null, logFields(why))
                 for (other in batches.keys.toList()) if (other !== self) other.cancel()
             }
             http != null && http.status == 400 && batchSize > 1 -> {
+                warn("Batch rejected, sending payments one by one", *why)
                 sendAlone.addAll(keys)
                 requeueManual(manualInBatch)
             }
-            http != null && http.status == 400 -> markFailed(keys, aiConnectionFailure(e))
+            http != null && http.status == 400 -> {
+                warn("A payment was rejected by the model", *why)
+                markFailed(keys, aiConnectionFailure(e))
+            }
             http != null && http.status == 429 -> {
                 lanes = (lanes / 2).coerceAtLeast(1)
+                warn("Rate limited", "lanes" to lanes, *why)
                 scheduleRetry(keys, manualInBatch, aiConnectionFailure(e))
             }
-            else -> scheduleRetry(keys, manualInBatch, aiConnectionFailure(e))
+            else -> {
+                warn("Request failed", *why)
+                scheduleRetry(keys, manualInBatch, aiConnectionFailure(e))
+            }
         }
     }
 
@@ -419,6 +444,7 @@ class CategorizationEngine(
     }
 
     private suspend fun markFailed(keys: Set<String>, message: String) {
+        warn("Marked payments as failed", "payments" to keys.size, "reason" to message)
         withContext(ioDispatcher) { store?.recordCategoryFailures(keys, message) }
         for (key in keys) {
             if (key in run) runFailed.add(key)
@@ -435,6 +461,8 @@ class CategorizationEngine(
             backoff.getOrNull(attempt - 1)?.let { byDelay.getOrPut(it) { mutableSetOf() }.add(key) } ?: exhausted.add(key)
         }
         for ((wait, waiting) in byDelay) {
+            note("Retry scheduled", "payments" to waiting.size, "inSeconds" to wait / 1000, "reason" to message)
+            lastIssue = message
             backedOff.addAll(waiting)
             requeueManual(manualInBatch.filter { it.key in waiting })
             val timer = scope.launch {
@@ -481,6 +509,7 @@ class CategorizationEngine(
         val runDone = (runTotal - remaining).coerceAtLeast(0)
         if (finished) {
             val result = CategoryRunResult(runCommitted.size, runReview.size, runFailed.size)
+            note("Run finished", "labeled" to result.total, "review" to result.review, "failed" to result.failed, "stopped" to stopped)
             clearRun()
             if (!stopped && fatalError == null) _runResults.tryEmit(result)
         }
@@ -503,6 +532,7 @@ class CategorizationEngine(
             stopped = stopped,
             runDone = if (finished) 0 else runDone,
             runTotal = if (finished) 0 else runTotal,
+            issue = if (backedOff.isNotEmpty() && fatalError == null) lastIssue?.let { "$it. Trying again soon" } else null,
         )
         _automation.value = state
     }
@@ -557,6 +587,7 @@ class CategorizationEngine(
 
     /** Cancels in-flight and queued categorization; those payments return to their previous state. */
     fun stop() {
+        note("Stopped by the user", "running" to batches.size, "queued" to manualQueue.size)
         cancelBatches()
         manualQueue.clear()
         clearRun()

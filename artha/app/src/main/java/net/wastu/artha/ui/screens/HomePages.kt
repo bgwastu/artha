@@ -53,7 +53,7 @@ internal fun HomePages(
                     onBack = onBack,
                 )
                 Page.CATEGORIES -> CategoriesScreen(viewModel, onBack = onBack)
-                Page.AI -> AiScreen(viewModel, onBack = onBack, onOpenReview = { onOpen(Page.REVIEW) })
+                Page.AI -> AiScreen(viewModel, onBack = onBack)
                 Page.REMOTE -> RemoteAccessScreen(onBack = onBack)
                 Page.DATA -> DataScreen(viewModel, onBack = onBack)
                 Page.REVIEW -> CategoryReviewScreen(

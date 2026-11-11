@@ -13,7 +13,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
@@ -44,7 +43,7 @@ internal fun PageScaffold(
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        snackbarHost = { snackbarHost?.let { SnackbarHost(it) } },
+        snackbarHost = { snackbarHost?.let { BannerHost(it) } },
         topBar = {
             Column(Modifier.fillMaxWidth()) {
                 LargeFlexibleTopAppBar(

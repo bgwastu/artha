@@ -26,7 +26,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
@@ -59,6 +58,7 @@ import net.wastu.artha.ui.ArthaViewModel
 import net.wastu.artha.ui.LedgerState
 import net.wastu.artha.ui.Page
 import net.wastu.artha.ui.PageStack
+import net.wastu.artha.ui.components.BannerHost
 import net.wastu.artha.ui.components.collectOrDefault
 
 internal enum class Destination(val label: String, val icon: ImageVector) {
@@ -131,7 +131,7 @@ fun HomeScreen(
         val showRail = maxWidth >= 600.dp && maxHeight >= 480.dp
         val barBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
         Scaffold(
-            snackbarHost = { SnackbarHost(snackbarHost) },
+            snackbarHost = { BannerHost(snackbarHost) },
             modifier = (if (showSearch) Modifier.clearAndSetSemantics {} else Modifier)
                 .nestedScroll(barBehavior.nestedScrollConnection),
             topBar = {
@@ -252,9 +252,8 @@ private fun HomeFeedbackEffects(viewModel: ArthaViewModel?, snackbarHost: Snackb
     LaunchedEffect(importFeedback?.sequence) {
         importFeedback?.let { snackbarHost.showSnackbar(it.message) }
     }
-    LaunchedEffect(viewModel, pages.top) {
-        // The AI page reports its own run, so only announce runs started elsewhere.
-        if (pages.top != Page.AI) viewModel?.categoryRunResults?.collect {
+    LaunchedEffect(viewModel) {
+        viewModel?.categoryRunResults?.collect {
             val result = snackbarHost.showSnackbar(
                 categoryRunMessage(it),
                 actionLabel = if (it.review > 0 || it.failed > 0) "Review" else null,
