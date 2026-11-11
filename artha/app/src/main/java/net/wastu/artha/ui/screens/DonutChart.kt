@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -147,19 +148,20 @@ private val SliceMotion = tween<Float>(durationMillis = 450, easing = FastOutSlo
 @Composable
 private fun rememberAnimatedSlices(slices: List<SpendingChartLogic.Slice>): List<Pair<SpendingChartLogic.Slice, Float>> {
     val firstNames = remember { slices.map { it.name }.toSet() }
-    val amounts = remember { mutableMapOf<String, Animatable<Float, AnimationVector1D>>() }
+    val amounts = remember { mutableStateMapOf<String, Animatable<Float, AnimationVector1D>>() }
     val leaving = remember { mutableStateListOf<SpendingChartLogic.Slice>() }
     val previous = remember { arrayOf<List<SpendingChartLogic.Slice>>(emptyList()) }
-    for (slice in slices) {
-        val target = slice.amountMinor.toFloat()
-        // Present on the first frame: shown at full size. Added later: grows in from nothing.
-        amounts.getOrPut(slice.name) { Animatable(if (slice.name in firstNames) target else 1f) }
-    }
+    // Present on the first frame: shown at full size. Added later: grows in from nothing.
+    fun startValue(slice: SpendingChartLogic.Slice) =
+        if (slice.name in firstNames) slice.amountMinor.toFloat() else 1f
     LaunchedEffect(slices) {
         val names = slices.map { it.name }.toSet()
         leaving.removeAll { it.name in names }
         previous[0].filter { old -> old.name !in names && leaving.none { it.name == old.name } }.forEach(leaving::add)
         previous[0] = slices
+        // Created here, not during composition: an Animatable is remembered state, and a new slice
+        // would otherwise build a fresh one on every recomposition.
+        for (slice in slices) amounts.getOrPut(slice.name) { Animatable(startValue(slice)) }
         coroutineScope {
             for (slice in slices) launch { amounts[slice.name]?.animateTo(slice.amountMinor.toFloat(), SliceMotion) }
             for (gone in leaving.toList()) launch {
@@ -169,7 +171,7 @@ private fun rememberAnimatedSlices(slices: List<SpendingChartLogic.Slice>): List
             }
         }
     }
-    return (slices + leaving).map { it to (amounts[it.name]?.value ?: it.amountMinor.toFloat()).coerceAtLeast(1f) }
+    return (slices + leaving).map { it to (amounts[it.name]?.value ?: startValue(it)).coerceAtLeast(1f) }
 }
 
 /** The centre of the donut: the picked category when there is one, otherwise the month total. */

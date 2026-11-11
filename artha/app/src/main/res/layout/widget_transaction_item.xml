@@ -33,6 +33,7 @@
             android:layout_gravity="bottom|end"
             android:background="@drawable/bg_widget_badge"
             android:clipToOutline="true"
+            tools:ignore="UnusedAttribute"
             android:importantForAccessibility="no"
             android:outlineProvider="background"
             android:padding="1dp"
@@ -51,6 +52,7 @@
             android:maxLines="1"
             android:textColor="@color/widget_text_primary"
             android:textSize="7sp"
+            tools:ignore="SmallSp"
             android:textStyle="bold"
             android:visibility="gone" />
     </FrameLayout>
