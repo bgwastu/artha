@@ -220,7 +220,7 @@ fun HomeScreen(
                                         sourceIssues.firstOrNull()?.let { issue ->
                                             SourceHealthNotice(
                                                 title = issue.title,
-                                                detail = issue.diagnostic.lastSyncEpochMillis?.let {
+                                                detail = issue.lastSyncEpochMillis?.let {
                                                     "Last sync ${formatRelativeTime(it, now)}"
                                                 } ?: "No recorded sync yet",
                                                 onClick = { openSource(issue.provider) },

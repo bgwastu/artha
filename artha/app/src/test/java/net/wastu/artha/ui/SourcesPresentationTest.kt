@@ -8,7 +8,6 @@ import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.providers.AccountStatus
 import net.wastu.artha.data.providers.ProviderDiagnostic
-import net.wastu.artha.data.providers.ProviderImportWindow
 import net.wastu.artha.ui.screens.SourceHealthReason
 import net.wastu.artha.ui.screens.canRetrySync
 import net.wastu.artha.ui.screens.countExpenses
@@ -38,12 +37,22 @@ class SourcesPresentationTest {
         )
         val enabled = setOf(Provider.JAGO, Provider.SHOPEE, Provider.GRAB)
         assertEquals(
-            listOf(Provider.SHOPEE, Provider.JAGO),
+            listOf(Provider.SHOPEE),
             sourceHealthIssues(diagnostics, enabled, emptyMap(), now).map { it.provider },
         )
         val withImportedGrab = sourceHealthIssues(diagnostics, enabled, mapOf(Provider.GRAB to 1), now)
-        assertEquals(listOf(SourceHealthReason.SIGN_IN, SourceHealthReason.MISSING_APP, SourceHealthReason.PARTIAL),
+        assertEquals(listOf(SourceHealthReason.SIGN_IN, SourceHealthReason.MISSING_APP),
             withImportedGrab.map { it.reason })
+    }
+
+    @Test
+    fun partialAndRateLimitedSyncsStayInSourceDetails() {
+        val diagnostics = mapOf(
+            Provider.JAGO to ProviderDiagnostic(lastSyncEpochMillis = now, accountStatus = AccountStatus.PARTIAL),
+            Provider.GRAB to ProviderDiagnostic(lastSyncEpochMillis = now, accountStatus = AccountStatus.RATE_LIMITED),
+        )
+        assertTrue(sourceHealthIssues(diagnostics, diagnostics.keys, emptyMap(), now).isEmpty())
+        assertEquals("Partly synced", sourceHeadline(Provider.JAGO, diagnostics[Provider.JAGO], true, false))
     }
 
     @Test
@@ -61,7 +70,7 @@ class SourcesPresentationTest {
     }
 
     @Test
-    fun monthlyWarningsFollowTheLastSyncAndObservedPartialHistory() {
+    fun monthlyWarningsFollowTheLastSync() {
         val september = YearMonth.of(2026, 9)
         val october = september.plusMonths(1)
         val november = october.plusMonths(1)
@@ -73,14 +82,6 @@ class SourcesPresentationTest {
         assertTrue(issue.affectsMonth(october, november))
         assertTrue(issue.affectsMonth(november, november))
         assertFalse(issue.affectsMonth(november.plusMonths(1), november))
-
-        val partial = diagnostic.copy(
-            accountStatus = AccountStatus.PARTIAL,
-            lastImportWindow = ProviderImportWindow(2, lastSync - 1, lastSync),
-        )
-        val partialIssue = sourceHealthIssues(mapOf(provider to partial), setOf(provider), emptyMap(), now).single()
-        assertTrue(partialIssue.affectsMonth(september, november))
-        assertFalse(partialIssue.affectsMonth(september.minusMonths(1), november))
     }
 
     @Test

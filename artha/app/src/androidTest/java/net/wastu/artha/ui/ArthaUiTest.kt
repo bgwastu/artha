@@ -116,6 +116,7 @@ class ArthaUiTest {
         state.edit().clear().apply()
         try {
             val preferences = ProviderPreferences(context)
+            preferences.recordSyncSuccess(Provider.JAGO, "0 added, 1 already saved", partialReason = "One row was skipped")
             preferences.recordSyncError(Provider.SHOPEE, "Session expired", AccountStatus.NEEDS_LOGIN)
             val viewModel = ArthaViewModel(
                 RootAccess { false },
@@ -125,6 +126,7 @@ class ArthaUiTest {
             )
             model = viewModel
             compose.setContent { ArthaTheme(dynamicColor = false) { ArthaApp(viewModel) } }
+            compose.onNodeWithText("Bank Jago sync is incomplete").assertDoesNotExist()
             compose.onNodeWithText("Sign in to Shopee").assertIsDisplayed().performClick()
             compose.onNodeWithText("Open Shopee").assertIsDisplayed()
             compose.onNodeWithContentDescription("Back").performClick()

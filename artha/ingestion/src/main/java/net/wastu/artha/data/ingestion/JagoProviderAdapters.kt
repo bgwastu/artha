@@ -133,6 +133,7 @@ object JagoCachedHistory {
                             pocketId,
                             pocket,
                             pocketName,
+                            pockets,
                             ::noteRowFailure,
                         )
                         // A rejected or zero-value observation must never reserve the source identity.
@@ -166,6 +167,7 @@ object JagoCachedHistory {
         pocketId: String,
         pocket: Map<*, *>?,
         pocketName: String?,
+        pockets: Map<String, Any?>,
         noteRowFailure: (Exception) -> Unit,
     ): UnifiedTransaction? {
         fun text(index: Int): String = when (val value = fields["f$index"]) {
@@ -177,8 +179,14 @@ object JagoCachedHistory {
         require(id.isNotBlank()) { "Jago transaction identity unavailable" }
         val rawDate = text(5)
         val sourceAmount = fields["f3"] as? Number ?: error("Jago numeric amount unavailable")
+        fun pocketCurrency(metadata: Map<*, *>?) =
+            (metadata?.get("f44") as? String)?.takeUnless { it == "null" }.orEmpty()
         val currency = text(41).ifBlank {
-            (pocket?.get("f44") as? String).orEmpty()
+            pocketCurrency(pocket).ifBlank {
+                // Aggregate history can carry the owning pocket on the row without a pocket container.
+                val referencedPocket = (fields["f12"] as? String)?.let { pockets[it] } as? Map<*, *>
+                pocketCurrency(referencedPocket)
+            }
         }
         val scale = JagoHiveMinorUnits.minorUnitScale(currency)
         require(currency.isNotBlank() && scale != null) {

@@ -205,14 +205,33 @@ class JagoProviderContractTest {
         }
     }
 
-    @Test fun orphanDuplicateBeforeNamedPocketPreservesTheNamedOriginalPayload() {
+    @Test fun aggregateDuplicateWithReferencedCurrencyPreservesTheNamedOriginalPayload() {
         val original = parse(fields()).single()
-        val orphan = fields().apply { put("f13", 0L) }
+        val orphan = fields().apply {
+            put("f13", 0L)
+            remove("f41")
+            put("f12", POCKET_ID)
+        }
         val history = linkedMapOf("fictional-aggregate" to mapOf("f2" to listOf(orphan)),
             POCKET_ID to mapOf("f2" to listOf(fields())))
         val rows = JagoCachedHistory.parse(mapOf(POCKET_ID to pocket()), history)
         assertEquals(listOf(original), rows)
         assertEquals(original.rawPayload, rows.single().rawPayload)
+    }
+
+    @Test fun aggregateRowCanUseAnExplicitCurrencyFromItsReferencedPocket() {
+        val referenced = pocket().apply { put("f44", "USD") }
+        val row = fields().apply {
+            remove("f41")
+            put("f12", POCKET_ID)
+        }
+        val rows = JagoCachedHistory.parse(
+            mapOf(POCKET_ID to referenced),
+            mapOf("fictional-aggregate" to mapOf("f2" to listOf(row))),
+        )
+        assertEquals("USD", rows.single().money.currencyCode)
+        assertEquals(2_500_000L, rows.single().money.amountMinor)
+        assertNull(rows.single().pocket)
     }
 
     @Test fun orphanWithoutCurrencyRejectsOnlyThatRowAndNeverDefaultsToRupiah() {

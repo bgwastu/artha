@@ -22,31 +22,24 @@ import net.wastu.artha.core.model.Provider
 import net.wastu.artha.data.providers.AccountStatus
 import net.wastu.artha.data.providers.ProviderDiagnostic
 
-internal enum class SourceHealthReason { SIGN_IN, FAILED, LIMITED, MISSING_APP, STALE, PARTIAL }
+internal enum class SourceHealthReason { SIGN_IN, FAILED, MISSING_APP, STALE }
 
 internal data class SourceHealthIssue(
     val provider: Provider,
     val reason: SourceHealthReason,
-    val diagnostic: ProviderDiagnostic,
+    val lastSyncEpochMillis: Long?,
 ) {
     val title: String
         get() = when (reason) {
             SourceHealthReason.SIGN_IN -> "Sign in to ${provider.displayName}"
             SourceHealthReason.FAILED -> "${provider.displayName} sync failed"
-            SourceHealthReason.LIMITED -> "${provider.displayName} is limiting sync"
             SourceHealthReason.MISSING_APP -> "${provider.displayName} app not installed"
             SourceHealthReason.STALE -> "${provider.displayName} sync is overdue"
-            SourceHealthReason.PARTIAL -> "${provider.displayName} sync is incomplete"
         }
 
     fun affectsMonth(month: YearMonth, currentMonth: YearMonth): Boolean {
         if (month >= currentMonth) return month == currentMonth
-        if (diagnostic.lastSyncEpochMillis?.let { month >= accountingMonth(it) } == true) return true
-        if (reason != SourceHealthReason.PARTIAL) return false
-        val window = diagnostic.lastImportWindow ?: return false
-        val first = window.earliestMillis ?: return false
-        val last = window.latestMillis ?: return false
-        return month in accountingMonth(first)..accountingMonth(last)
+        return lastSyncEpochMillis?.let { month >= accountingMonth(it) } == true
     }
 }
 
@@ -61,19 +54,18 @@ internal fun sourceHealthIssues(
     val reason = when (diagnostic.accountStatus) {
         AccountStatus.NEEDS_LOGIN -> SourceHealthReason.SIGN_IN
         AccountStatus.ERROR -> SourceHealthReason.FAILED
-        AccountStatus.RATE_LIMITED -> SourceHealthReason.LIMITED
+        AccountStatus.RATE_LIMITED, AccountStatus.PARTIAL -> return@mapNotNull null
         AccountStatus.APP_NOT_INSTALLED -> {
             // Import is enabled by default, even for apps the user has never had.
             if (lastSync == null && providerCounts.getOrDefault(provider, 0) == 0) return@mapNotNull null
             SourceHealthReason.MISSING_APP
         }
-        AccountStatus.PARTIAL -> SourceHealthReason.PARTIAL
         AccountStatus.CONNECTED, AccountStatus.UNKNOWN -> {
             if (!isSourceSyncOverdue(lastSync, now)) return@mapNotNull null
             SourceHealthReason.STALE
         }
     }
-    SourceHealthIssue(provider, reason, diagnostic)
+    SourceHealthIssue(provider, reason, lastSync)
 }.sortedWith(compareBy({ it.reason }, { it.provider }))
 
 private fun accountingMonth(epochMillis: Long): YearMonth =
