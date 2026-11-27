@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Analytics
@@ -35,6 +36,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.Saver
@@ -52,6 +54,10 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.analysis.categoryRunMessage
@@ -92,6 +98,11 @@ fun HomeScreen(
     var transactionFilters by rememberSaveable(stateSaver = TransactionFiltersSaver) { mutableStateOf(TransactionFilters()) }
     var destination by rememberSaveable(stateSaver = Destination.Saver) { mutableStateOf(Destination.TRANSACTIONS) }
     val pages = rememberSaveable(saver = PageStack.Saver) { PageStack() }
+    var directSource by rememberSaveable { mutableStateOf<Provider?>(null) }
+    val openSource: (Provider?) -> Unit = { provider ->
+        directSource = provider
+        pages.open(if (provider == null) Page.SOURCES else Page.SOURCE_DETAILS)
+    }
 
     var showSearch by rememberSaveable { mutableStateOf(false) }
     var showFilter by rememberSaveable { mutableStateOf(false) }
@@ -103,6 +114,21 @@ fun HomeScreen(
     HomeFeedbackEffects(viewModel, snackbarHost, pages)
 
     val manualImport = importMode == ImportMode.MANUAL
+    val diagnostics by viewModel?.providerDiagnostics.collectOrDefault(emptyMap())
+    val importEnabled by viewModel?.importEnabled.collectOrDefault(emptySet())
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                now = System.currentTimeMillis()
+                delay(60_000)
+            }
+        }
+    }
+    val sourceIssues = remember(diagnostics, importEnabled, providerCounts, now) {
+        sourceHealthIssues(diagnostics, importEnabled, providerCounts, now)
+    }
     val ledgerLoadFailed by viewModel?.ledgerLoadFailed.collectOrDefault(false)
     val categoryFilter by viewModel?.categoryFilter.collectOrDefault(null)
     val targetDestination by viewModel?.targetDestination.collectOrDefault(null)
@@ -187,7 +213,21 @@ fun HomeScreen(
                         saveableStateHolder.SaveableStateProvider(tab.name) {
                             when (tab) {
                                 Destination.TRANSACTIONS -> Row(Modifier.fillMaxSize()) {
-                                    Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
+                                    Column(
+                                        Modifier.weight(1f).fillMaxHeight(),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                    ) {
+                                        sourceIssues.firstOrNull()?.let { issue ->
+                                            SourceHealthNotice(
+                                                title = issue.title,
+                                                detail = issue.diagnostic.lastSyncEpochMillis?.let {
+                                                    "Last sync ${formatRelativeTime(it, now)}"
+                                                } ?: "No recorded sync yet",
+                                                onClick = { openSource(issue.provider) },
+                                                modifier = Modifier.widthIn(max = 720.dp).fillMaxWidth()
+                                                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                                            )
+                                        }
                                         LedgerScreen(
                                             state = ledgerState,
                                             syncing = importMode != ImportMode.IDLE,
@@ -214,6 +254,8 @@ fun HomeScreen(
                                         onOpenCategories = { pages.open(Page.CATEGORIES) },
                                         onOpenCategoryReview = { pages.open(Page.REVIEW) },
                                         onOpenAiCategories = { pages.open(Page.AI) },
+                                        sourceIssues = sourceIssues,
+                                        onOpenSource = openSource,
                                     )
                                 }
                                 Destination.SETTINGS -> SettingsScreen(viewModel, onOpen = pages::open)
@@ -241,8 +283,8 @@ fun HomeScreen(
             enabledProviders = enabledProviders,
             syncingProvider = syncingProvider,
             providerCounts = providerCounts,
+            directSource = directSource,
             onProviderEnabled = onProviderEnabled,
-            onOpen = pages::open,
             onBack = pages::back,
             onOpenTransaction = openTransaction,
         )

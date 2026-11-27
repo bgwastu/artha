@@ -9,8 +9,10 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
+import kotlin.time.TimeSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import net.wastu.artha.core.model.Direction
@@ -22,22 +24,39 @@ import org.json.JSONObject
 /** Read-only native source snapshots and GETs; no handmade exports or session refresh. */
 class GojekOrderReader(private val files: RootFileReader, private val screen: GojekScreenStore = GojekScreenStore(files.context.filesDir)) {
     suspend fun transactions(): List<UnifiedTransaction> = withContext(Dispatchers.IO) {
+        val timings = mutableMapOf<String, String>()
+        try {
+            timings.measure("totalMs") { readTransactions(timings) }
+        } finally {
+            ArthaLog.i("GoPayRead", "GoPay import read timing", timings)
+        }
+    }
+
+    private suspend fun readTransactions(timings: MutableMap<String, String>): List<UnifiedTransaction> {
         val rows = ImportRows()
         val details = linkedMapOf<String, JSONObject>()
         val orders = mutableListOf<GojekProviderParser.NativeOrder>()
+        val coroutineContext = currentCoroutineContext()
         val checkActive = { coroutineContext.ensureActive() }
         var cachedPayments = false
+        val cacheStart = TimeSource.Monotonic.markNow()
         try {
             val base = "/data/data/com.gojek.app/cache/okhttp_cache"
-            val names = files.list(base).filter { it.matches(Regex("[a-f0-9]{32}\\.0")) }.take(MAX_CACHE_ENTRIES)
-            val headers = files.readBatch(names.map { "$base/$it" })
+            val names = timings.measure("cacheListMs") {
+                files.list(base).filter { it.matches(Regex("[a-f0-9]{32}\\.0")) }.take(MAX_CACHE_ENTRIES)
+            }
+            timings["cacheHeaderCount"] = names.size.toString()
+            val headers = timings.measure("cacheHeadersMs") { files.readBatch(names.map { "$base/$it" }) }
             val selected = headers.mapNotNull { (path, bytes) ->
                 try { bytes?.let(GojekProviderParser::cacheEntry)?.let { path to it } }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (e: ProviderReadException) { rows.issue(e); null }
                 catch (_: Exception) { rows.issue("One Gojek history cache header is unrecognized"); null }
             }.sortedByDescending { it.second.receivedMillis }
-            val snapshot = files.stableBatch(selected.flatMap { (path, _) -> listOf(path, path.removeSuffix(".0") + ".1") })
+            timings["cacheMatchCount"] = selected.size.toString()
+            val snapshot = timings.measure("cacheSnapshotMs") {
+                files.stableBatch(selected.flatMap { (path, _) -> listOf(path, path.removeSuffix(".0") + ".1") })
+            }
             for ((path, _) in selected) {
                 coroutineContext.ensureActive()
                 try {
@@ -66,9 +85,10 @@ class GojekOrderReader(private val files: RootFileReader, private val screen: Go
             rows.issue(e)
         }
         catch (_: Exception) { /* A cold cache does not block authenticated history. */ }
+        finally { timings["cacheMs"] = cacheStart.elapsedNow().inWholeMilliseconds.toString() }
 
         val loginPrefsPath = "/data/data/com.gojek.app/shared_prefs/goto-scp-login.xml"
-        val loginModified = files.lastModifiedMillis(loginPrefsPath)
+        val loginModified = timings.measure("loginCheckMs") { files.lastModifiedMillis(loginPrefsPath) }
         val loginStale = loginModified != null &&
             System.currentTimeMillis() - loginModified > TimeUnit.DAYS.toMillis(30)
         if (loginStale && !cachedPayments) {
@@ -84,7 +104,7 @@ class GojekOrderReader(private val files: RootFileReader, private val screen: Go
             rows.issue(GOJEK_NEEDS_LOGIN_MESSAGE)
         } else {
             try {
-                liveHeaders = sessionHeaders()
+                liveHeaders = timings.measure("sessionMs") { sessionHeaders() }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: ProviderReadException) {
@@ -95,13 +115,14 @@ class GojekOrderReader(private val files: RootFileReader, private val screen: Go
         }
         // Rows the screen walk read from GoPay's own history screens. They carry the same
         // `gopay:<ID transaksi>` identity as the API rows, so rows the ledger already has are ignored.
-        val screenRows = try { screen.transactions() }
+        val screenRows = try { timings.measure("screenHistoryMs") { screen.transactions() } }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (t: Exception) { ArthaLog.w("ArthaScreen", "screen store read failed", t); emptyList() }
         val screenContributed = screenRows.isNotEmpty()
         for (row in screenRows) if (rows.transactions.none { it.key == row.key }) rows.transactions += row
         if (liveHeaders != null) {
             val headers = liveHeaders
+            val historyStart = TimeSource.Monotonic.markNow()
             try {
                 var next: String? = GojekProviderParser.HISTORY_URL
                 val visited = mutableSetOf<String>()
@@ -131,20 +152,28 @@ class GojekOrderReader(private val files: RootFileReader, private val screen: Go
                 }
             } catch (_: Exception) {
                 rows.issue(ProviderReadException(AccountStatus.ERROR, "Gojek live history is unavailable; valid cached payments are retained"))
+            } finally {
+                timings["liveHistoryMs"] = historyStart.elapsedNow().inWholeMilliseconds.toString()
             }
-            if (!deadlineExceeded(started) && !gatewayEnforced) {
-                try {
-                    importOrders(request(GojekProviderParser.ORDERS_URL, headers, started, checkActive), orders, rows, checkActive, preferLive = true)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (e: ProviderReadException) {
-                    rows.issue(e)
-                } catch (_: Exception) {
-                    rows.issue("Gojek native order enrichment is unavailable")
+            if (!gatewayEnforced) {
+                timings.measure("liveDetailsMs") {
+                    if (!deadlineExceeded(started)) {
+                        try {
+                            importOrders(request(GojekProviderParser.ORDERS_URL, headers, started, checkActive), orders, rows, checkActive, preferLive = true)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (e: ProviderReadException) {
+                            rows.issue(e)
+                        } catch (_: Exception) {
+                            rows.issue("Gojek native order enrichment is unavailable")
+                        }
+                    }
+                    fetchPaymentDetails(headers, rows, details, started, checkActive)
                 }
             }
-            if (!gatewayEnforced) fetchPaymentDetails(headers, rows, details, started, checkActive)
-            importJagoReferencedPayments(headers, rows, System.nanoTime(), checkActive, details, gatewayEnforced)
+            timings.measure("jagoLinkedMs") {
+                importJagoReferencedPayments(headers, rows, System.nanoTime(), checkActive, details, gatewayEnforced, timings)
+            }
         }
 
         for (index in rows.transactions.indices) {
@@ -160,8 +189,17 @@ class GojekOrderReader(private val files: RootFileReader, private val screen: Go
             rows.issue("Cached GoPay history covers only pages previously opened in Gojek")
         }
         // A clean failure with no rows still throws ProviderReadException to the caller.
-        try { rows.finish().sortedByDescending { it.occurredAt } }
+        return try { rows.finish().sortedByDescending { it.occurredAt } }
         catch (e: PartialImportException) { e.transactions.sortedByDescending { it.occurredAt } }
+    }
+
+    private inline fun <T> MutableMap<String, String>.measure(field: String, read: () -> T): T {
+        val start = TimeSource.Monotonic.markNow()
+        try {
+            return read()
+        } finally {
+            this[field] = start.elapsedNow().inWholeMilliseconds.toString()
+        }
     }
 
     private fun importOrders(body: JSONObject, orders: MutableList<GojekProviderParser.NativeOrder>, rows: ImportRows, checkActive: () -> Unit, preferLive: Boolean = false) {
@@ -281,10 +319,12 @@ class GojekOrderReader(private val files: RootFileReader, private val screen: Go
         started: Long,
         checkActive: () -> Unit,
         details: MutableMap<String, JSONObject>,
-        gatewayEnforced: Boolean = false,
+        gatewayEnforced: Boolean,
+        timings: MutableMap<String, String>,
     ) {
         val known = rows.transactions.map { it.providerTransactionId.removePrefix("gopay:") }.toSet()
-        val hints = jagoGopayHints().filter { it.orderId !in known }
+        val hints = timings.measure("jagoReadMs") { jagoGopayHints().filter { it.orderId !in known } }
+        timings["jagoHintCount"] = hints.size.toString()
         if (hints.isEmpty()) return
         var reads = 0
         // The detail API is bounded and abandoned after its first rejection; Jago-derived rows need no network.

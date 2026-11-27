@@ -27,8 +27,8 @@ internal fun HomePages(
     enabledProviders: Set<Provider>,
     syncingProvider: Provider?,
     providerCounts: Map<Provider, Int>,
+    directSource: Provider?,
     onProviderEnabled: (Provider, Boolean) -> Unit,
-    onOpen: (Page) -> Unit,
     onBack: () -> Unit,
     onOpenTransaction: (UnifiedTransaction) -> Unit,
 ) {
@@ -44,13 +44,14 @@ internal fun HomePages(
         val page = entry?.page
         if (page != null && viewModel != null) Surface(Modifier.fillMaxSize()) {
             when (page) {
-                Page.SOURCES -> SourcesScreen(
+                Page.SOURCES, Page.SOURCE_DETAILS -> SourcesScreen(
                     enabled = enabledProviders,
                     syncingProvider = syncingProvider,
                     providerCounts = providerCounts,
                     onEnabled = onProviderEnabled,
                     viewModel = viewModel,
                     onBack = onBack,
+                    directSource = directSource.takeIf { page == Page.SOURCE_DETAILS },
                 )
                 Page.CATEGORIES -> CategoriesScreen(viewModel, onBack = onBack)
                 Page.AI -> AiScreen(viewModel, onBack = onBack)

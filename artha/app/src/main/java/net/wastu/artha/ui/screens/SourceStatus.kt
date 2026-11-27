@@ -13,13 +13,24 @@ import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.providers.AccountStatus
 import net.wastu.artha.data.providers.ProviderDiagnostic
 
-internal fun isSourceProblem(diagnostic: ProviderDiagnostic?, importEnabled: Boolean, importing: Boolean): Boolean {
+private const val SYNC_OVERDUE_MILLIS = 24 * 60 * 60 * 1000L
+
+internal fun isSourceSyncOverdue(lastSync: Long?, now: Long): Boolean =
+    lastSync != null && now - lastSync >= SYNC_OVERDUE_MILLIS
+
+internal fun isSourceProblem(
+    diagnostic: ProviderDiagnostic?,
+    importEnabled: Boolean,
+    importing: Boolean,
+    now: Long = System.currentTimeMillis(),
+): Boolean {
     if (importing || !importEnabled) return false
     return when (diagnostic?.accountStatus) {
         AccountStatus.NEEDS_LOGIN,
         AccountStatus.APP_NOT_INSTALLED,
         AccountStatus.RATE_LIMITED,
         AccountStatus.ERROR -> true
+        AccountStatus.CONNECTED, AccountStatus.UNKNOWN -> isSourceSyncOverdue(diagnostic.lastSyncEpochMillis, now)
         else -> false
     }
 }
@@ -63,6 +74,7 @@ internal fun sourceHeadline(
     diagnostic: ProviderDiagnostic?,
     importEnabled: Boolean,
     importing: Boolean,
+    now: Long = System.currentTimeMillis(),
 ): String = when {
     importing -> "Syncing"
     !importEnabled -> "Paused"
@@ -71,6 +83,8 @@ internal fun sourceHeadline(
     diagnostic?.accountStatus == AccountStatus.RATE_LIMITED -> "Limited by ${provider.displayName}"
     diagnostic?.accountStatus == AccountStatus.ERROR -> "Last sync failed"
     diagnostic?.accountStatus == AccountStatus.PARTIAL -> "Partly synced"
+    diagnostic?.lastSyncEpochMillis == null -> "Not synced yet"
+    isSourceSyncOverdue(diagnostic.lastSyncEpochMillis, now) -> "Sync overdue"
     else -> "Up to date"
 }
 

@@ -57,6 +57,7 @@ fun SourcesScreen(
     onEnabled: (Provider, Boolean) -> Unit = { _, _ -> },
     viewModel: ArthaViewModel? = null,
     onBack: () -> Unit = {},
+    directSource: Provider? = null,
 ) {
     var selectedProvider by rememberSaveable { mutableStateOf<Provider?>(null) }
     val importEnabled by viewModel?.importEnabled.collectOrDefault(Provider.entries.toSet())
@@ -99,6 +100,11 @@ fun SourcesScreen(
         flash = gojekFlash.takeIf { provider == Provider.GOJEK },
         onBack = onBackFromPage,
     )
+
+    if (directSource != null) {
+        detailPage(directSource, onBack)
+        return
+    }
 
     BoxWithConstraints(Modifier.widthIn(max = 1320.dp).fillMaxSize()) {
         val expanded = maxWidth >= 840.dp && maxHeight >= 480.dp

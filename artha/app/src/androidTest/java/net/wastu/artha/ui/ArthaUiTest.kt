@@ -1,5 +1,7 @@
 package net.wastu.artha.ui
 
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -27,6 +29,8 @@ import net.wastu.artha.core.root.RootAccess
 import net.wastu.artha.data.analysis.SpendingState
 import net.wastu.artha.data.ledger.LedgerDatabase
 import net.wastu.artha.data.ledger.RoomLedgerRepository
+import net.wastu.artha.data.providers.AccountStatus
+import net.wastu.artha.data.providers.ProviderPreferences
 import net.wastu.artha.ui.theme.ArthaTheme
 import org.junit.After
 import org.junit.Rule
@@ -100,6 +104,39 @@ class ArthaUiTest {
         manual.complete(Unit)
         compose.waitUntil(10_000) { viewModel.importMode.value == ImportMode.IDLE }
         compose.onNode(progress, useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun sourceHealthOpensTheAffectedSourceFromTransactionsAndAnalysis() {
+        val context = object : ContextWrapper(ApplicationProvider.getApplicationContext<Context>()) {
+            override fun getSharedPreferences(name: String, mode: Int) =
+                super.getSharedPreferences("source_health_test_$name", mode)
+        }
+        val state = context.getSharedPreferences("provider_visibility", Context.MODE_PRIVATE)
+        state.edit().clear().apply()
+        try {
+            val preferences = ProviderPreferences(context)
+            preferences.recordSyncError(Provider.SHOPEE, "Session expired", AccountStatus.NEEDS_LOGIN)
+            val viewModel = ArthaViewModel(
+                RootAccess { false },
+                { error("This test supplies saved spending directly") },
+                preferences = preferences,
+                spendingState = MutableStateFlow(SpendingState.Ready(emptyList(), emptyMap())),
+            )
+            model = viewModel
+            compose.setContent { ArthaTheme(dynamicColor = false) { ArthaApp(viewModel) } }
+            compose.onNodeWithText("Sign in to Shopee").assertIsDisplayed().performClick()
+            compose.onNodeWithText("Open Shopee").assertIsDisplayed()
+            compose.onNodeWithContentDescription("Back").performClick()
+            compose.onNodeWithText("Analysis").performClick()
+            compose.onNodeWithText("Total may be incomplete").assertIsDisplayed().performClick()
+            compose.onNodeWithText("Open Shopee").assertIsDisplayed()
+            compose.onNodeWithContentDescription("Back").performClick()
+            compose.runOnIdle { preferences.recordSyncSuccess(Provider.SHOPEE, "0 added, 0 already saved") }
+            compose.onNodeWithText("Total may be incomplete").assertDoesNotExist()
+        } finally {
+            state.edit().clear().apply()
+        }
     }
 
     @Test

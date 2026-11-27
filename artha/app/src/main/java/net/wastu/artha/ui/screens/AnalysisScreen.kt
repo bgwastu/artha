@@ -56,7 +56,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -81,9 +80,9 @@ import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import net.wastu.artha.core.model.AccountingTime
+import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.TransactionType
 import net.wastu.artha.core.model.UnifiedTransaction
@@ -105,13 +104,14 @@ import net.wastu.artha.ui.components.ShapeBadge
 import net.wastu.artha.ui.formatMoney
 
 @Composable
-fun AnalysisScreen(
+internal fun AnalysisScreen(
     viewModel: ArthaViewModel,
     onOpenTransaction: (UnifiedTransaction) -> Unit = {},
     onOpenCategories: () -> Unit = {},
     onOpenCategoryReview: () -> Unit = {},
     onOpenAiCategories: () -> Unit = {},
-    onOpenChart: () -> Unit = {},
+    sourceIssues: List<SourceHealthIssue> = emptyList(),
+    onOpenSource: (Provider?) -> Unit = {},
 ) {
     val analysis by viewModel.monthAnalysis.collectAsStateWithLifecycle()
     val ledgerState by viewModel.ledgerState.collectAsStateWithLifecycle()
@@ -131,14 +131,6 @@ fun AnalysisScreen(
     }
     val aiConfigured = snapshot.aiConfig.let { it.baseUrl.isNotBlank() && it.apiKey.isNotBlank() && it.model.isNotBlank() }
 
-    var now by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(60_000L)
-            now = System.currentTimeMillis()
-        }
-    }
-
     if (ledgerState is LedgerState.Loading && savedTransactions.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             LoadingIndicator(Modifier.size(64.dp).semantics { contentDescription = "Loading saved spending" })
@@ -156,7 +148,9 @@ fun AnalysisScreen(
     val slices = remember(analysis) { SpendingChartLogic.categorySlices(analysis) }
     var selectedSliceIndex by rememberSaveable(analysis.month, analysis.type) { mutableStateOf<Int?>(null) }
     val total = slices.sumOf { it.amountMinor }.coerceAtLeast(1)
-    val canGoNext = selectedMonth < YearMonth.now(AccountingTime.clock)
+    val currentMonth = YearMonth.now(AccountingTime.clock)
+    val canGoNext = selectedMonth < currentMonth
+    val coverageIssues = sourceIssues.filter { it.affectsMonth(analysis.month, currentMonth) }
     // Pages run Expenses, Income, then Expenses of the next month, and so on. Swipe left for the next page, right for the previous.
     val swipeType = Modifier.swipeBetween(
         onLeft = {
@@ -198,6 +192,17 @@ fun AnalysisScreen(
                 label = { if (it == TransactionType.INCOME) "Income" else "Expenses" },
                 modifier = Modifier.padding(vertical = 4.dp).then(swipeType),
             )
+        }
+        if (coverageIssues.isNotEmpty()) {
+            item(key = "source_coverage") {
+                val single = coverageIssues.singleOrNull()
+                SourceHealthNotice(
+                    title = "Total may be incomplete",
+                    detail = single?.title ?: coverageIssues.joinToString { it.provider.displayName },
+                    onClick = { onOpenSource(single?.provider) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
         item(key = "chart") {
             // A new type slides in from the side it was swiped from. Same-type updates (categorizing) don't re-slide.

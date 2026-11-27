@@ -293,7 +293,7 @@ class RootFileReader(val context: Context) {
     private fun rootShell(timeoutSeconds: Int) =
         Shell.Builder.create().setContext(context).setTimeout(timeoutSeconds.toLong()).build("su", "-M", "-c", "/system/bin/sh")
 
-    /** Shell timeout in seconds: a 15 s floor, scaled by bytes copied so large snapshots finish. */
+    /** libsu applies this interval to shell verification, before file commands run. */
     private fun timeoutSeconds(bytes: Long): Int =
         (MIN_TIMEOUT_SECONDS + bytes / BYTES_PER_EXTRA_TIMEOUT_SECOND)
             .coerceAtMost(MAX_TIMEOUT_SECONDS.toLong())

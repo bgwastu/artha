@@ -1,18 +1,22 @@
 package net.wastu.artha.ui
 
 import java.time.Instant
+import java.time.YearMonth
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.providers.AccountStatus
 import net.wastu.artha.data.providers.ProviderDiagnostic
+import net.wastu.artha.data.providers.ProviderImportWindow
+import net.wastu.artha.ui.screens.SourceHealthReason
 import net.wastu.artha.ui.screens.canRetrySync
 import net.wastu.artha.ui.screens.countExpenses
 import net.wastu.artha.ui.screens.formatRelativeTime
 import net.wastu.artha.ui.screens.isSourceProblem
 import net.wastu.artha.ui.screens.lastSyncText
 import net.wastu.artha.ui.screens.sourceHeadline
+import net.wastu.artha.ui.screens.sourceHealthIssues
 import net.wastu.artha.ui.screens.sourceRowStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -23,6 +27,61 @@ import org.junit.Test
 class SourcesPresentationTest {
 
     private val now = 1_800_000_000_000L
+
+    @Test
+    fun homePrioritizesActionableIssuesAndSkipsPausedOrUnusedSources() {
+        val diagnostics = mapOf(
+            Provider.JAGO to ProviderDiagnostic(accountStatus = AccountStatus.PARTIAL),
+            Provider.SHOPEE to ProviderDiagnostic(accountStatus = AccountStatus.NEEDS_LOGIN),
+            Provider.GOJEK to ProviderDiagnostic(accountStatus = AccountStatus.ERROR),
+            Provider.GRAB to ProviderDiagnostic(accountStatus = AccountStatus.APP_NOT_INSTALLED),
+        )
+        val enabled = setOf(Provider.JAGO, Provider.SHOPEE, Provider.GRAB)
+        assertEquals(
+            listOf(Provider.SHOPEE, Provider.JAGO),
+            sourceHealthIssues(diagnostics, enabled, emptyMap(), now).map { it.provider },
+        )
+        val withImportedGrab = sourceHealthIssues(diagnostics, enabled, mapOf(Provider.GRAB to 1), now)
+        assertEquals(listOf(SourceHealthReason.SIGN_IN, SourceHealthReason.MISSING_APP, SourceHealthReason.PARTIAL),
+            withImportedGrab.map { it.reason })
+    }
+
+    @Test
+    fun connectedSourcesOnlyWarnAfterAFullDayWithoutSync() {
+        val provider = Provider.JAGO
+        val diagnostics = mapOf(provider to ProviderDiagnostic(
+            lastSyncEpochMillis = now, accountStatus = AccountStatus.CONNECTED,
+        ))
+        val day = 24 * 60 * 60 * 1_000L
+        assertTrue(sourceHealthIssues(diagnostics, setOf(provider), emptyMap(), now + day - 1).isEmpty())
+        assertEquals(SourceHealthReason.STALE,
+            sourceHealthIssues(diagnostics, setOf(provider), emptyMap(), now + day).single().reason)
+        assertEquals("Sync overdue", sourceHeadline(provider, diagnostics[provider], true, false, now + day))
+        assertTrue(isSourceProblem(diagnostics[provider], true, false, now + day))
+    }
+
+    @Test
+    fun monthlyWarningsFollowTheLastSyncAndObservedPartialHistory() {
+        val september = YearMonth.of(2026, 9)
+        val october = september.plusMonths(1)
+        val november = october.plusMonths(1)
+        val lastSync = Instant.parse("2026-09-30T17:00:00Z").toEpochMilli() // October 1 in Jakarta.
+        val provider = Provider.SHOPEE
+        val diagnostic = ProviderDiagnostic(lastSyncEpochMillis = lastSync, accountStatus = AccountStatus.NEEDS_LOGIN)
+        val issue = sourceHealthIssues(mapOf(provider to diagnostic), setOf(provider), emptyMap(), now).single()
+        assertFalse(issue.affectsMonth(september, november))
+        assertTrue(issue.affectsMonth(october, november))
+        assertTrue(issue.affectsMonth(november, november))
+        assertFalse(issue.affectsMonth(november.plusMonths(1), november))
+
+        val partial = diagnostic.copy(
+            accountStatus = AccountStatus.PARTIAL,
+            lastImportWindow = ProviderImportWindow(2, lastSync - 1, lastSync),
+        )
+        val partialIssue = sourceHealthIssues(mapOf(provider to partial), setOf(provider), emptyMap(), now).single()
+        assertTrue(partialIssue.affectsMonth(september, november))
+        assertFalse(partialIssue.affectsMonth(september.minusMonths(1), november))
+    }
 
     @Test
     fun sourceRowStatusCoversEveryState() {
@@ -227,9 +286,10 @@ class SourcesPresentationTest {
             "Up to date",
             sourceHeadline(
                 Provider.GOJEK,
-                ProviderDiagnostic(accountStatus = AccountStatus.CONNECTED),
+                ProviderDiagnostic(accountStatus = AccountStatus.CONNECTED, lastSyncEpochMillis = now),
                 importEnabled = true,
                 importing = false,
+                now = now,
             )
         )
         assertEquals(
@@ -242,7 +302,7 @@ class SourcesPresentationTest {
             )
         )
         assertEquals(
-            "Up to date",
+            "Not synced yet",
             sourceHeadline(
                 Provider.GOJEK,
                 ProviderDiagnostic(accountStatus = AccountStatus.UNKNOWN),
@@ -251,7 +311,7 @@ class SourcesPresentationTest {
             )
         )
         assertEquals(
-            "Up to date",
+            "Not synced yet",
             sourceHeadline(
                 Provider.GOJEK,
                 null,

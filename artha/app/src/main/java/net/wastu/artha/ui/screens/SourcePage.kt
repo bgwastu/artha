@@ -209,6 +209,7 @@ private fun SourceStatusSection(
         when (status) {
             AccountStatus.APP_NOT_INSTALLED -> Unit
             AccountStatus.NEEDS_LOGIN -> OutlinedButton(onClick = onImport, enabled = !busy) { Text("Retry") }
+            AccountStatus.CONNECTED, AccountStatus.UNKNOWN -> FilledTonalButton(onClick = onImport, enabled = !busy) { Text("Sync now") }
             else -> FilledTonalButton(onClick = onImport, enabled = !busy) { Text("Retry") }
         }
     }
