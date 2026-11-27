@@ -19,17 +19,21 @@ interface TransactionDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun append(transactions: List<TransactionEntity>): List<Long>
 
-    @Query("SELECT * FROM unified_transactions WHERE provider != 'JAGO'")
-    suspend fun sourceRecords(): List<TransactionEntity>
+    @Query("SELECT * FROM unified_transactions WHERE provider IN (:providers)")
+    suspend fun sourceRecords(providers: List<String>): List<TransactionEntity>
 
     @Transaction
     suspend fun appendProviderImport(transactions: List<TransactionEntity>): AppendResult {
-        val observations = if (transactions.any { it.provider != "JAGO" }) ProviderObservations.capture(
-            sourceRecords().map(TransactionEntity::toDomain), transactions.map(TransactionEntity::toDomain),
-            transactions.maxOfOrNull { it.ingestedAtEpochMillis } ?: 0L) else emptyList()
+        val providers = transactions.map { it.provider }.distinct().filterNot { it == "JAGO" }
+        val ingestedAt = transactions.maxOfOrNull { it.ingestedAtEpochMillis } ?: 0L
+        val observations = if (providers.isEmpty()) emptyList() else ProviderObservations.capture(
+            sourceRecords(providers).map(TransactionEntity::toDomain),
+            transactions.map(TransactionEntity::toDomain),
+            ingestedAt,
+        )
         val original = append(transactions)
         val inserted = original.count { it != -1L }
-        val updates = append(observations.map { TransactionEntity.fromDomain(it, Instant.ofEpochMilli(transactions.maxOf { row -> row.ingestedAtEpochMillis })) })
+        val updates = append(observations.map { TransactionEntity.fromDomain(it, Instant.ofEpochMilli(ingestedAt)) })
             .count { it != -1L }
         return AppendResult(inserted, original.size - inserted, updates)
     }

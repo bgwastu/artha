@@ -48,6 +48,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -55,6 +56,7 @@ import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.data.analysis.categoryRunMessage
 import net.wastu.artha.ui.ArthaViewModel
+import net.wastu.artha.ui.ImportMode
 import net.wastu.artha.ui.LedgerState
 import net.wastu.artha.ui.Page
 import net.wastu.artha.ui.PageStack
@@ -79,7 +81,7 @@ fun HomeScreen(
     ledgerState: LedgerState,
     onRetryLedger: () -> Unit,
     enabledProviders: Set<Provider> = Provider.entries.toSet(),
-    refreshing: Boolean = false,
+    importMode: ImportMode = ImportMode.IDLE,
     syncingProvider: Provider? = null,
     providerCounts: Map<Provider, Int> = emptyMap(),
     onRefresh: () -> Unit = {},
@@ -100,7 +102,7 @@ fun HomeScreen(
     val snackbarHost = remember { SnackbarHostState() }
     HomeFeedbackEffects(viewModel, snackbarHost, pages)
 
-    val automaticImport by viewModel?.automaticImportActive.collectOrDefault(false)
+    val manualImport = importMode == ImportMode.MANUAL
     val ledgerLoadFailed by viewModel?.ledgerLoadFailed.collectOrDefault(false)
     val categoryFilter by viewModel?.categoryFilter.collectOrDefault(null)
     val targetDestination by viewModel?.targetDestination.collectOrDefault(null)
@@ -120,8 +122,10 @@ fun HomeScreen(
     }
     BackHandler(enabled = pages.top != null) { pages.back() }
 
-    val latestTransactions by viewModel?.allTransactions.collectOrDefault(emptyList())
-    val selected = latestTransactions.firstOrNull { it.key == selectedKey } ?: selectedFallback?.takeIf { it.key == selectedKey }
+    val selected = selectedKey?.let { key ->
+        val latestTransactions by viewModel?.allTransactions.collectOrDefault(emptyList())
+        latestTransactions.firstOrNull { it.key == key } ?: selectedFallback?.takeIf { it.key == key }
+    }
     val closeDetails = { selectedKey = null; selectedFallback = null }
     val detailsState = selected?.let { rememberTransactionDetailsState(it.key) }
     val largeNavigationText = LocalDensity.current.fontScale > 1.3f
@@ -140,6 +144,9 @@ fun HomeScreen(
                     showBackToAnalysis = destination == Destination.TRANSACTIONS && categoryFilter != null,
                     onBackToAnalysis = { viewModel?.closeCategoryTransactions() },
                     scrollBehavior = barBehavior,
+                    syncStatus = if (importMode == ImportMode.AUTOMATIC) {
+                        syncingProvider?.let { "Syncing ${it.displayName}" } ?: "Syncing"
+                    } else null,
                 )
             },
             floatingActionButton = {
@@ -149,8 +156,7 @@ fun HomeScreen(
                     exit = fadeOut() + slideOutVertically { it / 2 },
                 ) {
                     LedgerActionsToolbar(
-                        refreshing = refreshing,
-                        syncEnabled = !refreshing || automaticImport,
+                        manuallySyncing = manualImport,
                         onSearch = { showSearch = true },
                         onSync = onRefresh,
                         onFilter = { showFilter = true },
@@ -165,10 +171,10 @@ fun HomeScreen(
                 if (showRail) HomeNavigationRail(destination, largeNavigationText) { destination = it }
                 Column(Modifier.weight(1f)) {
                     if (ledgerLoadFailed && ledgerState is LedgerState.Ready) LedgerLoadFailedBanner(onRetryLedger)
-                    // Sync runs in the view model, so every tab shows the same bar for as long as it lasts.
-                    AnimatedVisibility(visible = refreshing, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+                    AnimatedVisibility(visible = manualImport, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
                         LinearWavyProgressIndicator(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                                .semantics { contentDescription = "Transaction sync" },
                         )
                     }
                     AnimatedContent(
@@ -184,6 +190,7 @@ fun HomeScreen(
                                     Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
                                         LedgerScreen(
                                             state = ledgerState,
+                                            syncing = importMode != ImportMode.IDLE,
                                             enabledProviders = enabledProviders,
                                             onTransaction = openTransaction,
                                             onRetry = onRetryLedger,

@@ -30,6 +30,8 @@ sealed interface LedgerState {
     data object Failed : LedgerState
 }
 
+enum class ImportMode { IDLE, AUTOMATIC, MANUAL }
+
 data class ImportFeedback(val sequence: Long, val provider: Provider?, val message: String, val failed: Boolean = false)
 
 /** Saved payment date range for one provider, measured on the resolved ledger rows the UI shows. */
@@ -97,10 +99,8 @@ class ArthaViewModel(
     val allTransactions = _reconciledCache.asStateFlow()
     private val _monthAnalysis = MutableStateFlow(BudgetAnalyzer.analyzeMonth(_selectedMonth.value, emptyList()))
     val monthAnalysis = _monthAnalysis.asStateFlow()
-    private val _refreshing = MutableStateFlow(false)
-    val refreshing = _refreshing.asStateFlow()
-    private val _automaticImportActive = MutableStateFlow(false)
-    val automaticImportActive = _automaticImportActive.asStateFlow()
+    private val _importMode = MutableStateFlow(ImportMode.IDLE)
+    val importMode = _importMode.asStateFlow()
     private val _requestedImportProvider = MutableStateFlow<Provider?>(null)
     val requestedImportProvider = _requestedImportProvider.asStateFlow()
     private val _importFeedback = MutableStateFlow<ImportFeedback?>(null)
@@ -146,7 +146,7 @@ class ArthaViewModel(
 
     fun enterForeground() {
         observeSavedLedger()
-        automaticRefresh()
+        importHistory(null, automatic = true)
     }
 
     private fun observeSavedLedger() {
@@ -277,12 +277,13 @@ class ArthaViewModel(
         categorySet: Set<String>? = _categoryFilterSet.value,
     ): LedgerState.Ready {
         val (start, end) = dates ?: (null to null)
+        val endExclusive = end?.let(AccountingTime::dayAfter)
         val activeSet = categorySet ?: category?.let { setOf(it) }
         return LedgerState.Ready(rows.filter { tx ->
             val millis = tx.occurredAt.toEpochMilli()
             (activeSet != null || tx.provider in enabled) &&
                 (activeSet == null || ((tx.category ?: UNCATEGORIZED_LABEL) in activeSet && tx.type == _analysisType.value)) &&
-                (start == null || millis >= start) && (end == null || millis < AccountingTime.dayAfter(end))
+                (start == null || millis >= start) && (endExclusive == null || millis < endExclusive)
         })
     }
 
@@ -294,12 +295,6 @@ class ArthaViewModel(
         observeSavedLedger()
     }
 
-    private fun automaticRefresh() {
-        // Every app foreground triggers a sync; per-provider staleness and rate-limit windows
-        // inside the importer decide whether each source actually refreshes.
-        importHistory(null, automatic = true)
-    }
-
     fun refresh() { importHistory(null) }
     fun syncProvider(provider: Provider) { importHistory(provider) }
     /** Gojek needs its history screens walked first; the progress and feedback match any other source sync. */
@@ -307,15 +302,14 @@ class ArthaViewModel(
     private fun importHistory(provider: Provider?, automatic: Boolean = false, walk: (suspend () -> String)? = null) {
         if (automatic && preferences != null && importEnabled.value.none { preferences.isStale(it, clock.millis()) }) return
         val previous = ingestionJob?.takeIf { it.isActive }
-        if (previous != null && (automatic || !_automaticImportActive.value)) {
+        if (previous != null && (automatic || _importMode.value == ImportMode.MANUAL)) {
             if (!automatic) _importFeedback.value = ImportFeedback(++importSequence, provider, "An import is already running")
             return
         }
         previous?.cancel()
         if (!automatic) _importFeedback.value = null
         _requestedImportProvider.value = provider
-        _refreshing.value = true
-        _automaticImportActive.value = automatic
+        _importMode.value = if (automatic) ImportMode.AUTOMATIC else ImportMode.MANUAL
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
                 previous?.join()
@@ -351,7 +345,8 @@ class ArthaViewModel(
             }
             finally {
                 if (ingestionJob === coroutineContext[Job]) {
-                    _refreshing.value = false; _requestedImportProvider.value = null; _automaticImportActive.value = false
+                    _requestedImportProvider.value = null
+                    _importMode.value = ImportMode.IDLE
                 }
             }
         }

@@ -24,6 +24,7 @@ fun LedgerScreen(
     enabledProviders: Set<Provider> = Provider.entries.toSet(),
     onTransaction: (UnifiedTransaction) -> Unit,
     onRetry: () -> Unit,
+    syncing: Boolean = false,
     showFilter: Boolean = false,
     onDismissFilter: () -> Unit = {},
     viewModel: ArthaViewModel? = null,
@@ -31,7 +32,6 @@ fun LedgerScreen(
     onFiltersChanged: (TransactionFilters) -> Unit = {},
 ) {
     val dateRange by viewModel?.dateRangeFilter.collectOrDefault(null)
-    val refreshing by viewModel?.refreshing.collectOrDefault(false)
     val category by viewModel?.categoryFilter.collectOrDefault(null)
     val categoryProgress by viewModel?.categoryProgress.collectOrDefault(CategoryProgress())
     // Category drill-down is all-source confirmed spending; prior browsing choices stay intact for Back.
@@ -73,8 +73,8 @@ fun LedgerScreen(
             transactions = filteredTransactions,
             onTransaction = onTransaction, resetKey = listOf(effectiveFilters, dateRange, category),
             activeFilters = active, onClearFilters = ::clearAll,
-            emptyTitle = if (active.isNotEmpty()) "No matching transactions" else "No saved payments",
-            isPopulating = refreshing,
+            emptyTitle = if (active.isNotEmpty() || typeFilter != null) "No matching transactions" else "No saved payments",
+            isPopulating = syncing && allDebitTransactions.isEmpty() && active.isEmpty() && typeFilter == null,
             categoryProgress = categoryProgress,
             periodSummary = periodSummary,
             onFilterDates = viewModel?.let { vm -> { start, end -> vm.setDateRangeFilter(start, end) } },

@@ -34,10 +34,12 @@ data class TransactionEntity(
         rawPayload = rawPayload,
         pocket = pocketId?.let { Pocket(it, requireNotNull(pocketName)) },
         isQris = rawPayload.contains("\"isQris\":true") || rawPayload.contains("\"f1\":\"QRD01\"") || rawPayload.contains("\"code\":\"QRD01\""),
-        cardLast4 = Regex("\"cardLast4\":\"(\\d{4})\"").find(rawPayload)?.groupValues?.get(1),
+        cardLast4 = cardLast4Pattern.find(rawPayload)?.groupValues?.get(1),
     )
 
     companion object {
+        private val cardLast4Pattern = Regex("\"cardLast4\":\"(\\d{4})\"")
+
         fun fromDomain(transaction: UnifiedTransaction, ingestedAt: Instant) = TransactionEntity(
             provider = transaction.provider.name,
             providerTransactionId = transaction.providerTransactionId,

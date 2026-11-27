@@ -43,6 +43,7 @@ import net.wastu.artha.core.model.iconRes
 import net.wastu.artha.data.analysis.CategoryProgress
 import net.wastu.artha.data.attention.forSource
 import net.wastu.artha.ui.ArthaViewModel
+import net.wastu.artha.ui.ImportMode
 import net.wastu.artha.ui.SourceCoverage
 import net.wastu.artha.ui.components.PageScaffold
 import net.wastu.artha.ui.components.collectOrDefault
@@ -63,8 +64,9 @@ fun SourcesScreen(
     val importing by viewModel?.syncingProvider.collectOrDefault(syncingProvider)
     val categoryAutomation by viewModel?.categoryAutomation.collectOrDefault(null)
     val categoryProgress by viewModel?.categoryProgress.collectOrDefault(CategoryProgress())
-    val importBusy by viewModel?.refreshing.collectOrDefault(false)
-    val automaticImport by viewModel?.automaticImportActive.collectOrDefault(false)
+    val importMode by viewModel?.importMode.collectOrDefault(ImportMode.IDLE)
+    val importBusy = importMode != ImportMode.IDLE
+    val manualImport = importMode == ImportMode.MANUAL
     val requestedProvider by viewModel?.requestedImportProvider.collectOrDefault(null)
     val importFeedback by viewModel?.importFeedback.collectOrDefault(null)
     val coverage by viewModel?.providerCoverage.collectOrDefault(emptyMap<Provider, SourceCoverage>())
@@ -92,7 +94,7 @@ fun SourcesScreen(
         onEnabled = { onEnabled(provider, it) },
         onImportEnabled = { viewModel?.setImportEnabled(provider, it) },
         onImport = { syncAction(provider) },
-        busy = importBusy && !automaticImport,
+        busy = manualImport,
         feedback = feedback(provider),
         flash = gojekFlash.takeIf { provider == Provider.GOJEK },
         onBack = onBackFromPage,
@@ -135,7 +137,7 @@ fun SourcesScreen(
                                 onClick = { selectedProvider = provider },
                                 onRetry = { syncAction(provider) }
                                     .takeIf { canRetrySync(diagnostic, provider in importEnabled, providerImporting) },
-                                retryEnabled = !(importBusy && !automaticImport),
+                                retryEnabled = !manualImport,
                             )
                         }
                     }

@@ -1,14 +1,15 @@
 package net.wastu.artha.data.ingestion
 
+import kotlin.time.TimeSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import net.wastu.artha.core.log.ArthaLog
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.root.RootAccess
 import net.wastu.artha.data.ledger.AppendResult
@@ -26,13 +27,15 @@ class IngestionCoordinator(
 ) {
     private val mutex = Mutex()
     private val adaptersByProvider = adapters.associateBy { it.provider }
-    private val active = MutableStateFlow<List<Provider>>(emptyList())
+    private val active = mutableListOf<Provider>()
     private val _syncingProvider = MutableStateFlow<Provider?>(null)
     /** The provider the UI shows as importing; with several in flight, the one that started first. */
     val syncingProvider = _syncingProvider.asStateFlow()
 
+    @Synchronized
     private fun markActive(provider: Provider, running: Boolean) {
-        _syncingProvider.value = active.updateAndGet { if (running) it + provider else it - provider }.firstOrNull()
+        if (running) active.add(provider) else active.remove(provider)
+        _syncingProvider.value = active.firstOrNull()
     }
 
     init { require(adaptersByProvider.size == adapters.size) { "Only one adapter per Provider is allowed." } }
@@ -77,18 +80,41 @@ class IngestionCoordinator(
 
     private suspend fun readAndAppend(provider: Provider, interactive: Boolean = false): ImportResult {
         val adapter = requireNotNull(adaptersByProvider[provider]) { "Provider ingestion is not implemented yet." }
-        var warning: String? = null
-        val transactions = try {
-            if (interactive) adapter.ingestInteractive() else adapter.ingest()
-        } catch (partial: PartialImportException) {
-            if (partial.transactions.isEmpty()) throw partial
-            warning = partial.message?.takeIf { it.isNotBlank() } ?: "Some history could not be imported"; partial.transactions
+        val start = TimeSource.Monotonic.markNow()
+        var readMs: Long? = null
+        var saveStartMs: Long? = null
+        var outcome = "failed"
+        try {
+            var warning: String? = null
+            val transactions = try {
+                if (interactive) adapter.ingestInteractive() else adapter.ingest()
+            } catch (partial: PartialImportException) {
+                if (partial.transactions.isEmpty()) throw partial
+                warning = partial.message?.takeIf { it.isNotBlank() } ?: "Some history could not be imported"
+                partial.transactions
+            }
+            readMs = start.elapsedNow().inWholeMilliseconds
+            require(transactions.all { it.provider == provider }) { "Adapter returned another Provider's transaction." }
+            val payments = transactions.filter { it.isConfirmed }.distinctBy { it.key }
+            val window = ProviderImportWindow(payments.size,
+                payments.minOfOrNull { it.occurredAt.toEpochMilli() }, payments.maxOfOrNull { it.occurredAt.toEpochMilli() })
+            saveStartMs = start.elapsedNow().inWholeMilliseconds
+            val result = ledger().appendProviderImport(transactions)
+            outcome = if (warning == null) "complete" else "partial"
+            return ImportResult(result, warning, window)
+        } catch (cancelled: CancellationException) {
+            outcome = "cancelled"
+            throw cancelled
+        } finally {
+            val totalMs = start.elapsedNow().inWholeMilliseconds
+            ArthaLog.i("SourceSync", "Source import timing", buildMap {
+                put("provider", provider.name)
+                put("outcome", outcome)
+                put("readMs", (readMs ?: totalMs).toString())
+                saveStartMs?.let { put("saveMs", (totalMs - it).toString()) }
+                put("totalMs", totalMs.toString())
+            })
         }
-        require(transactions.all { it.provider == provider }) { "Adapter returned another Provider's transaction." }
-        val payments = transactions.filter { it.isConfirmed }.distinctBy { it.key }
-        val window = ProviderImportWindow(payments.size,
-            payments.minOfOrNull { it.occurredAt.toEpochMilli() }, payments.maxOfOrNull { it.occurredAt.toEpochMilli() })
-        return ImportResult(ledger().appendProviderImport(transactions), warning, window)
     }
 
     private suspend fun importAndRecord(provider: Provider, interactive: Boolean = false): String = try {

@@ -56,6 +56,29 @@ class RoomLedgerRepositoryTest {
     }
 
     @Test
+    fun importedEvidenceUpdatesKeepTheOriginalRowsAndOtherProviders() = runBlocking {
+        val shopee = transaction.copy(
+            provider = Provider.SHOPEE,
+            rawPayload = """{"origin":"shopee-order-api","paymentDetailVerified":true}""",
+        )
+        val grab = transaction.copy(
+            provider = Provider.GRAB,
+            rawPayload = """{"origin":"grab-rides-api","paymentDetailVerified":true}""",
+        )
+        ledger.append(listOf(shopee, grab))
+        val revisedShopee = shopee.copy(description = "Verified Shopee payment")
+        val revisedGrab = grab.copy(description = "Verified Grab payment")
+        assertEquals(AppendResult(0, 2, 2), ledger.appendProviderImport(listOf(revisedShopee, revisedGrab)))
+        assertEquals(AppendResult(0, 1), ledger.appendProviderImport(listOf(revisedShopee)))
+        assertEquals(AppendResult(0, 0), ledger.appendProviderImport(emptyList()))
+
+        val stored = ledger.loadTransactions()
+        assertEquals(setOf(shopee, grab), stored.filterNot(ProviderObservations::isObservation).toSet())
+        assertEquals(setOf(revisedShopee, revisedGrab), ProviderObservations.resolve(stored).toSet())
+        assertEquals(4, stored.size)
+    }
+
+    @Test
     fun invalidPayloadRejectsTheEntireBatch() = runBlocking {
         try {
             ledger.append(listOf(transaction, transaction.copy(providerTransactionId = "invalid", rawPayload = "not JSON")))

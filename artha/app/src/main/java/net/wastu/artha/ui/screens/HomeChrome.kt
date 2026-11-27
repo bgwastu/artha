@@ -1,8 +1,10 @@
 package net.wastu.artha.ui.screens
 
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.FilterList
@@ -14,6 +16,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ShortNavigationBar
 import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.Text
@@ -34,6 +37,7 @@ internal fun HomeTopBar(
     showBackToAnalysis: Boolean,
     onBackToAnalysis: () -> Unit,
     scrollBehavior: TopAppBarScrollBehavior,
+    syncStatus: String?,
 ) {
     LargeFlexibleTopAppBar(
         scrollBehavior = scrollBehavior,
@@ -45,14 +49,25 @@ internal fun HomeTopBar(
             }
         },
         title = { Text(destination.label, modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        actions = {
+            if (syncStatus != null) {
+                Text(
+                    text = syncStatus,
+                    modifier = Modifier.padding(end = 16.dp).widthIn(max = 144.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        },
     )
 }
 
 /** Search is the primary action; sync and filter sit beside it in the same toolbar. */
 @Composable
 internal fun LedgerActionsToolbar(
-    refreshing: Boolean,
-    syncEnabled: Boolean,
+    manuallySyncing: Boolean,
     onSearch: () -> Unit,
     onSync: () -> Unit,
     onFilter: () -> Unit,
@@ -65,8 +80,8 @@ internal fun LedgerActionsToolbar(
             }
         },
     ) {
-        IconButton(onClick = onSync, enabled = syncEnabled) {
-            if (refreshing) {
+        IconButton(onClick = onSync, enabled = !manuallySyncing) {
+            if (manuallySyncing) {
                 LoadingIndicator(modifier = Modifier.size(28.dp).semantics { contentDescription = "Syncing" })
             } else {
                 Icon(Icons.Default.Sync, contentDescription = "Sync")

@@ -95,7 +95,7 @@ object ProviderObservations {
         return buildList {
             for (tx in incoming.filter(::eligible)) {
                 val previous = current[tx.key] ?: continue
-                if (fingerprint(previous) == fingerprint(tx)) continue
+            if (previous == tx || fingerprint(previous) == fingerprint(tx)) continue
                 // GoPay's own screens only fill in what Jago's note could not say; they never rewrite other rows.
                 if (JSONObject(tx.rawPayload).optString("paymentEvidence") == SCREEN_EVIDENCE && !GojekProviderParser.lacksMerchant(previous)) continue
                 val time = maxOf(now, Math.addExact(times[tx.key] ?: 0L, 1L))

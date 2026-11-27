@@ -7,6 +7,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 private const val HUMAN_LINE_SEP = " - "
+private val qrisSuffix = Regex("(?i)\\s*-\\s*qr?is\\s*$")
+private val terminalNumberSuffix = Regex("\\s+[a-z]{0,3}\\d{3,6}\\s*$")
+private val reversalMarker = Regex("(?i)\\s*\\(Reversed\\)\\s*")
+private val leadingLabel = Regex("(?i)^([^:]+):\\s+")
+private val dashSeparator = Regex("\\s*-\\s*")
 
 /** One-line title for lists and detail headers; ASCII separators only. */
 
@@ -36,7 +41,7 @@ private fun lineFromPayload(payload: JSONObject): String? {
     val merchant = usableMerchant(payload.optText("merchantName"))
         ?: qrisMerchantHint(payload)
         ?: usableMerchant(payload.optText("counterpart"))
-    // QRIS is a row tag, not part of the title.
+    // The title shows the merchant; the details show the payment method.
     if (merchant != null) return merchant
     payload.optText("orderDisplayDescription").trim().takeIf { it.isNotBlank() }?.let { return it }
     val shop = payload.optText("shopName").ifBlank { payload.optText("restaurantName") }
@@ -66,8 +71,8 @@ private fun qrisMerchantHint(payload: JSONObject): String? {
     val localized = payload.optText("localized").trim()
     if (localized.isBlank()) return null
     val cleaned = localized
-        .replace(Regex("(?i)\\s*-\\s*qr?is\\s*$"), "")
-        .replace(Regex("\\s+[a-z]{0,3}\\d{3,6}\\s*$"), "")
+        .replace(qrisSuffix, "")
+        .replace(terminalNumberSuffix, "")
         .trim()
     if (cleaned.isBlank() || usableMerchant(cleaned) == null) return null
     // Uppercase descriptors (e.g. "WEI QIANG", "CIRCLE K - JAK0922") read better title-cased;
@@ -110,11 +115,11 @@ private fun primaryItemLabel(items: JSONArray?): String {
 private fun normalizeHumanLine(text: String): String {
     var line = text.trim()
     if (line.isBlank()) return ""
-    line = line.replace(Regex("(?i)\\s*\\(Reversed\\)\\s*"), "").trim()
+    line = line.replace(reversalMarker, "").trim()
     // Rows saved by older versions joined their parts with a dot; read them with the same dash as everything else.
     line = line.replace('·', '-').replace('•', '-')
-    line = line.replace(Regex("(?i)^([^:]+):\\s+"), "$1$HUMAN_LINE_SEP")
-    val parts = line.split(Regex("\\s*-\\s*")).map { it.trim() }.filter { it.isNotBlank() }
+    line = line.replace(leadingLabel, "$1$HUMAN_LINE_SEP")
+    val parts = line.split(dashSeparator).map { it.trim() }.filter { it.isNotBlank() }
     val deduped = mutableListOf<String>()
     for (part in parts) {
         if (deduped.lastOrNull()?.equals(part, ignoreCase = true) != true) deduped += part

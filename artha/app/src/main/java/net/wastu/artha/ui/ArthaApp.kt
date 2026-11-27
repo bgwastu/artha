@@ -12,7 +12,7 @@ import net.wastu.artha.ui.screens.HomeScreen
 fun ArthaApp(model: ArthaViewModel) {
     val ledger by model.ledgerState.collectAsStateWithLifecycle()
     val enabled by model.enabledProviders.collectAsStateWithLifecycle()
-    val refreshing by model.refreshing.collectAsStateWithLifecycle()
+    val importMode by model.importMode.collectAsStateWithLifecycle()
     val syncingProvider by model.syncingProvider.collectAsStateWithLifecycle()
     val providerCounts by model.providerCounts.collectAsStateWithLifecycle()
 
@@ -22,7 +22,7 @@ fun ArthaApp(model: ArthaViewModel) {
         HomeScreen(
             ledgerState = ledger,
             enabledProviders = enabled,
-            refreshing = refreshing,
+            importMode = importMode,
             syncingProvider = syncingProvider,
             providerCounts = providerCounts,
             onRefresh = model::refresh,

@@ -269,7 +269,7 @@ class TransactionEditFeedbackTest {
             advanceUntilIdle()
             assertEquals(5, calls)
             assertEquals(CategoryAutomationState.READY, vm.categoryAutomation.value)
-            assertTrue(vm.refreshing.value) // Saved payments are categorized while the provider is still blocked.
+            assertEquals(ImportMode.AUTOMATIC, vm.importMode.value) // The provider is still blocked.
             store.setClassification(payment().key, "Manual", "", true)
             store.setUserNote(payment().key, "New context")
             advanceUntilIdle()

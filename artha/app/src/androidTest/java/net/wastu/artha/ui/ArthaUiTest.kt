@@ -1,9 +1,14 @@
 package net.wastu.artha.ui
 
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasAnySibling
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -11,12 +16,15 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.time.Instant
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import net.wastu.artha.core.model.Direction
 import net.wastu.artha.core.model.Money
 import net.wastu.artha.core.model.Provider
 import net.wastu.artha.core.model.UnifiedTransaction
 import net.wastu.artha.core.root.RootAccess
+import net.wastu.artha.data.analysis.SpendingState
 import net.wastu.artha.data.ledger.LedgerDatabase
 import net.wastu.artha.data.ledger.RoomLedgerRepository
 import net.wastu.artha.ui.theme.ArthaTheme
@@ -39,7 +47,7 @@ class ArthaUiTest {
     }
 
     @Test
-    fun deniedRootOffersRetryForAnEmptyLedger() {
+    fun deniedRootLeavesTheEmptyLedgerAndSyncActionAvailable() {
         var opened = false
         val viewModel = ArthaViewModel(RootAccess { false }, { opened = true; object : net.wastu.artha.data.ledger.LedgerRepository {
             override fun observeTransactions() = kotlinx.coroutines.flow.flowOf(emptyList<UnifiedTransaction>())
@@ -49,12 +57,49 @@ class ArthaUiTest {
         model = viewModel
         compose.setContent { ArthaTheme(dynamicColor = false) { ArthaApp(viewModel) } }
         compose.waitUntil(10_000) { viewModel.rootGate.value == net.wastu.artha.core.root.RootGateState.DENIED && viewModel.ledgerState.value is LedgerState.Ready }
-        compose.onNodeWithText("Root access required").assertExists()
-        compose.onNodeWithText("Retry Root Gate").performClick()
-        compose.waitForIdle()
-        compose.onNodeWithText("Add transaction").assertDoesNotExist()
-        compose.onNodeWithText("Transactions").assertDoesNotExist()
+        compose.onNodeWithText("No saved payments").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Sync").assertIsEnabled()
         org.junit.Assert.assertTrue(opened)
+    }
+
+    @Test
+    fun automaticSyncKeepsSavedPaymentsVisibleWithoutTheManualProgressBar() {
+        val saved = UnifiedTransaction(
+            Provider.JAGO, "test-payment", Direction.DEBIT, Money(2_500_000),
+            Instant.parse("2026-10-12T05:00:00Z"), "Kopi Kenangan", "{}",
+        )
+        val automatic = CompletableDeferred<Unit>()
+        val manual = CompletableDeferred<Unit>()
+        val viewModel = ArthaViewModel(
+            RootAccess { true },
+            { error("This test supplies saved spending directly") },
+            ingestStale = { automatic.await(); emptyMap() },
+            ingest = { manual.await(); emptyMap() },
+            syncingProvider = MutableStateFlow(Provider.SHOPEE),
+            spendingState = MutableStateFlow(SpendingState.Ready(listOf(saved), emptyMap())),
+        )
+        model = viewModel
+        compose.setContent { ArthaTheme(dynamicColor = false) { ArthaApp(viewModel) } }
+        compose.waitUntil(10_000) {
+            compose.onAllNodes(hasText("Kopi Kenangan")).fetchSemanticsNodes().isNotEmpty()
+        }
+        val progress = SemanticsMatcher.expectValue(
+            SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo.Indeterminate,
+        )
+        compose.onNodeWithText("Syncing Shopee").assertIsDisplayed()
+        compose.onNode(progress, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("Income").performClick()
+        compose.onNodeWithText("No matching transactions").assertIsDisplayed()
+        compose.onNodeWithText("All").performClick()
+        compose.onNodeWithContentDescription("Sync").assertIsEnabled().performClick()
+        compose.waitUntil(10_000) { viewModel.importMode.value == ImportMode.MANUAL }
+        compose.onNodeWithText("Syncing Shopee").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Transaction sync").assertIsDisplayed()
+        compose.onNodeWithText("Kopi Kenangan").assertIsDisplayed()
+
+        manual.complete(Unit)
+        compose.waitUntil(10_000) { viewModel.importMode.value == ImportMode.IDLE }
+        compose.onNode(progress, useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test
@@ -73,7 +118,7 @@ class ArthaUiTest {
                         money = Money(2_500_000),
                         occurredAt = Instant.parse("2026-10-12T05:00:00Z"),
                         description = "Kopi Kenangan",
-                        rawPayload = """{"origin":"jago-linked-local-hive","isQris":true,"paymentMethod":"QRIS","counterpart":"BRI","notes":"Latte"}""",
+                        rawPayload = """{"origin":"jago-linked-local-hive","isQris":true,"paymentMethod":"QRIS","merchantName":"Kopi Kenangan","counterpart":"BRI","notes":"Latte"}""",
                         isQris = true,
                     ),
                 ),
@@ -90,10 +135,9 @@ class ArthaUiTest {
         compose.waitUntil(10_000) { compose.onAllNodes(hasText("Kopi Kenangan")).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Add transaction", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithText("Kopi Kenangan").assertIsDisplayed()
-        compose.onNodeWithText("QRIS", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("Kopi Kenangan").performClick()
         compose.onNode(
-            hasText("QRIS") and hasAnySibling(hasText("Payment Method")),
+            hasText("QRIS") and hasAnySibling(hasText("Payment method")),
             useUnmergedTree = true,
         ).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("BRI", useUnmergedTree = true).performScrollTo().assertIsDisplayed()

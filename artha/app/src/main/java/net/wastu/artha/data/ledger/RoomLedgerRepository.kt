@@ -26,7 +26,9 @@ class RoomLedgerRepository(
     }
 
     override suspend fun appendProviderImport(transactions: List<UnifiedTransaction>): AppendResult {
+        if (transactions.isEmpty()) return AppendResult(0, 0)
         transactions.forEach { JSONObject(it.rawPayload) }
-        return dao.appendProviderImport(transactions.map { TransactionEntity.fromDomain(it, clock.instant()) })
+        val ingestedAt = clock.instant()
+        return dao.appendProviderImport(transactions.map { TransactionEntity.fromDomain(it, ingestedAt) })
     }
 }
