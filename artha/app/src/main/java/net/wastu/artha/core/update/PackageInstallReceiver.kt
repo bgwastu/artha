@@ -75,7 +75,7 @@ class PackageInstallReceiver : BroadcastReceiver() {
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         val pi = PendingIntent.getActivity(context, NOTIFICATION_ID, intent, flags)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_monochrome)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Artha update ready")
             .setContentText("Tap to complete installation")
             .setContentIntent(pi)

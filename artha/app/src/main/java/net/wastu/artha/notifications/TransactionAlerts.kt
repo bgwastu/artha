@@ -49,7 +49,7 @@ class TransactionAlerts(
         manager.notify(
             id,
             NotificationCompat.Builder(context, CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_launcher_monochrome)
+                .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle(alert.title)
                 .setContentText(alert.text)
                 .setContentIntent(open)
